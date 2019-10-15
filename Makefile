@@ -10,6 +10,8 @@ OMPFLAGS = -fopenmp
 LDLIBS   = 
 
 include $(KOKKOS_PATH)/Makefile.kokkos
+SRC = $(wildcard *par.c)
+OBJ = $(SRC:.c=.o)
 
 all: mtx2csr sgpar sgpar_lg sgpar_hg sgpar_c
 
@@ -19,8 +21,8 @@ mtx2csr: mtx2csr.cpp
 sgpar: sgpar.c sgpar.h
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -o sgpar    sgpar.c     $(LDLIBS)
 
-sgpar_kokkos: sgpar.c sgpar.h
-	$(CXX) $(CXXFLAGS) $(KOKKOS_LDFLAGS) $(KOKKOS_LIBS) $(OMPFLAGS) -o sgpar    sgpar.c     $(LDLIBS)
+sgpar_kokkos: $(OBJ) $(KOKKOS_LINK_DEPENDS)
+	$(CXX) $(CXXFLAGS) $(KOKKOS_LDFLAGS) $(OBJ) $(KOKKOS_LIBS) $(LDLIBS) -o sgpar.kokkos
 
 sgpar_lg: sgpar.c sgpar.h
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DSGPAR_LARGEGRAPHS -o sgpar_lg  sgpar.c     $(LDLIBS)
@@ -34,5 +36,5 @@ sgpar_c: sgpar.c sgpar.h
 clean:
 	rm -f mtx2csr sgpar_c sgpar sgpar_lg sgpar_hg
 
-%.o:%.cpp $(KOKKOS_CPP_DEPENDS)
-	$(CXX) $(KOKKOS_CPPFLAGS) $(KOKKOS_CXXFLAGS) $(CXXFLAGS) $(EXTRA_INC) -c $<
+%.o:%.c $(KOKKOS_CPP_DEPENDS)
+	$(CXX) $(KOKKOS_CPPFLAGS) $(KOKKOS_CXXFLAGS) $(CXXFLAGS) $(EXTRA_INC) $(OMPFLAGS) -D_KOKKOS -c $<

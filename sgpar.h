@@ -235,7 +235,7 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
                               const sgp_graph_t g, 
                               const int coarsening_level,
                               sgp_pcg32_random_t *rng) {
-    Kokkos::initialize( argc, argv );
+    Kokkos::initialize();
     {
 
     sgp_vid_t n = g.nvertices;
@@ -306,10 +306,11 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
     
     free(hn);
     free(vperm);
+
+    *nvertices_coarse_ptr = nvertices_coarse;
     }
     Kokkos::finalize();
 
-    *nvertices_coarse_ptr = nvertices_coarse;
     
     return EXIT_SUCCESS;
 }
