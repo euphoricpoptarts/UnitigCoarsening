@@ -60,12 +60,13 @@ int main(int argc, char **argv) {
     printf("graph %s, min edgecut found is %ld\n", 
                     filename, edgecut_min);
 
-
+    /*
     FILE *outfp = fopen("parts.txt", "w");
     for (sgp_vid_t i=0;  i<g.nvertices; i++) {
         fprintf(outfp, "%d\n", part[i]); 
     }
     fclose(outfp);
+    */
 
     CHECK_SGPAR( sgp_free_graph(&g) );
     free(part);
