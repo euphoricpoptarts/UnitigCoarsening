@@ -10,23 +10,64 @@ using namespace sgpar;
 
 int main(int argc, char **argv) {
 
-    if (argc != 2) {
+    if (argc < 2) {
         fprintf(stderr, "Usage: %s filename.csr\n", argv[0]);
         return EXIT_FAILURE;
     }
     char *filename = argv[1];
+    
+    int coarsening_alg = 0;
+    if (argc >= 3) {
+        coarsening_alg = atoi(argv[2]);
+    }
+
+    int refine_alg = 0;
+    if (argc >= 4) {
+        refine_alg = atoi(argv[3]);
+    }
+
+    int local_search_alg = 0;
+    if (argc >= 5) {
+        local_search_alg = atoi(argv[4]);
+    }
+
+    int num_iter = 100;
+    if (argc >= 6) {
+        num_iter = atoi(argv[5]);
+    }
+
 
     sgp_graph_t g;
     CHECK_SGPAR( sgp_load_graph(&g, filename) );
     printf("n: %ld, m: %ld\n", g.nvertices, g.nedges);
+    printf("coarsening_alg: %d, refine_alg: %d, local_alg %d, num_iter %d\n", 
+                    coarsening_alg, refine_alg, local_search_alg, num_iter);
 
     sgp_vid_t *part;
     part = (sgp_vid_t *) malloc(g.nvertices * sizeof(sgp_vid_t));
     SGPAR_ASSERT(part != NULL);
 
-    CHECK_SGPAR( sgp_partition_graph(part, 2, 0, 0, 0, 0, g) );
-    CHECK_SGPAR( sgp_free_graph(&g) );
+    long edgecut_min = 1<<30;
+    
+    for (int i=0; i<num_iter; i++) {
+        long edgecut = 0;
+        CHECK_SGPAR( sgp_partition_graph(part, 2, &edgecut, coarsening_alg, 
+                                        refine_alg, local_search_alg, 0, g) );
+        if (edgecut < edgecut_min) {
+            edgecut_min = edgecut;
+        }
+    }
+    printf("graph %s, min edgecut found is %ld\n", 
+                    filename, edgecut_min);
 
+
+    FILE *outfp = fopen("parts.txt", "w");
+    for (sgp_vid_t i=0;  i<g.nvertices; i++) {
+        fprintf(outfp, "%d\n", part[i]); 
+    }
+    fclose(outfp);
+
+    CHECK_SGPAR( sgp_free_graph(&g) );
     free(part);
 
     return EXIT_SUCCESS;

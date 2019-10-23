@@ -102,7 +102,8 @@ typedef double sgp_real_t;
 #define SGPAR_COARSENING_MAXLEVELS 100
 #endif
 
-#define SGPAR_POWERITER_TOL 1e-8
+#define SGPAR_POWERITER_TOL 1e-10
+#define SGPAR_POWERITER_ITER 100000000
 
 typedef struct {
     int64_t   nvertices;   
@@ -549,6 +550,28 @@ SGPAR_API int sgp_vec_orthogonalize(sgp_real_t *u1, sgp_real_t *u2, int64_t n) {
     return EXIT_SUCCESS;
 }
 
+SGPAR_API int sgp_vec_D_orthogonalize(sgp_real_t *u1, sgp_real_t *u2, 
+                        sgp_wgt_t *D,  int64_t n) {
+
+    //u1[i] = u1[i] - (dot(u1, D*u2)/dot(u2, D*u2)) * u2[i]
+
+    sgp_real_t mult1;
+    sgp_vec_dotproduct(&mult1, u1, u2, n);
+
+    sgp_real_t mult_numer = 0.0;
+    sgp_real_t mult_denom = 0.0;
+    for (int64_t i=0; i<n; i++) {
+        mult_numer += u1[i]*D[i]*u2[i];
+        mult_denom += u2[i]*D[i]*u2[i];
+    }
+
+    for (int64_t i=0; i<n; i++) {
+        u1[i] -= mult_numer*u2[i]/mult_denom;
+    }
+    return EXIT_SUCCESS;
+}
+
+
 SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g) {
 
     sgp_vid_t n = g.nvertices;
@@ -586,8 +609,9 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g) {
 
     sgp_real_t tol = SGPAR_POWERITER_TOL;
     int niter = 0;
+    int iter_max = SGPAR_POWERITER_ITER/n;
     sgp_real_t dotprod = 0;
-    while (fabs(dotprod) < (1-tol)) {
+    while ((fabs(dotprod) < (1-tol)) && (niter < iter_max)) {
 
         // u = v
         for (sgp_vid_t i=0; i<n; i++) {
@@ -613,8 +637,10 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g) {
         sgp_vec_dotproduct(&dotprod, u, v, n);
         niter++;
     }
+    if (niter == iter_max) {
+        printf("exceeded max iter count, ");
+    }
     printf("number of iterations: %d\n", niter);
-
     free(vec1);
     free(v);
 
@@ -637,6 +663,7 @@ SGPAR_API int sgp_power_iter_final(sgp_real_t *u, sgp_graph_t g) {
             gb = 2*(g.source_offsets[i+1]-g.source_offsets[i]);
         }
     }
+    // fprintf(stderr, "Gershgorin bound: %lu\n", ((uint64_t) gb));
 
 #if 0
     sgp_real_t mult = 0;
@@ -659,7 +686,8 @@ SGPAR_API int sgp_power_iter_final(sgp_real_t *u, sgp_graph_t g) {
     sgp_real_t tol = SGPAR_POWERITER_TOL;
     int niter = 0;
     sgp_real_t dotprod = 0;
-    while (dotprod < (1-tol)) {
+    int iter_max = SGPAR_POWERITER_ITER/n;
+    while ((fabs(dotprod) < (1-tol)) && (niter < iter_max)) {
 
         // u = v
         for (sgp_vid_t i=0; i<n; i++) {
@@ -680,13 +708,54 @@ SGPAR_API int sgp_power_iter_final(sgp_real_t *u, sgp_graph_t g) {
             v_i += matvec_i;
             v[i] = v_i;
         }
-        sgp_vec_orthogonalize(v, vec1, n);
+        sgp_vec_orthogonalize(v, vec1, n); 
         sgp_vec_normalize(v, n);
         sgp_vec_dotproduct(&dotprod, u, v, n); 
         niter++;
         
     }
+    if (niter == iter_max) {
+        printf("exceeded max iter count, ");
+    }
     printf("number of iterations: %d\n", niter);
+
+    sgp_real_t eigenval = 0;
+    sgp_real_t eigenval_max = 0;
+    sgp_real_t eigenval_min = 2;
+    for (sgp_vid_t i=0; i<n; i++) {
+        sgp_vid_t weighted_degree = g.source_offsets[i+1]-g.source_offsets[i];
+        sgp_real_t u_i = weighted_degree*u[i];
+        sgp_real_t matvec_i = 0;
+        for (sgp_eid_t j=g.source_offsets[i]; 
+                       j<g.source_offsets[i+1]; j++) {
+            matvec_i += u[g.destination_indices[j]];
+        }
+        u_i -= matvec_i;
+        sgp_real_t eigenval_est = u_i/u[i];
+        if (eigenval_est < eigenval_min) {
+            eigenval_min = eigenval_est;
+        }
+        if (eigenval_est > eigenval_max) {
+            eigenval_max = eigenval_est;
+        }
+        eigenval += (u_i*u_i)*1e9;
+    }
+
+    printf("eigenvalue = %1.9lf (%1.9lf %1.9lf), "
+                    "edge cut lb %5.0lf "
+                    "gap ratio %.0lf\n", 
+                    eigenval*1e-9, 
+                    eigenval_min, eigenval_max,
+                    eigenval*1e-9*n/4,
+                    ceil(1.0/(1.0-eigenval*1e-9)));
+#if 0
+#ifdef __cplusplus
+    std::sort(u, u+n);
+    for (int i=0; i<10; i++) {
+        printf("[%3.4f %3.0f] ", u[n-1-i], (u[n-1-i]*u[n-1-i]*100));
+    }
+#endif 
+#endif
 
     free(vec1);
     free(v);
@@ -694,8 +763,142 @@ SGPAR_API int sgp_power_iter_final(sgp_real_t *u, sgp_graph_t g) {
     return EXIT_SUCCESS;
 }
 
+SGPAR_API int sgp_power_iter_normLap(sgp_real_t *u, sgp_graph_t g) {
+
+    sgp_vid_t n = g.nvertices;
+
+    sgp_real_t *vec1 = (sgp_real_t *) malloc(n*sizeof(sgp_real_t));
+    SGPAR_ASSERT(vec1 != NULL);
+    for (sgp_vid_t i=0; i<n; i++) {
+        vec1[i] = 1.0;
+    }
+
+    sgp_vec_normalize(vec1, n); 
+    sgp_vec_D_orthogonalize(u, vec1, g.weighted_degree, n);
+    sgp_vec_normalize(u, n);
+
+    sgp_real_t *v = (sgp_real_t *) malloc(n*sizeof(sgp_real_t));
+    SGPAR_ASSERT(v != NULL);
+    for (sgp_vid_t i=0; i<n; i++) {
+        v[i] = u[i];
+    }
+
+    sgp_real_t tol = SGPAR_POWERITER_TOL;
+    int niter = 0;
+    int iter_max = SGPAR_POWERITER_ITER/n;
+    sgp_real_t dotprod = 0;
+    while ((fabs(dotprod) < (1-tol)) && (niter < iter_max)) {
+
+        // u = v
+        for (sgp_vid_t i=0; i<n; i++) {
+            u[i] = v[i];
+        }
+
+        // v = 1/2(I+D^-1A)u
+        for (sgp_vid_t i=0; i<n; i++) {
+            // sgp_real_t v_i = g.weighted_degree[i]*u[i];
+            sgp_real_t weighted_degree_inv = 1.0/g.weighted_degree[i];
+            sgp_real_t v_i = 0.5*u[i];
+            sgp_real_t matvec_i = 0;
+            for (sgp_eid_t j=g.source_offsets[i]; 
+                           j<g.source_offsets[i+1]; j++) {
+                matvec_i += u[g.destination_indices[j]]*g.eweights[j];
+
+            }
+            // v_i -= matvec_i;
+            v_i += 0.5*matvec_i*weighted_degree_inv;
+            v[i] = v_i;
+        }
+
+        // sgp_vec_D_orthogonalize(v, vec1, n);
+        sgp_vec_normalize(v, n);
+        sgp_vec_dotproduct(&dotprod, u, v, n);
+        niter++;
+    }
+    if (niter == iter_max) {
+        printf("exceeded max iter count, ");
+    }
+    printf("number of iterations: %d\n", niter);
+    free(vec1);
+    free(v);
+
+    return EXIT_SUCCESS;
+}
+
+SGPAR_API int sgp_power_iter_normLap_final(sgp_real_t *u, sgp_graph_t g) {
+
+    sgp_vid_t n = g.nvertices;
+
+    sgp_real_t *vec1 = (sgp_real_t *) malloc(n*sizeof(sgp_real_t));
+    SGPAR_ASSERT(vec1 != NULL);
+    for (sgp_vid_t i=0; i<n; i++) {
+        vec1[i] = 1.0;
+    }
+
+    sgp_wgt_t *weighted_degree = (sgp_wgt_t *) malloc(n*sizeof(sgp_wgt_t));
+    assert(weighted_degree != NULL);
+    for (sgp_vid_t i=0; i<n; i++) {
+        weighted_degree[i] = g.source_offsets[i+1] - g.source_offsets[i];
+    }
+
+    sgp_vec_normalize(vec1, n); 
+
+    sgp_vec_D_orthogonalize(u, vec1, weighted_degree, n);
+    sgp_vec_normalize(u, n);
+
+    sgp_real_t *v = (sgp_real_t *) malloc(n*sizeof(sgp_real_t));
+    SGPAR_ASSERT(v != NULL);
+    for (sgp_vid_t i=0; i<n; i++) {
+        v[i] = u[i];
+    }
+
+    sgp_real_t tol = SGPAR_POWERITER_TOL;
+    int niter = 0;
+    int iter_max = SGPAR_POWERITER_ITER/n;
+    sgp_real_t dotprod = 0;
+    while ((fabs(dotprod) < (1-tol)) && (niter < iter_max)) {
+
+        // u = v
+        for (sgp_vid_t i=0; i<n; i++) {
+            u[i] = v[i];
+        }
+
+        // v = 1/2(I+D^-1A)u
+        for (sgp_vid_t i=0; i<n; i++) {
+            // sgp_real_t v_i = g.weighted_degree[i]*u[i];
+            sgp_real_t weighted_degree_inv = 1.0/weighted_degree[i];
+            sgp_real_t v_i = 0.5*u[i];
+            sgp_real_t matvec_i = 0;
+            for (sgp_eid_t j=g.source_offsets[i]; 
+                           j<g.source_offsets[i+1]; j++) {
+                matvec_i += u[g.destination_indices[j]];
+
+            }
+            // v_i -= matvec_i;
+            v_i += 0.5*matvec_i*weighted_degree_inv;
+            v[i] = v_i;
+        }
+
+        // sgp_vec_D_orthogonalize(v, vec1, n);
+        sgp_vec_normalize(v, n);
+        sgp_vec_dotproduct(&dotprod, u, v, n);
+        niter++;
+    }
+    if (niter == iter_max) {
+        printf("exceeded max iter count, ");
+    }
+    printf("number of iterations: %d\n", niter);
+    free(vec1);
+    free(v);
+    free(weighted_degree);
+
+    return EXIT_SUCCESS;
+}
+
+
 SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions, 
-                                    int perc_imbalance_allowed, 
+                                    long *edgecut, int perc_imbalance_allowed, 
+                                    int local_search_alg,
                                     sgp_real_t *evec,
                                     sgp_graph_t g) {
 
@@ -750,12 +953,11 @@ SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
     }
 
     long edgecut_min = edgecut_curr;
-    long curr_split = n - imbl;
+    long curr_split = imbl;
 
     for (sgp_vid_t i=imbl; i<imbr; i++) {
         /* add vert at position i to comm 0 */
         sgp_vid_t u = vu_pair[i].u;
-        part[u] = 0;
         long ec_update = 0;
         for (sgp_eid_t j=g.source_offsets[u]; j<g.source_offsets[u+1]; j++) {
             sgp_vid_t v = g.destination_indices[j];
@@ -768,19 +970,167 @@ SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
         edgecut_curr = edgecut_curr + 2*ec_update;
 
         if (edgecut_curr <= edgecut_min) {
+            part[u] = 0;
             edgecut_min = edgecut_curr;
+            curr_split = i+1;
+            /*
             curr_split = n - i - 1;
             if ((n - i - 1) < (i+1)) {
                 curr_split = i + 1;
             }
+            */
         } 
     }
     printf("After bipartitioning, the partitions have %ld and %ld vertices, "
            "and the edge cut is %ld.\n", 
            curr_split, n-curr_split, edgecut_min/2);
+    *edgecut = edgecut_min/2;
+
+    if (local_search_alg == 0) 
+        return 0;
+
+    int64_t n_left = curr_split-n/3;
+    if (n_left < 0) {
+        n_left = 0;
+    }
+    int64_t n_right = curr_split+n/3;
+    if (n_right > ((int64_t) n)) {
+        n_right = n;
+    }
+    int num_swaps = 0;
+    int64_t ec_change = 0;
+    int max_swaps = n/3;
+    while (num_swaps < max_swaps) {
+        int64_t ec_dec_max = 0;
+        sgp_vid_t move_right_vert = SGP_INFTY;
+        for (long i=n_left; i<curr_split; i++) {
+            sgp_vid_t part_i = part[i];
+            
+            int64_t ec_dec_i = 0;
+            for (sgp_eid_t j=g.source_offsets[i]; 
+                           j<g.source_offsets[i+1]; j++) {
+                sgp_vid_t v = g.destination_indices[j];
+                if (part[v] != part_i) {
+                    ec_dec_i++;
+                } else {
+                    ec_dec_i--;
+                }
+            }
+            if (ec_dec_i > ec_dec_max) {
+                ec_dec_max = ec_dec_i;
+                move_right_vert = i; 
+            }
+        }
+        if (move_right_vert == SGP_INFTY) {
+            // printf("Exiting before swap\n");
+            break;
+        }
+        // printf("ec dec is %ld, moving vert %lu to the right\n",
+        //                ec_dec_max, (uint64_t) move_right_vert);
+        if (part[move_right_vert] == 0) {
+            part[move_right_vert] = 1;
+        } else {
+            part[move_right_vert] = 0;
+        }
+        ec_change += ec_dec_max;
+        int64_t ec_dec_max_prev = ec_dec_max;
+
+        ec_dec_max = 0;
+        sgp_vid_t move_left_vert = SGP_INFTY;
+        for (long i=curr_split; i<n_right; i++) {
+            sgp_vid_t part_i = part[i];
+            int64_t ec_dec_i = 0;
+            for (sgp_eid_t j=g.source_offsets[i]; 
+                           j<g.source_offsets[i+1]; j++) {
+                sgp_vid_t v = g.destination_indices[j];
+                if (part[v] != part_i) {
+                    ec_dec_i++;
+                } else {
+                    ec_dec_i--;
+                }
+            }
+            if (ec_dec_i > ec_dec_max) {
+                ec_dec_max = ec_dec_i;
+                move_left_vert = i; 
+            }
+        }
+        if (move_left_vert == SGP_INFTY) {
+            /* Roll back prev swap and exit */
+            if (part[move_right_vert] == 0) {
+                part[move_right_vert] = 1;
+            } else {
+                part[move_right_vert] = 0;
+            }
+            ec_change -= ec_dec_max_prev;
+            // printf("Incomplete swap, exiting\n");
+            break;
+        }
+        // printf("ec dec is %ld, moving vert %lu to the left\n",
+        //                ec_dec_max, (uint64_t) move_left_vert);
+        if (part[move_left_vert] == 0) {
+            part[move_left_vert] = 1;
+        } else {
+            part[move_left_vert] = 0;
+        }
+        ec_change += ec_dec_max;
+
+        num_swaps++;
+    }
+    printf("Total change: %ld, swaps %d, new edgecut %ld\n", 
+                    ec_change, num_swaps, edgecut_min/2-ec_change);
+
+    edgecut_curr = 0;
+    for (sgp_vid_t i=0; i<n; i++) {
+        sgp_vid_t part_i = part[i];
+        for (sgp_eid_t j=g.source_offsets[i]; j<g.source_offsets[i+1]; j++) {
+            sgp_vid_t v = g.destination_indices[j];
+            if (part[v] != part_i) {
+                edgecut_curr++;
+            }
+        }
+    }
+    // fprintf(stderr, "computed %ld, est %ld\n", edgecut_curr/2,
+    //                    edgecut_min/2-ec_change);
+    assert(edgecut_curr/2 == (edgecut_min/2-ec_change));
+    *edgecut = edgecut_curr/2;
+
+#if 0
+    sgp_real_t bin_width = 0.005;
+    int64_t num_bins = ((int64_t) (2.0/bin_width) + 1);
+    int64_t *bin_counts = (int64_t *) malloc(num_bins * sizeof(int64_t));
+    for (int64_t i=0; i<num_bins; i++) {
+        bin_counts[i] = 0; 
+    }
+    for (int64_t i=0; i<((int64_t)n); i++) {
+        int64_t bin_num = ((int64_t) floor((1+evec[i])/bin_width));
+        bin_counts[bin_num]++;
+    }
+
+    int64_t cumulative_bin_perc = 0;
+    for (int64_t i=0; i<num_bins; i++) {
+        int64_t bin_perc = (100*bin_counts[i])/n;
+        if (bin_perc > 0) {
+            cumulative_bin_perc += bin_perc;
+            printf("bin %ld, perc %ld\n", i, bin_perc);
+        }
+    }
+    printf("cumulative bin percentage: %ld\n", cumulative_bin_perc);
+
+    free(bin_counts);
+#endif
 
     return EXIT_SUCCESS;
 }    
+
+SGPAR_API int sgp_improve_partition(sgp_vid_t *part, sgp_vid_t num_partitions, 
+                                    long *edgecut, int perc_imbalance_allowed, 
+                                    sgp_real_t *evec,
+                                    sgp_graph_t g) {
+
+    return EXIT_SUCCESS;
+}    
+
+
 
 
 /**********************************************************
@@ -791,6 +1141,7 @@ SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
 SGPAR_API int sgp_load_graph(sgp_graph_t *g, char *csr_filename);
 SGPAR_API int sgp_free_graph(sgp_graph_t *g);
 SGPAR_API int sgp_partition_graph(sgp_vid_t *part, sgp_vid_t num_partitions,
+                                  long *edge_cut, 
                                   int coarsening_alg, int refine_alg,
                                   int local_search_alg, 
                                   int perc_imbalance_allowed,
@@ -867,6 +1218,7 @@ SGPAR_API int sgp_free_graph(sgp_graph_t *g) {
 
 SGPAR_API int sgp_partition_graph(sgp_vid_t *part, 
                                   const sgp_vid_t num_partitions,
+                                  long *edge_cut,
                                   const int coarsening_alg, 
                                   const int refine_alg,
                                   const int local_search_alg, 
@@ -876,6 +1228,11 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     sgp_pcg32_random_t rng;
     rng.state = time(NULL);
     rng.inc   = 1;
+
+    printf("sgpar settings: %d %d %.16f\n", 
+                    SGPAR_COARSENING_VTX_CUTOFF, 
+                    SGPAR_POWERITER_ITER,
+                    SGPAR_POWERITER_TOL);
 
     int coarsening_level = 0;
     sgp_graph_t g_all[SGPAR_COARSENING_MAXLEVELS];
@@ -926,8 +1283,13 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     sgp_vec_normalize(eigenvec[num_coarsening_levels-1], gc_nvertices);
     if (coarsening_alg != 5) { /* coarsening_alg = 5 is no coarsening */
         printf("Coarsening level %d, ", num_coarsening_levels-1);        
-        CHECK_SGPAR( sgp_power_iter(eigenvec[num_coarsening_levels-1], 
+        if (refine_alg == 0) {
+            CHECK_SGPAR( sgp_power_iter(eigenvec[num_coarsening_levels-1], 
                    g_all[num_coarsening_levels-1]) );
+        } else {
+            CHECK_SGPAR( sgp_power_iter_normLap(eigenvec[num_coarsening_levels-1], 
+                   g_all[num_coarsening_levels-1]) );
+        }
     }
 
     for (int l=num_coarsening_levels-2; l>=0; l--) {
@@ -943,15 +1305,22 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         sgp_vec_normalize(eigenvec[l], gcl_n);
         if (l > 0) {
             printf("Coarsening level %d, ", l);
-            sgp_power_iter(eigenvec[l], g_all[l]);
+            if (refine_alg == 0) {
+                sgp_power_iter(eigenvec[l], g_all[l]);
+            } else {
+                sgp_power_iter_normLap(eigenvec[l], g_all[l]);
+            }
         }
     }
 
     double fin_refine_time = sgp_timer();
 
     printf("Coarsening level %d, ", 0);
-    CHECK_SGPAR( sgp_power_iter_final(eigenvec[0], g_all[0]) );
-
+    if (refine_alg == 0) {
+        CHECK_SGPAR( sgp_power_iter_final(eigenvec[0], g_all[0]) );
+    } else {
+        CHECK_SGPAR( sgp_power_iter_normLap_final(eigenvec[0], g_all[0]) );
+    }
     double fin_final_level_time = sgp_timer();
 
     printf("Total: %3.3lf s, coarsening %3.3lf %3.0lf%% "
@@ -973,8 +1342,14 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         sgp_free_graph(&g_all[i]);
     }
 
-    sgp_compute_partition(part, num_partitions, perc_imbalance_allowed, 
+    sgp_compute_partition(part, num_partitions, edge_cut, 
+                          perc_imbalance_allowed, 
+                          local_search_alg,
                           eigenvec[0], g);    
+
+    sgp_improve_partition(part, num_partitions, edge_cut,
+                           perc_imbalance_allowed,
+                           eigenvec[0], g);
     free(eigenvec[0]);
 
     return EXIT_SUCCESS;

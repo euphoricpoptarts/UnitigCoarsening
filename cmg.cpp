@@ -22,7 +22,7 @@
 #endif
 
 #define COARSE_VTX_CUTOFF 25
-#define TOL 1e-8
+#define TOL 1e-12
 
 typedef struct graph {
     long n;
@@ -738,11 +738,13 @@ void power_it(graph_t *g, int vecnum) {
     // double diff = diff_vec(v2, u2, g->n);
 
     double tol = TOL;
-
     while(dp_v2_u2 < 1.0 - tol) {
     // while(diff > tol) {
         k ++;
-
+        if (k > 1000000) {
+            fprintf(stderr, "Million iterations, breaking\n");
+            break;
+        }
         copy_vec(u2, v2, g->n);
     
         // u2 = Bg * v2;
@@ -774,7 +776,7 @@ void power_it(graph_t *g, int vecnum) {
         copy_vec(u2, g->u2, g->n);
         g->vec2_itrs = k;
     }
-
+    printf("Number of iterations %d\n", k);
     free(v2);
     free(v1);
     free(u2);
@@ -791,7 +793,7 @@ void compute_vector(graph_t *g, int refine_type, int vecnum) {
     
         // For coarsest graph
         // initialize with random numbers
-        std::default_random_engine generator(42);
+        std::default_random_engine generator(time(NULL));
         std::normal_distribution<double> distribution(0.0, 1.0);
         for (unsigned int i=0; i < g->n; i++) {
             if(vecnum == 3) {
@@ -812,13 +814,15 @@ void compute_vector(graph_t *g, int refine_type, int vecnum) {
                 g->u2[i] = g->cg->u2[coarse_index];
             }
         }
-        if (refine_type == 1) {
-            koren(g, vecnum);
-        } else {
-            // refine vector using power iteration
-            power_it(g, vecnum);
-        }
     }
+    if (refine_type == 1) {
+        koren(g, vecnum);
+    } else {
+        // refine vector using power iteration
+        power_it(g, vecnum);
+    }
+
+
 }
 
 void partition(graph_t *g) {
@@ -831,14 +835,16 @@ void partition(graph_t *g) {
     std::sort(part_ids.begin(), part_ids.end());
 
 
-    long split = g->n/2;
-    // allow 5% imbalance
-    long imb = split/20;
+    long split = ceil(g->n/2.0);
+    fprintf(stderr, "split is %ld\n", split);
+    // allow x% imbalance
+    long imbr = floor(split*1.01);
+    long imbl = g->n - imbr;
     std::vector<unsigned int> CompMapping(g->n, 0);
-    for (long i=0; i<(split-imb); i++) {
+    for (long i=0; i<imbl; i++) {
         CompMapping[part_ids[i].second] = 0;
     }
-    for (long i=(split-imb); i<g->n; i++) {
+    for (long i=imbl; i<g->n; i++) {
         CompMapping[part_ids[i].second] = 1;
     }
 
@@ -855,9 +861,9 @@ void partition(graph_t *g) {
     // fprintf(stderr, "Vert frac %lf, edge cut is %u\n", ((double) split-imb)/g->n, edgecut_curr/2);
 
     int edgecut_min = edgecut_curr;
-    unsigned int curr_split = split-imb-1;
+    unsigned int curr_split = g->n - imbl + 1;
 
-    for (long i=(split-imb); i<(split+imb); i++) {
+    for (long i=imbl; i<imbr; i++) {
         /* add vert at position i to comm 0 */
         unsigned int u = part_ids[i].second;
         CompMapping[u] = 0;
@@ -874,11 +880,14 @@ void partition(graph_t *g) {
         // std::cout << "Vert frac " << ((double) i)/g->n << ", edge cut is " << edgecut_curr/2 << std::endl;
         if (edgecut_curr <= edgecut_min) {
             edgecut_min = edgecut_curr;
-            curr_split = i;
+            curr_split = g->n - i - 1;
+            if ((g->n - i - 1) < (i+1)) {
+                curr_split = i + 1;
+            }
         } 
     }
-    std::cout << "Best vert frac " 
-              << ((double) curr_split)/g->n 
+    std::cout << "Large part with imbalance is " 
+              << curr_split 
               << ", edge cut is " << edgecut_min/2 << std::endl;
 
     double *vec = (double *) malloc (sizeof(double) * g->n);
