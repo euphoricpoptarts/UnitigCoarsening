@@ -439,32 +439,10 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
 
 Kokkos::initialize();
 {
-    sgp_vid_t tid = omp_get_thread_num();
-    sgp_vid_t nthreads = omp_get_num_threads();
 
-    if(tid == 0){
-        thread_ec_no_loops = (sgp_eid_t *) malloc((nthreads)*sizeof(sgp_eid_t));
-        SGPAR_ASSERT(thread_ec_no_loops != NULL);
-    }
-
-    bool thread_initialized = false;
-    sgp_vid_t u;
-    int source_index = 0;
-
-#pragma omp barrier
-
-    thread_ec_no_loops[tid]=0;
-
-#pragma omp for
-    for (sgp_eid_t i=0; i<nEdges; i++) {
-        if(!thread_initialized){
-            source_index = binary_search_find_source_index(g.source_offsets, 0, n, i);
-            u = vcmap[source_index];
-            thread_initialized = true;
-        } else if(g.source_offsets[source_index + 1] == i) {
-            source_index++;
-            u = vcmap[source_index];
-        }
+    Kokkos::parallel_for( nEdges, KOKKOS_LAMBDA (sgp_eid_t i) {
+        int source_index = binary_search_find_source_index(g.source_offsets, 0, n, i);
+        sgp_vid_t u = vcmap[source_index];
         sgp_vid_t v = vcmap[g.destination_indices[i]];
         
         if(u==v){
@@ -474,23 +452,13 @@ Kokkos::initialize();
         } else {
             edges_uvw[3*i] = u;
             edges_uvw[3*i+1] = v;
-            thread_ec_no_loops[tid]++;
         }
         if (coarsening_level != 1) {
             edges_uvw[3*i+2] = g.eweights[i];
         } else {
             edges_uvw[3*i+2] = 1;
         }
-    }
-
-#pragma omp barrier
-    
-    if(tid==0){
-        for(sgp_eid_t i = 0; i < nthreads; i++){
-            ec_no_loops+=thread_ec_no_loops[i];
-        }
-        free(thread_ec_no_loops);
-    }
+    });
 
 }
 Kokkos::finalize();
@@ -510,7 +478,7 @@ Kokkos::finalize();
     qsort(edges_uvw, nEdges, 3*sizeof(sgp_vid_t), uvw_cmpfn_inc);
 #endif
     *sort_time += (sgp_timer() - elt);
-    nEdges = ec_no_loops;
+    nEdges = binary_search_find_first_self_loop(((edge_triple_t *) edges_uvw), 0, nEdges);
     sgp_vid_t nc = gc->nvertices;
     sgp_vid_t *gc_degree = (sgp_vid_t *) malloc(nc*sizeof(sgp_vid_t));
     SGPAR_ASSERT(gc_degree != NULL);
@@ -1046,7 +1014,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part, sgp_vid_t num_partitions,
                                   int coarsening_alg, int refine_alg,
                                   int local_search_alg, 
                                   int perc_imbalance_allowed,
-                                  sgp_graph_t g);
+                                  sgp_graph_t g,
+                                  const char *metricsFilename);
 
 
 #ifdef __cplusplus
@@ -1123,7 +1092,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                   const int refine_alg,
                                   const int local_search_alg, 
                                   const int perc_imbalance_allowed,
-                                  const sgp_graph_t g) {
+                                  const sgp_graph_t g,
+                                  const char *metricsFilename) {
 
     sgp_pcg32_random_t rng;
     rng.state = time(NULL);
@@ -1220,6 +1190,16 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                     fin_refine_time-fin_coarsening_time,
                     100*(fin_refine_time-fin_coarsening_time)/
                     (fin_final_level_time-start_time));
+
+    FILE *metricfp = fopen(metricsFilename, "a");
+    if (metricfp == NULL) {
+        printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
+    } else {
+        fprintf(metricfp, "%3.3lf, %3.3lf, %3.3lf\n", 
+            fin_final_level_time-start_time,
+            fin_coarsening_time-start_time,
+            fin_final_level_time-fin_coarsening_time);
+    }
 
     for (int i=1; i<num_coarsening_levels; i++) {
         sgp_free_graph(&g_all[i]);
