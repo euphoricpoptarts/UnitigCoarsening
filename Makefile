@@ -13,7 +13,7 @@ include $(KOKKOS_PATH)/Makefile.kokkos
 SRC = $(wildcard *par.c)
 OBJ = $(SRC:.c=.o)
 
-all: mtx2csr sgpar sgpar_lg sgpar_hg sgpar_c
+all: mtx2csr sgpar sgpar_lg sgpar_hg sgpar_c sgpar_kokkos
 
 mtx2csr: mtx2csr.cpp
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -o mtx2csr  mtx2csr.cpp
@@ -34,7 +34,7 @@ sgpar_c: sgpar.c sgpar.h
 	$(CC) $(CFLAGS) $(OMPFLAGS) -o sgpar_c  sgpar.c   -lm $(LDLIBS)
 
 clean:
-	rm -f mtx2csr sgpar_c sgpar sgpar_lg sgpar_hg
+	rm -f mtx2csr sgpar_c sgpar sgpar_lg sgpar_hg sgpar.kokkos *.o
 
 %.o:%.c $(KOKKOS_CPP_DEPENDS)
 	$(CXX) $(KOKKOS_CPPFLAGS) $(KOKKOS_CXXFLAGS) $(CXXFLAGS) $(EXTRA_INC) $(OMPFLAGS) -D_KOKKOS -c $<

@@ -317,12 +317,12 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
 }
 #endif
 
-#ifdef __cplusplus
 typedef struct {
     sgp_vid_t u;
     sgp_vid_t v;
     sgp_vid_t w;
 } edge_triple_t;
+#ifdef __cplusplus
 
 inline static bool uvw_cmpfn_inc(const edge_triple_t& a, 
                                  const edge_triple_t& b) {
@@ -434,9 +434,6 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
     sgp_vid_t *edges_uvw;
     edges_uvw = (sgp_vid_t *) malloc(3*nEdges*sizeof(sgp_vid_t));
     SGPAR_ASSERT(edges_uvw != NULL);
-
-    sgp_eid_t ec_no_loops = 0;
-    sgp_eid_t *thread_ec_no_loops;
 
 Kokkos::initialize();
 {
@@ -579,7 +576,7 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
 #pragma omp parallel
 {
 
-    bool thread_initialized = false;
+    int thread_initialized = 0;
     sgp_vid_t u;
     int source_index = 0;
 
@@ -588,7 +585,7 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
         if(!thread_initialized){
             source_index = binary_search_find_source_index(g.source_offsets, 0, n, i);
             u = vcmap[source_index];
-            thread_initialized = true;
+            thread_initialized = 1;
         } else if(g.source_offsets[source_index + 1] == i) {
             source_index++;
             u = vcmap[source_index];
