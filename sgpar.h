@@ -1199,6 +1199,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
             fin_final_level_time-start_time,
             fin_coarsening_time-start_time,
             fin_final_level_time-fin_coarsening_time);
+        fclose(metricfp);
     }
 
     for (int i=1; i<num_coarsening_levels; i++) {
