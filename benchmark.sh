@@ -1,13 +1,15 @@
 #!/bin/bash
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $0 csr_filename metrics_filename"
+if [ "$#" -ne 4 ]; then
+    echo "Usage: $0 executable csr_filename metrics_filename trials"
     exit
 fi
-testFile=$1
-metricsFile=$2
-for i in {1..100}
+executable=$1
+testFile=$2
+metricsFile=$3
+trials=$4
+for((i=1;i<=trials;i++))
 do
-    ./sgpar $testFile $metricsFile
+    ./$executable $testFile $metricsFile > /dev/null 2>&1
 done
 
 totalT=0
