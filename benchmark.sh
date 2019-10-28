@@ -7,10 +7,8 @@ executable=$1
 testFile=$2
 metricsFile=$3
 trials=$4
-for((i=1;i<=trials;i++))
-do
-    ./$executable $testFile $metricsFile > /dev/null 2>&1
-done
+
+./$executable $testFile $metricsFile 0 0 0 $trials > /dev/null 2>&1
 
 totalT=0
 coarsenT=0
