@@ -10,32 +10,32 @@ using namespace sgpar;
 
 int main(int argc, char **argv) {
 
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s filename.csr\n", argv[0]);
+    if (argc < 3) {
+        fprintf(stderr, "Usage: %s filename.csr metricsfilename.txt\n", argv[0]);
         return EXIT_FAILURE;
     }
     char *filename = argv[1];
+    char *metrics = argv[2];
     
     int coarsening_alg = 0;
-    if (argc >= 3) {
-        coarsening_alg = atoi(argv[2]);
+    if (argc >= 4) {
+        coarsening_alg = atoi(argv[3]);
     }
 
     int refine_alg = 0;
-    if (argc >= 4) {
-        refine_alg = atoi(argv[3]);
+    if (argc >= 5) {
+        refine_alg = atoi(argv[4]);
     }
 
     int local_search_alg = 0;
-    if (argc >= 5) {
-        local_search_alg = atoi(argv[4]);
+    if (argc >= 6) {
+        local_search_alg = atoi(argv[5]);
     }
 
     int num_iter = 100;
-    if (argc >= 6) {
-        num_iter = atoi(argv[5]);
+    if (argc >= 7) {
+        num_iter = atoi(argv[6]);
     }
-
 
     sgp_graph_t g;
     CHECK_SGPAR( sgp_load_graph(&g, filename) );
@@ -52,7 +52,7 @@ int main(int argc, char **argv) {
     for (int i=0; i<num_iter; i++) {
         long edgecut = 0;
         CHECK_SGPAR( sgp_partition_graph(part, 2, &edgecut, coarsening_alg, 
-                                        refine_alg, local_search_alg, 0, g) );
+                                        refine_alg, local_search_alg, 0, g, metrics) );
         if (edgecut < edgecut_min) {
             edgecut_min = edgecut;
         }
