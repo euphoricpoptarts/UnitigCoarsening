@@ -1,6 +1,3 @@
-KOKKOS_PATH = ${HOME}/kokkos
-KOKKOS_DEVICES = "OpenMP"
-KOKKOS_ARCH = "BDW"
 .POSIX:
 CXX      = g++
 CC       = gcc
@@ -8,6 +5,10 @@ CXXFLAGS = -Wall -O3
 CFLAGS   = -Wall -O3 -std=c99
 OMPFLAGS = -fopenmp
 LDLIBS   = 
+
+KOKKOS_PATH = ${HOME}/kokkos
+KOKKOS_DEVICES = "OpenMP"
+KOKKOS_ARCH = "BDW"
 
 include $(KOKKOS_PATH)/Makefile.kokkos
 SRC = $(wildcard *par.c)
