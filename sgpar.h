@@ -734,11 +734,13 @@ SGPAR_API int sgp_vec_normalize(sgp_real_t *u, int64_t n) {
     assert(u != NULL);
     sgp_real_t squared_sum = 0;
 
+#pragma omp parallel for reduction(+: squared_sum)
     for (int64_t i=0; i<n; i++) {
         squared_sum += u[i]*u[i];
     }
     sgp_real_t sum_inv = 1/sqrt(squared_sum);
 
+#pragma omp parallel for
     for (int64_t i=0; i<n; i++) {
         u[i] = u[i]*sum_inv;
     }
@@ -749,6 +751,8 @@ SGPAR_API int sgp_vec_dotproduct(sgp_real_t *dot_prod_ptr,
                                  sgp_real_t *u1, sgp_real_t *u2, int64_t n) {
 
     sgp_real_t dot_prod = 0;
+    
+#pragma omp parallel for reduction(+: dot_prod)
     for (int64_t i=0; i<n; i++) {
         dot_prod += u1[i]*u2[i];
     }
