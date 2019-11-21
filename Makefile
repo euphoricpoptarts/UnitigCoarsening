@@ -1,7 +1,7 @@
 .POSIX:
 CXX      = g++
 CC       = gcc
-CXXFLAGS = -Wall -O3
+CXXFLAGS = -g#-Wall -O3
 CFLAGS   = -Wall -O3 -std=c99
 OMPFLAGS = -fopenmp
 LDLIBS   = 
@@ -35,7 +35,7 @@ sgpar_c: sgpar.c sgpar.h
 	$(CC) $(CFLAGS) $(OMPFLAGS) -o sgpar_c  sgpar.c   -lm $(LDLIBS)
 
 clean:
-	rm -f mtx2csr sgpar_c sgpar sgpar_lg sgpar_hg sgpar.kokkos *.o
+	rm -f mtx2csr sgpar_c sgpar sgpar_lg sgpar_hg sgpar.kokkos *.o KokkosCore_config.h KokkosCore_config.tmp
 
 %.o:%.c $(KOKKOS_CPP_DEPENDS)
 	$(CXX) $(KOKKOS_CPPFLAGS) $(KOKKOS_CXXFLAGS) $(CXXFLAGS) $(EXTRA_INC) $(OMPFLAGS) -D_KOKKOS -c $<
