@@ -983,23 +983,21 @@ Kokkos::finalize();
 SGPAR_API int sgp_vec_normalize_omp(sgp_real_t *u, int64_t n) {
 
     assert(u != NULL);
-    sgp_real_t* squared_sum;
-    if(omp_get_thread_num()==0){ 
-       squared_sum = (sgp_real_t *) malloc(sizeof(sgp_real_t));
-       squared_sum[0] = 0;
-    }
-#pragma omp barrier
+    static sgp_real_t squared_sum = 0;
 
-#pragma omp for reduction(+:squared_sum[0])
+#pragma omp single
+    squared_sum = 0;
+
+#pragma omp for reduction(+:squared_sum)
     for (int64_t i=0; i<n; i++) {
-        squared_sum[0] += u[i]*u[i];
+        squared_sum += u[i]*u[i];
     }
-    sgp_real_t sum_inv = 1/sqrt(squared_sum[0]);
-    
-    if(omp_get_thread_num()==0){ 
-       free(squared_sum);
+    sgp_real_t sum_inv = 1/sqrt(squared_sum);
+
+    #pragma omp single 
+    {
+        //printf("squared_sum %3.3f\n", squared_sum);
     }
-#pragma omp barrier
 
 #pragma omp for
     for (int64_t i=0; i<n; i++) {
@@ -1011,23 +1009,16 @@ SGPAR_API int sgp_vec_normalize_omp(sgp_real_t *u, int64_t n) {
 SGPAR_API int sgp_vec_dotproduct_omp(sgp_real_t *dot_prod_ptr, 
                                  sgp_real_t *u1, sgp_real_t *u2, int64_t n) {
 
-    sgp_real_t* dot_prod;
-    if(omp_get_thread_num()==0){ 
-       dot_prod = (sgp_real_t *) malloc(sizeof(sgp_real_t));
-       dot_prod[0] = 0;
-    }
-#pragma omp barrier
-    
-#pragma omp for reduction(+:dot_prod[0])
-    for (int64_t i=0; i<n; i++) {
-        dot_prod[0] += u1[i]*u2[i];
-    }
-    *dot_prod_ptr = dot_prod[0];
+    static sgp_real_t dot_prod = 0;
 
-    if(omp_get_thread_num()==0){ 
-       free(dot_prod);
+#pragma omp single
+    dot_prod = 0;
+    
+#pragma omp for reduction(+:dot_prod)
+    for (int64_t i=0; i<n; i++) {
+        dot_prod += u1[i]*u2[i];
     }
-#pragma omp barrier
+    *dot_prod_ptr = dot_prod;
 
     return EXIT_SUCCESS;
 }
@@ -1053,33 +1044,26 @@ SGPAR_API int sgp_vec_D_orthogonalize_omp(sgp_real_t *u1, sgp_real_t *u2,
     sgp_real_t mult1;
     sgp_vec_dotproduct_omp(&mult1, u1, u2, n);
 
-    sgp_real_t* mult_numer;
-    sgp_real_t* mult_denom;
-    
-    if(omp_get_thread_num()==0){ 
-       mult_numer = (sgp_real_t *) malloc(sizeof(sgp_real_t));
-       mult_numer[0] = 0;
-       mult_denom = (sgp_real_t *) malloc(sizeof(sgp_real_t));
-       mult_denom[0] = 0;
-    }
-#pragma omp barrier
+    static sgp_real_t mult_numer = 0;
+    static sgp_real_t mult_denom = 0;
 
-#pragma omp for reduction(+:mult_numer[0], mult_denom[0])
+#pragma omp single
+{
+    mult_numer = 0;
+    mult_denom = 0;
+}
+
+#pragma omp for reduction(+:mult_numer, mult_denom)
     for (int64_t i=0; i<n; i++) {
-        mult_numer[0] += u1[i]*D[i]*u2[i];
-        mult_denom[0] += u2[i]*D[i]*u2[i];
+        mult_numer += u1[i]*D[i]*u2[i];
+        mult_denom += u2[i]*D[i]*u2[i];
     }
 
 #pragma omp for
     for (int64_t i=0; i<n; i++) {
-        u1[i] -= mult_numer[0]*u2[i]/mult_denom[0];
+        u1[i] -= mult_numer*u2[i]/mult_denom;
     }
 
-    if(omp_get_thread_num()==0){
-        free(mult_numer);
-        free(mult_denom);
-    }
-#pragma omp barrier
     return EXIT_SUCCESS;
 }
 
@@ -1152,8 +1136,10 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int fina
         }
     }
 
-#pragma omp parallel
+#pragma omp parallel shared(u)
 {
+
+#pragma omp for
     for (sgp_vid_t i=0; i<n; i++) {
         vec1[i] = 1.0;
     }
@@ -1161,6 +1147,8 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int fina
 #if 0
     sgp_real_t mult = 0;
     sgp_vec_dotproduct_omp(&mult, vec1, u, n);
+
+#pragma omp for
     for (sgp_vid_t i=0; i<n; i++) {
         u[i] -= mult*u[i]/n;
     }
@@ -1175,15 +1163,13 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int fina
     }
     sgp_vec_normalize_omp(u, n);
 
-    sgp_real_t *v;
-    if(omp_get_thread_num()==0){
-        v = (sgp_real_t *) malloc(n*sizeof(sgp_real_t));
-        SGPAR_ASSERT(v != NULL);
-        for (sgp_vid_t i=0; i<n; i++) {
-            v[i] = u[i];
-        }
+    sgp_real_t *v = (sgp_real_t *) malloc(n*sizeof(sgp_real_t));
+    SGPAR_ASSERT(v != NULL);
+
+#pragma omp for
+    for (sgp_vid_t i=0; i<n; i++) {
+        v[i] = u[i];
     }
-#pragma omp barrier
 
     sgp_real_t tol = SGPAR_POWERITER_TOL;
     int niter = 0;
@@ -1244,8 +1230,8 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int fina
             printf("exceeded max iter count, ");
         }
         printf("number of iterations: %d\n", niter);
-        free(v);
     }
+    free(v);
 }
 
     if(!normLap && final){
