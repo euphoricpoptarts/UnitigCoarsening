@@ -1392,7 +1392,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part, sgp_vid_t num_partitions,
                                   int local_search_alg, 
                                   int perc_imbalance_allowed,
                                   sgp_graph_t g,
-                                  const char *metricsFilename);
+                                  const char *metricsFilename,
+                                  sgp_pcg32_random_t* rng);
 
 
 #ifdef __cplusplus
@@ -1471,11 +1472,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                   const int local_search_alg, 
                                   const int perc_imbalance_allowed,
                                   const sgp_graph_t g,
-                                  const char *metricsFilename) {
-
-    sgp_pcg32_random_t rng;
-    rng.state = time(NULL);
-    rng.inc   = 1;
+                                  const char *metricsFilename,
+                                  sgp_pcg32_random_t* rng) {
 
     printf("sgpar settings: %d %d %.16f\n", 
                     SGPAR_COARSENING_VTX_CUTOFF, 
@@ -1511,7 +1509,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                             vcmap[coarsening_level-1],
                                             g_all[coarsening_level-1], 
                                             coarsening_level, coarsening_alg, 
-                                            &rng, &coarsening_sort_time) );
+                                            rng, &coarsening_sort_time) );
     }
 
     int num_coarsening_levels = coarsening_level+1;
@@ -1525,7 +1523,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     SGPAR_ASSERT(eigenvec[num_coarsening_levels-1] != NULL);
     for (sgp_vid_t i=0; i<gc_nvertices; i++) {
         eigenvec[num_coarsening_levels-1][i] = 
-                            ((double) sgp_pcg32_random_r(&rng))/UINT32_MAX;
+                            ((double) sgp_pcg32_random_r(rng))/UINT32_MAX;
     }
 
     sgp_vec_normalize(eigenvec[num_coarsening_levels-1], gc_nvertices);

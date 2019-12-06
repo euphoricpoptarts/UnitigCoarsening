@@ -2,12 +2,18 @@ import sys
 import os
 from parse import parse
 from statistics import mean, stdev
+import secrets
 
 def main():
 
     filepath = sys.argv[1]
+    metricsPath = "metrics/group{}.txt".format(secrets.token_urlsafe(10))
 
-    print("analysing data for {}".format(filepath))
+    sysCall = "./sgpar {} {} 5 0 0 100 > /dev/null"
+
+    print("running sgpar on {}".format(filepath))
+
+    os.system(sysCall.format(filepath, metricsPath))
 
     form = "{} a {} {} {} {}"
     refineIters = []
@@ -17,7 +23,7 @@ def main():
     edgeCuts = []
 
     cnt = 0
-    with open(filepath) as fp:
+    with open(metricsPath) as fp:
        for line in fp:
            parsed = parse(form, line)
            refineIters.append(int(parsed[0]))

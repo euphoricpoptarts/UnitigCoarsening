@@ -48,11 +48,14 @@ int main(int argc, char **argv) {
     SGPAR_ASSERT(part != NULL);
 
     long edgecut_min = 1<<30;
+    sgp_pcg32_random_t rng;
+    rng.state = time(NULL);
+    rng.inc   = 1;
     
     for (int i=0; i<num_iter; i++) {
         long edgecut = 0;
         CHECK_SGPAR( sgp_partition_graph(part, 2, &edgecut, coarsening_alg, 
-                                        refine_alg, local_search_alg, 0, g, metrics) );
+                                        refine_alg, local_search_alg, 0, g, metrics, &rng) );
         if (edgecut < edgecut_min) {
             edgecut_min = edgecut;
         }
