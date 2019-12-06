@@ -29,6 +29,7 @@ def main():
 
     print("mean refine iterations: {}".format(mean(refineIters)))
     print("min refine iterations: {}".format(min(refineIters)))
+    print("refine iterations std deviation: {}".format(stdev(refineIters)))
     print("mean total time: {}".format(mean(totalTimes)))
     print("min total time: {}".format(min(totalTimes)))
     print("mean edge cut: {}".format(mean(edgeCuts)))
