@@ -5,9 +5,9 @@ from statistics import mean, stdev
 
 def main():
 
-    filepath = "metrics/group47.txt"
+    filepath = sys.argv[1]
 
-    print("starting")
+    print("analysing data for {}".format(filepath))
 
     form = "{} a {} {} {} {}"
     refineIters = []
