@@ -789,7 +789,7 @@ SGPAR_API int sgp_vec_D_orthogonalize(sgp_real_t *u1, sgp_real_t *u2,
 }
 
 
-SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g) {
+SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const char* metricsFilename) {
 
     sgp_vid_t n = g.nvertices;
 
@@ -861,10 +861,18 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g) {
     free(vec1);
     free(v);
 
+    FILE *metricfp = fopen(metricsFilename, "a");
+    if (metricfp == NULL) {
+        printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
+    } else {
+        fprintf(metricfp, "%d ", niter);
+        fclose(metricfp);
+    }
+
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int sgp_power_iter_final(sgp_real_t *u, sgp_graph_t g) {
+SGPAR_API int sgp_power_iter_final(sgp_real_t *u, sgp_graph_t g, const char* metricsFilename) {
 
     sgp_vid_t n = g.nvertices;
 
@@ -935,6 +943,13 @@ SGPAR_API int sgp_power_iter_final(sgp_real_t *u, sgp_graph_t g) {
         printf("exceeded max iter count, ");
     }
     printf("number of iterations: %d\n", niter);
+    FILE *metricfp = fopen(metricsFilename, "a");
+    if (metricfp == NULL) {
+        printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
+    } else {
+        fprintf(metricfp, "%d ", niter);
+        fclose(metricfp);
+    }
 
     sgp_real_t eigenval = 0;
     sgp_real_t eigenval_max = 0;
@@ -980,7 +995,7 @@ SGPAR_API int sgp_power_iter_final(sgp_real_t *u, sgp_graph_t g) {
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int sgp_power_iter_normLap(sgp_real_t *u, sgp_graph_t g) {
+SGPAR_API int sgp_power_iter_normLap(sgp_real_t *u, sgp_graph_t g, const char* metricsFilename) {
 
     sgp_vid_t n = g.nvertices;
 
@@ -1038,11 +1053,18 @@ SGPAR_API int sgp_power_iter_normLap(sgp_real_t *u, sgp_graph_t g) {
     printf("number of iterations: %d\n", niter);
     free(vec1);
     free(v);
+    FILE *metricfp = fopen(metricsFilename, "a");
+    if (metricfp == NULL) {
+        printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
+    } else {
+        fprintf(metricfp, "%d ", niter);
+        fclose(metricfp);
+    }
 
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int sgp_power_iter_normLap_final(sgp_real_t *u, sgp_graph_t g) {
+SGPAR_API int sgp_power_iter_normLap_final(sgp_real_t *u, sgp_graph_t g, const char* metricsFilename) {
 
     sgp_vid_t n = g.nvertices;
 
@@ -1108,6 +1130,13 @@ SGPAR_API int sgp_power_iter_normLap_final(sgp_real_t *u, sgp_graph_t g) {
     free(vec1);
     free(v);
     free(weighted_degree);
+    FILE *metricfp = fopen(metricsFilename, "a");
+    if (metricfp == NULL) {
+        printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
+    } else {
+        fprintf(metricfp, "%d ", niter);
+        fclose(metricfp);
+    }
 
     return EXIT_SUCCESS;
 }
@@ -1363,7 +1392,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part, sgp_vid_t num_partitions,
                                   int local_search_alg, 
                                   int perc_imbalance_allowed,
                                   sgp_graph_t g,
-                                  const char *metricsFilename);
+                                  const char *metricsFilename,
+                                  sgp_pcg32_random_t* rng);
 
 
 #ifdef __cplusplus
@@ -1442,11 +1472,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                   const int local_search_alg, 
                                   const int perc_imbalance_allowed,
                                   const sgp_graph_t g,
-                                  const char *metricsFilename) {
-
-    sgp_pcg32_random_t rng;
-    rng.state = time(NULL);
-    rng.inc   = 1;
+                                  const char *metricsFilename,
+                                  sgp_pcg32_random_t* rng) {
 
     printf("sgpar settings: %d %d %.16f\n", 
                     SGPAR_COARSENING_VTX_CUTOFF, 
@@ -1482,7 +1509,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                             vcmap[coarsening_level-1],
                                             g_all[coarsening_level-1], 
                                             coarsening_level, coarsening_alg, 
-                                            &rng, &coarsening_sort_time) );
+                                            rng, &coarsening_sort_time) );
     }
 
     int num_coarsening_levels = coarsening_level+1;
@@ -1496,7 +1523,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     SGPAR_ASSERT(eigenvec[num_coarsening_levels-1] != NULL);
     for (sgp_vid_t i=0; i<gc_nvertices; i++) {
         eigenvec[num_coarsening_levels-1][i] = 
-                            ((double) sgp_pcg32_random_r(&rng))/UINT32_MAX;
+                            ((double) sgp_pcg32_random_r(rng))/UINT32_MAX;
     }
 
     sgp_vec_normalize(eigenvec[num_coarsening_levels-1], gc_nvertices);
@@ -1504,10 +1531,10 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         printf("Coarsening level %d, ", num_coarsening_levels-1);        
         if (refine_alg == 0) {
             CHECK_SGPAR( sgp_power_iter(eigenvec[num_coarsening_levels-1], 
-                   g_all[num_coarsening_levels-1]) );
+                   g_all[num_coarsening_levels-1], metricsFilename) );
         } else {
             CHECK_SGPAR( sgp_power_iter_normLap(eigenvec[num_coarsening_levels-1], 
-                   g_all[num_coarsening_levels-1]) );
+                   g_all[num_coarsening_levels-1], metricsFilename) );
         }
     }
 
@@ -1525,9 +1552,9 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         if (l > 0) {
             printf("Coarsening level %d, ", l);
             if (refine_alg == 0) {
-                sgp_power_iter(eigenvec[l], g_all[l]);
+                sgp_power_iter(eigenvec[l], g_all[l], metricsFilename);
             } else {
-                sgp_power_iter_normLap(eigenvec[l], g_all[l]);
+                sgp_power_iter_normLap(eigenvec[l], g_all[l], metricsFilename);
             }
         }
     }
@@ -1536,9 +1563,9 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
 
     printf("Coarsening level %d, ", 0);
     if (refine_alg == 0) {
-        CHECK_SGPAR( sgp_power_iter_final(eigenvec[0], g_all[0]) );
+        CHECK_SGPAR( sgp_power_iter_final(eigenvec[0], g_all[0], metricsFilename) );
     } else {
-        CHECK_SGPAR( sgp_power_iter_normLap_final(eigenvec[0], g_all[0]) );
+        CHECK_SGPAR( sgp_power_iter_normLap_final(eigenvec[0], g_all[0], metricsFilename) );
     }
     double fin_final_level_time = sgp_timer();
 
@@ -1557,16 +1584,6 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                     100*(fin_refine_time-fin_coarsening_time)/
                     (fin_final_level_time-start_time));
 
-    FILE *metricfp = fopen(metricsFilename, "a");
-    if (metricfp == NULL) {
-        printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
-    } else {
-        fprintf(metricfp, "%3.3lf, %3.3lf, %3.3lf\n", 
-            fin_final_level_time-start_time,
-            fin_coarsening_time-start_time,
-            fin_final_level_time-fin_coarsening_time);
-        fclose(metricfp);
-    }
 
     for (int i=1; i<num_coarsening_levels; i++) {
         sgp_free_graph(&g_all[i]);
@@ -1575,7 +1592,19 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     sgp_compute_partition(part, num_partitions, edge_cut, 
                           perc_imbalance_allowed, 
                           local_search_alg,
-                          eigenvec[0], g);    
+                          eigenvec[0], g);
+
+    FILE *metricfp = fopen(metricsFilename, "a");
+    if (metricfp == NULL) {
+        printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
+    } else {
+        fprintf(metricfp, "a %3.3lf %3.3lf %3.3lf %li\n", 
+            fin_final_level_time-start_time,
+            fin_coarsening_time-start_time,
+            fin_final_level_time-fin_coarsening_time,
+            *edge_cut);
+        fclose(metricfp);
+    }
 
     sgp_improve_partition(part, num_partitions, edge_cut,
                            perc_imbalance_allowed,
