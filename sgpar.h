@@ -1385,8 +1385,6 @@ SGPAR_API int sgp_improve_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
 }    
 
 
-
-
 /**********************************************************
  * API
  **********************************************************
@@ -1394,6 +1392,8 @@ SGPAR_API int sgp_improve_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
 
 SGPAR_API int sgp_load_graph(sgp_graph_t *g, char *csr_filename);
 SGPAR_API int sgp_free_graph(sgp_graph_t *g);
+SGPAR_API int sgp_load_partition(sgp_vid_t *part, int size, char *part_filename);
+SGPAR_API int compute_partition_edit_distance(sgp_vid_t* part1, sgp_vid_t* part2, int size, unsigned int *diff);
 SGPAR_API int sgp_partition_graph(sgp_vid_t *part, sgp_vid_t num_partitions,
                                   long *edge_cut, 
                                   int coarsening_alg, int refine_alg,
@@ -1469,6 +1469,43 @@ SGPAR_API int sgp_free_graph(sgp_graph_t *g) {
         g->weighted_degree = NULL;
     }
 
+    return EXIT_SUCCESS;
+}
+
+SGPAR_API int sgp_load_partition(sgp_vid_t *part, int size, char *part_filename){
+    FILE *infp = fopen(part_filename, "rb");
+    if (infp == NULL) {
+        printf("Error: Could not open input file. Exiting ...\n");
+        return EXIT_FAILURE;
+    }
+
+    for(int i = 0; i < size; i++){
+        if(fscanf(infp, "%i", part + i) == 0){
+            return EXIT_FAILURE;
+        }
+    }
+
+    return EXIT_SUCCESS;
+}
+
+//partitions assumed to same vertex labellings
+SGPAR_API int compute_partition_edit_distance(sgp_vid_t* part1, sgp_vid_t* part2, int size, unsigned int *diff){
+
+    int d = 0;
+    int d2 = 0;
+    for(int i = 0; i < size; i++){
+        if(part1[i] == part2[i]){
+            d++;
+        } else {
+            d2++;
+        }
+    }
+
+    if(d < d2){
+        *diff = d;
+    } else {
+        *diff = d2;
+    }
     return EXIT_SUCCESS;
 }
 
@@ -1606,7 +1643,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     if (metricfp == NULL) {
         printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
     } else {
-        fprintf(metricfp, "a %3.3lf %3.3lf %3.3lf %li\n", 
+        fprintf(metricfp, "a %3.3lf %3.3lf %3.3lf %li ", 
             fin_final_level_time-start_time,
             fin_coarsening_time-start_time,
             fin_final_level_time-fin_coarsening_time,

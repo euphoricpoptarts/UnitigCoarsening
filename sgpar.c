@@ -47,6 +47,16 @@ int main(int argc, char **argv) {
     part = (sgp_vid_t *) malloc(g.nvertices * sizeof(sgp_vid_t));
     SGPAR_ASSERT(part != NULL);
 
+
+
+    sgp_vid_t *best_part = (sgp_vid_t *) malloc(g.nvertices * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(best_part != NULL);
+    int compare_part = 0;
+    if(argc >= 8){
+        CHECK_SGPAR( sgp_load_partition(best_part, g.nvertices, argv[7]));
+        compare_part = 1;
+    }
+
     long edgecut_min = 1<<30;
     sgp_pcg32_random_t rng;
     rng.state = time(NULL);
@@ -56,6 +66,18 @@ int main(int argc, char **argv) {
         long edgecut = 0;
         CHECK_SGPAR( sgp_partition_graph(part, 2, &edgecut, coarsening_alg, 
                                         refine_alg, local_search_alg, 0, g, metrics, &rng) );
+
+        unsigned int part_diff = 0;
+        if(compare_part){
+            CHECK_SGPAR( compute_partition_edit_distance(part, best_part, g.nvertices, &part_diff));
+        }
+        FILE *metricfp = fopen(metrics, "a");
+        if (metricfp == NULL) {
+            printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
+        } else {
+            fprintf(metricfp, "%u\n", part_diff);
+            fclose(metricfp);
+        }
         if (edgecut < edgecut_min) {
             edgecut_min = edgecut;
         }
