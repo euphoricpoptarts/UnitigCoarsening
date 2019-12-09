@@ -854,8 +854,10 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const char* metricsFi
         sgp_vec_dotproduct(&dotprod, u, v, n);
         niter++;
     }
+    int max_iter_reached = 0;
     if (niter == iter_max) {
         printf("exceeded max iter count, ");
+        max_iter_reached = 1;
     }
     printf("number of iterations: %d\n", niter);
     free(vec1);
@@ -865,7 +867,7 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const char* metricsFi
     if (metricfp == NULL) {
         printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
     } else {
-        fprintf(metricfp, "%d ", niter);
+        fprintf(metricfp, "%d %d ", niter, max_iter_reached);
         fclose(metricfp);
     }
 
@@ -939,15 +941,17 @@ SGPAR_API int sgp_power_iter_final(sgp_real_t *u, sgp_graph_t g, const char* met
         niter++;
         
     }
+    int max_iter_reached = 0;
     if (niter == iter_max) {
         printf("exceeded max iter count, ");
+        max_iter_reached = 1;
     }
     printf("number of iterations: %d\n", niter);
     FILE *metricfp = fopen(metricsFilename, "a");
     if (metricfp == NULL) {
         printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
     } else {
-        fprintf(metricfp, "%d ", niter);
+        fprintf(metricfp, "%d %d ", niter, max_iter_reached);
         fclose(metricfp);
     }
 
@@ -1047,8 +1051,10 @@ SGPAR_API int sgp_power_iter_normLap(sgp_real_t *u, sgp_graph_t g, const char* m
         sgp_vec_dotproduct(&dotprod, u, v, n);
         niter++;
     }
+    int max_iter_reached = 0;
     if (niter == iter_max) {
         printf("exceeded max iter count, ");
+        max_iter_reached = 1;
     }
     printf("number of iterations: %d\n", niter);
     free(vec1);
@@ -1057,7 +1063,7 @@ SGPAR_API int sgp_power_iter_normLap(sgp_real_t *u, sgp_graph_t g, const char* m
     if (metricfp == NULL) {
         printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
     } else {
-        fprintf(metricfp, "%d ", niter);
+        fprintf(metricfp, "%d %d ", niter, max_iter_reached);
         fclose(metricfp);
     }
 
@@ -1123,8 +1129,10 @@ SGPAR_API int sgp_power_iter_normLap_final(sgp_real_t *u, sgp_graph_t g, const c
         sgp_vec_dotproduct(&dotprod, u, v, n);
         niter++;
     }
+    int max_iter_reached = 0;
     if (niter == iter_max) {
         printf("exceeded max iter count, ");
+        max_iter_reached = 1;
     }
     printf("number of iterations: %d\n", niter);
     free(vec1);
@@ -1134,7 +1142,7 @@ SGPAR_API int sgp_power_iter_normLap_final(sgp_real_t *u, sgp_graph_t g, const c
     if (metricfp == NULL) {
         printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
     } else {
-        fprintf(metricfp, "%d ", niter);
+        fprintf(metricfp, "%d %d ", niter, max_iter_reached);
         fclose(metricfp);
     }
 
