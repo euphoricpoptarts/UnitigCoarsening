@@ -11,6 +11,7 @@ using namespace sgpar;
 int main(int argc, char **argv) {
 
     if (argc < 3) {
+        printf("You input %d args\n", argc);
         fprintf(stderr, "Usage: %s filename.csr metricsfilename.txt\n", argv[0]);
         return EXIT_FAILURE;
     }
@@ -35,6 +36,12 @@ int main(int argc, char **argv) {
     int num_iter = 100;
     if (argc >= 7) {
         num_iter = atoi(argv[6]);
+    }
+
+    if(argc >= 9) {
+        double new_tol = atof(argv[8]);
+
+        CHECK_SGPAR( change_tol(new_tol) );
     }
 
     sgp_graph_t g;

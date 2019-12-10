@@ -106,7 +106,7 @@ typedef double sgp_real_t;
 #define SGPAR_COARSENING_MAXLEVELS 100
 #endif
 
-#define SGPAR_POWERITER_TOL 1e-10
+static sgp_real_t SGPAR_POWERITER_TOL = 1e-10;
 #define SGPAR_POWERITER_ITER 100000000
 
 typedef struct {
@@ -136,6 +136,12 @@ typedef struct {
                status, __LINE__);                                              \
         return EXIT_FAILURE;                                                   \
     }                                                                          \
+}
+
+SGPAR_API int change_tol(sgp_real_t new_tol){
+    SGPAR_POWERITER_TOL = new_tol;
+
+    return EXIT_SUCCESS;
 }
 
 SGPAR_API double sgp_timer() {
@@ -1475,7 +1481,7 @@ SGPAR_API int sgp_free_graph(sgp_graph_t *g) {
 SGPAR_API int sgp_load_partition(sgp_vid_t *part, int size, char *part_filename){
     FILE *infp = fopen(part_filename, "rb");
     if (infp == NULL) {
-        printf("Error: Could not open input file. Exiting ...\n");
+        printf("Error: Could not open partition file. Exiting ...\n");
         return EXIT_FAILURE;
     }
 
@@ -1491,10 +1497,10 @@ SGPAR_API int sgp_load_partition(sgp_vid_t *part, int size, char *part_filename)
 //partitions assumed to same vertex labellings
 SGPAR_API int compute_partition_edit_distance(sgp_vid_t* part1, sgp_vid_t* part2, int size, unsigned int *diff){
 
-    int d = 0;
-    int d2 = 0;
+    int d = 0; //difference if partition labelling is same
+    int d2 = 0; //difference if partition labelling is swapped
     for(int i = 0; i < size; i++){
-        if(part1[i] == part2[i]){
+        if(part1[i] != part2[i]){
             d++;
         } else {
             d2++;
@@ -1502,9 +1508,9 @@ SGPAR_API int compute_partition_edit_distance(sgp_vid_t* part1, sgp_vid_t* part2
     }
 
     if(d < d2){
-        *diff = d;
+        *diff = d/2;
     } else {
-        *diff = d2;
+        *diff = d2/2;
     }
     return EXIT_SUCCESS;
 }
