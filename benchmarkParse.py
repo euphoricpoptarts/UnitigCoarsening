@@ -9,7 +9,7 @@ from threading import Thread
 
 
 tolerances = ["1e-7","1e-8","1e-9","1e-10","1e-11","1e-12","1e-13","1e-14","1e-15"]
-sysCall = "./sgpar {} {} 5 0 0 100 {} {} > /dev/null"
+sysCall = "./sgpar {} {} 5 0 0 10 {} {} > /dev/null"
 form = "{} a {} {} {} {} {}"
 refineForm = "{} {}"
 
