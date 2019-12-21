@@ -9,27 +9,43 @@ from threading import Thread
 
 
 tolerances = ["1e-7","1e-8","1e-9","1e-10","1e-11","1e-12","1e-13","1e-14","1e-15"]
-sysCall = "./sgpar {} {} 5 0 0 10 {} {} > /dev/null"
-form = "{} a {} {} {} {} {}"
-refineForm = "{} {}"
+sysCall = "./sgpar {} {} 0 0 0 10 {} {} > /dev/null"
+form = "{} a {} {} {} b {}"
 
-def concatStatWithSpace(stats, stat):
-    return ' '.join(map(str, stats[stat]))
+def concatStatWithSpace(stat):
+    return ' '.join(map(str, stat))
+
+class MultilevelData:
+    def __init__(self):
+        self.niters = []
+        self.maxIters = []
+        self.edgeCuts = []
+        self.swaps = []
+
+class MultilevelStats:
+    def __init__(self):
+        self.refineMean = []
+        self.refineMin = []
+        self.refineStdDev = []
+        self.maxItersReached = []
+        self.edgeCutMean = []
+        self.edgeCutMin = []
+        self.edgeCutStdDev = []
+        self.swapsMean = []
+        self.swapsMin = []
+        self.swapsStdDev = []
+
+def printStat(outFormat, fieldsByLevel, outfile):
+    levelN = 0
+    for field in fieldsByLevel:
+        print(outFormat.format(levelN, concatStatWithSpace(field)), file=outfile)
+        levelN += 1
 
 def processGraph(filepath, bestPart, logFile):
     statsByTol = {}
-    statsByTol["refineMean"] = []
-    statsByTol["refineMin"] = []
-    statsByTol["refineStdDev"] = []
-    statsByTol["totalMaxIter"] = []
     statsByTol["timeMean"] = []
     statsByTol["timeMin"] = []
-    statsByTol["edgeCutMean"] = []
-    statsByTol["edgeCutMin"] = []
-    statsByTol["edgeCutStdDev"] = []
-    statsByTol["swapsMean"] = []
-    statsByTol["swapsMin"] = []
-    statsByTol["swapsStdDev"] = []
+    statsByTol["coarsenLevel"] = []
     for tolerance in tolerances:
         metricsPath = "metrics/group{}.txt".format(secrets.token_urlsafe(10))
         print("running sgpar on {} with tol {}, comparing to {}, data logged in {}".format(filepath, tolerance, bestPart, metricsPath))
@@ -41,55 +57,86 @@ def processGraph(filepath, bestPart, logFile):
             print("error produced by:")
             print(sysCall.format(filepath, metricsPath, bestPart, tolerance))
         else:
-            refineIters = []
             totalTimes = []
             coarsenTimes = []
             refineTimes = []
-            edgeCuts = []
-            partSwaps = []
-            maxIterReached = 0
+            multilevel = []
 
             cnt = 0
             with open(metricsPath) as fp:
                 for line in fp:
                     parsed = parse(form, line)
-                    refineData = parse(refineForm, parsed[0])
-                    refineIters.append(int(refineData[0]))
-                    maxIterReached += int(refineData[1])
+                    refineData = parsed[0].split()
+                    niters = refineData[0::2]
+                    niters.reverse()
+                    maxIterReached = refineData[1::2]
+                    maxIterReached.reverse()
                     totalTimes.append(float(parsed[1]))
                     coarsenTimes.append(float(parsed[2]))
                     refineTimes.append(float(parsed[3]))
-                    edgeCuts.append(int(parsed[4]))
-                    partSwaps.append(int(parsed[5]))
+                    multilevelResults = parsed[4].split()
+                    multilevelEdgeCuts = multilevelResults[0::2]
+                    multilevelEdgeCuts.reverse()
+                    multilevelSwaps = multilevelResults[1::2]
+                    multilevelSwaps.reverse()
+
+                    data = zip(niters, maxIterReached, multilevelEdgeCuts, multilevelSwaps)
+
+                    dataCount = 0
+                    for datum in data:
+                        dataCount += 1
+                        if len(multilevel) < dataCount:
+                            multilevel.append(MultilevelData())
+                        multilevel[dataCount-1].niters.append(int(datum[0]))
+                        multilevel[dataCount-1].maxIters.append(int(datum[1]))
+                        multilevel[dataCount-1].edgeCuts.append(int(datum[2]))
+                        multilevel[dataCount-1].swaps.append(int(datum[3]))
+
                     cnt += 1
 
-            statsByTol["refineMean"].append(mean(refineIters))
-            statsByTol["refineMin"].append(min(refineIters))
-            statsByTol["refineStdDev"].append(stdev(refineIters))
-            statsByTol["totalMaxIter"].append(maxIterReached)
+            levelCount = 0
+            for level in multilevel:
+                levelCount += 1
+                if len(statsByTol["coarsenLevel"]) < levelCount:
+                    levelStats = MultilevelStats()
+                    statsByTol["coarsenLevel"].append(levelStats)
+                levelStats = statsByTol["coarsenLevel"][levelCount - 1]
+                levelStats.refineMean.append(mean(level.niters))
+                levelStats.refineMin.append(min(level.niters))
+                if len(level.niters) > 1:
+                    levelStats.refineStdDev.append(stdev(level.niters))
+                else:
+                    levelStats.refineStdDev.append(0)
+                levelStats.edgeCutMean.append(mean(level.edgeCuts))
+                levelStats.edgeCutMin.append(min(level.edgeCuts))
+                if len(level.edgeCuts) > 1:
+                    levelStats.edgeCutStdDev.append(stdev(level.edgeCuts))
+                else:
+                    levelStats.edgeCutStdDev.append(0)
+                levelStats.swapsMean.append(mean(level.swaps))
+                levelStats.swapsMin.append(min(level.swaps))
+                if len(level.swaps) > 1:
+                    levelStats.swapsStdDev.append(stdev(level.swaps))
+                else:
+                    levelStats.swapsStdDev.append(0)
+                levelStats.maxItersReached.append(sum(level.maxIters))
             statsByTol["timeMean"].append(mean(totalTimes))
             statsByTol["timeMin"].append(min(totalTimes))
-            statsByTol["edgeCutMean"].append(mean(edgeCuts))
-            statsByTol["edgeCutMin"].append(min(edgeCuts))
-            statsByTol["edgeCutStdDev"].append(stdev(edgeCuts))
-            statsByTol["swapsMean"].append(mean(partSwaps))
-            statsByTol["swapsMin"].append(min(partSwaps))
-            statsByTol["swapsStdDev"].append(stdev(partSwaps))
 
     output = open(logFile, "w")
     print("tolerances: {}".format(' '.join(tolerances)), file=output)
-    print("mean refine iterations: {}".format(concatStatWithSpace(statsByTol, "refineMean")), file=output)
-    print("min refine iterations: {}".format(concatStatWithSpace(statsByTol, "refineMin")), file=output)
-    print("refine iterations std deviation: {}".format(concatStatWithSpace(statsByTol, "refineStdDev")), file=output)
-    print("times max iter reached: {}".format(concatStatWithSpace(statsByTol, "totalMaxIter")), file=output)
-    print("mean total time: {}".format(concatStatWithSpace(statsByTol, "timeMean")), file=output)
-    print("min total time: {}".format(concatStatWithSpace(statsByTol, "timeMin")), file=output)
-    print("mean edge cut: {}".format(concatStatWithSpace(statsByTol, "edgeCutMean")), file=output)
-    print("min edge cut: {}".format(concatStatWithSpace(statsByTol, "edgeCutMin")), file=output)
-    print("edge cut std deviation: {}".format(concatStatWithSpace(statsByTol, "edgeCutStdDev")), file=output)
-    print("mean swaps to best partition: {}".format(concatStatWithSpace(statsByTol, "swapsMean")), file=output)
-    print("min swaps to best partition: {}".format(concatStatWithSpace(statsByTol, "swapsMin")), file=output)
-    print("swaps to best partition std deviation: {}".format(concatStatWithSpace(statsByTol, "swapsStdDev")), file=output)
+    print("mean total time: {}".format(concatStatWithSpace(statsByTol["timeMean"])), file=output)
+    print("min total time: {}".format(concatStatWithSpace(statsByTol["timeMin"])), file=output)
+    printStat("coarsen level {} mean refine iterations: {}", [level.refineMean for level in statsByTol["coarsenLevel"]], output)
+    printStat("coarsen level {} min refine iterations: {}", [level.refineMin for level in statsByTol["coarsenLevel"]], output)
+    printStat("coarsen level {} refine iterations std deviation: {}", [level.refineStdDev for level in statsByTol["coarsenLevel"]], output)
+    printStat("coarsen level {} times max iter reached: {}", [level.maxItersReached for level in statsByTol["coarsenLevel"]], output)
+    printStat("coarsen level {} mean edge cut: {}", [level.edgeCutMean for level in statsByTol["coarsenLevel"]], output)
+    printStat("coarsen level {} min edge cut: {}", [level.edgeCutMin for level in statsByTol["coarsenLevel"]], output)
+    printStat("coarsen level {} edge cut std deviation: {}", [level.edgeCutStdDev for level in statsByTol["coarsenLevel"]], output)
+    printStat("coarsen level {} mean swaps to best partition: {}", [level.swapsMean for level in statsByTol["coarsenLevel"]], output)
+    printStat("coarsen level {} min swaps to best partition: {}", [level.swapsMin for level in statsByTol["coarsenLevel"]], output)
+    printStat("coarsen level {} swaps to best partition std deviation: {}", [level.swapsStdDev for level in statsByTol["coarsenLevel"]], output)
     print("end {} processing".format(filepath))
 
 def main():
