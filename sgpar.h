@@ -58,6 +58,8 @@ namespace sgpar {
 #define SGPAR_ASSERT(expr) 
 #endif
 
+//typedef struct { uint64_t niters; int max_iter_reached; long edge_cut; long swaps; } sgp_refine_stats;
+
 /**********************************************************
  *  PCG Random Number Generator
  **********************************************************
@@ -1497,7 +1499,7 @@ SGPAR_API int sgp_load_partition(sgp_vid_t *part, int size, char *part_filename)
 }
 
 //partitions assumed to same vertex labellings
-SGPAR_API int compute_partition_edit_distance(sgp_vid_t* part1, sgp_vid_t* part2, int size, unsigned int *diff){
+SGPAR_API int compute_partition_edit_distance(const sgp_vid_t* part1, const sgp_vid_t* part2, int size, unsigned int *diff){
 
     int d = 0; //difference if partition labelling is same
     int d2 = 0; //difference if partition labelling is swapped
@@ -1526,6 +1528,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                   const int perc_imbalance_allowed,
                                   const sgp_graph_t g,
                                   const char *metricsFilename,
+                                  const sgp_vid_t * best_part,
+                                  const int compare_part,
                                   sgp_pcg32_random_t* rng) {
 
     printf("sgpar settings: %d %lu %.16f\n", 
@@ -1550,6 +1554,11 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     double start_time = sgp_timer();
     double coarsening_sort_time = 0;
 
+    sgp_pcg32_random_t coarsen_rng;
+    coarsen_rng.state = 0xfedcba9876543210;
+    coarsen_rng.inc = 1;
+
+    //generate all coarse graphs
     while ((coarsening_level < (SGPAR_COARSENING_MAXLEVELS-1)) && 
            (g_all[coarsening_level].nvertices > SGPAR_COARSENING_VTX_CUTOFF) &&
            (coarsening_alg != 5)) {
@@ -1562,7 +1571,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                             vcmap[coarsening_level-1],
                                             g_all[coarsening_level-1], 
                                             coarsening_level, coarsening_alg, 
-                                            rng, &coarsening_sort_time) );
+                                            &coarsen_rng, &coarsening_sort_time) );
     }
 
     int num_coarsening_levels = coarsening_level+1;
@@ -1574,6 +1583,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     eigenvec[num_coarsening_levels-1] = (sgp_real_t *) 
                                         malloc(gc_nvertices*sizeof(sgp_real_t));
     SGPAR_ASSERT(eigenvec[num_coarsening_levels-1] != NULL);
+    //randomly initialize guess eigenvector for coarsest graph
     for (sgp_vid_t i=0; i<gc_nvertices; i++) {
         eigenvec[num_coarsening_levels-1][i] = 
                             ((double) sgp_pcg32_random_r(rng))/UINT32_MAX;
@@ -1591,14 +1601,34 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         }
     }
 
+    sgp_real_t* prolonged_eigenvec[SGPAR_COARSENING_MAXLEVELS];
+
     for (int l=num_coarsening_levels-2; l>=0; l--) {
         sgp_vid_t gcl_n = g_all[l].nvertices;
         eigenvec[l] = (sgp_real_t *) malloc(gcl_n*sizeof(sgp_real_t));
         SGPAR_ASSERT(eigenvec[l] != NULL);
+
+        prolonged_eigenvec[l + 1] = (sgp_real_t*)malloc(gcl_n * sizeof(sgp_real_t));
+        SGPAR_ASSERT(prolonged_eigenvec[l+1] != NULL);
+        //prolong eigenvector from coarser level to finer level
         for (sgp_vid_t i=0; i<gcl_n; i++) {
             eigenvec[l][i] = eigenvec[l+1][vcmap[l][i]];
+            prolonged_eigenvec[l + 1][i] = eigenvec[l][i];
         }
         free(eigenvec[l+1]);
+
+        //prolong l+1 eigenvector to finest level
+        for (int l2 = l - 1; l2 >= 0; l2--) {
+            sgp_real_t* prev_prolonged = prolonged_eigenvec[l + 1];
+            sgp_vid_t gcl2_n = g_all[l2].nvertices;
+            prolonged_eigenvec[l + 1] = (sgp_real_t*)malloc(gcl2_n * sizeof(sgp_real_t));
+            SGPAR_ASSERT(prolonged_eigenvec[l + 1] != NULL);
+            for (sgp_vid_t i = 0; i < gcl2_n; i++) {
+                prolonged_eigenvec[l + 1][i] = prev_prolonged[vcmap[l2][i]];
+            }
+            free(prev_prolonged);
+        }
+
         free(vcmap[l]);
 
         sgp_vec_normalize(eigenvec[l], gcl_n);
@@ -1642,20 +1672,47 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         sgp_free_graph(&g_all[i]);
     }
 
-    sgp_compute_partition(part, num_partitions, edge_cut, 
-                          perc_imbalance_allowed, 
-                          local_search_alg,
-                          eigenvec[0], g);
-
     FILE *metricfp = fopen(metricsFilename, "a");
     if (metricfp == NULL) {
         printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
     } else {
-        fprintf(metricfp, "a %3.3lf %3.3lf %3.3lf %li ", 
+        fprintf(metricfp, "a %3.3lf %3.3lf %3.3lf b", 
             fin_final_level_time-start_time,
             fin_coarsening_time-start_time,
-            fin_final_level_time-fin_coarsening_time,
-            *edge_cut);
+            fin_final_level_time-fin_coarsening_time);
+
+        for (int l = num_coarsening_levels - 1; l >= 1; l--) {
+            sgp_compute_partition(part, num_partitions, edge_cut,
+                perc_imbalance_allowed,
+                local_search_alg,
+                prolonged_eigenvec[l], g);
+
+            free(prolonged_eigenvec[l]);
+            
+            unsigned int part_diff = 0;
+            if (compare_part) {
+                CHECK_SGPAR(compute_partition_edit_distance(part, best_part, g.nvertices, &part_diff));
+            }
+
+            fprintf(metricfp, " %lu %lu", *edge_cut, part_diff);
+        }
+
+    }
+
+    
+
+    sgp_compute_partition(part, num_partitions, edge_cut,
+        perc_imbalance_allowed,
+        local_search_alg,
+        eigenvec[0], g);
+
+    unsigned int part_diff = 0;
+    if (compare_part) {
+        CHECK_SGPAR(compute_partition_edit_distance(part, best_part, g.nvertices, &part_diff));
+    }
+
+    if (metricfp != NULL) {
+        fprintf(metricfp, " %lu %lu\n", *edge_cut, part_diff);
         fclose(metricfp);
     }
 

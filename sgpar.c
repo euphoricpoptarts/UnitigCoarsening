@@ -72,19 +72,10 @@ int main(int argc, char **argv) {
     for (int i=0; i<num_iter; i++) {
         long edgecut = 0;
         CHECK_SGPAR( sgp_partition_graph(part, 2, &edgecut, coarsening_alg, 
-                                        refine_alg, local_search_alg, 0, g, metrics, &rng) );
+                                        refine_alg, local_search_alg, 0, g,
+                                        metrics, best_part, compare_part, &rng) );
 
-        unsigned int part_diff = 0;
-        if(compare_part){
-            CHECK_SGPAR( compute_partition_edit_distance(part, best_part, g.nvertices, &part_diff));
-        }
-        FILE *metricfp = fopen(metrics, "a");
-        if (metricfp == NULL) {
-            printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
-        } else {
-            fprintf(metricfp, "%u\n", part_diff);
-            fclose(metricfp);
-        }
+        
         if (edgecut < edgecut_min) {
             edgecut_min = edgecut;
         }
