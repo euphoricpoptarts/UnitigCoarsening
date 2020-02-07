@@ -158,6 +158,71 @@ SGPAR_API double sgp_timer() {
 #endif
 }
 
+SGPAR_API int sgp_coarsen_heavy_edge_matching(sgp_vid_t* vcmap,
+                                              sgp_vid_t* nvertices_coarse_ptr,
+                                              const sgp_graph_t g,
+                                              const int coarsening_level,
+                                              sgp_pcg32_random_t* rng) {
+
+	sgp_vid_t n = g.nvertices;
+
+	sgp_vid_t* vperm = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
+	SGPAR_ASSERT(vperm != NULL);
+
+	for (sgp_vid_t i = 0; i < n; i++) {
+		vcmap[i] = SGP_INFTY;
+		vperm[i] = i;
+	}
+
+
+	for (sgp_vid_t i = n - 1; i > 0; i--) {
+		sgp_vid_t v_i = vperm[i];
+#ifndef SGPAR_HUGEGRAPHS
+		uint32_t j = (sgp_pcg32_random_r(rng)) % (i + 1);
+#else
+		uint64_t j1 = (sgp_pcg32_random_r(rng)) % (i + 1);
+		uint64_t j2 = (sgp_pcg32_random_r(rng)) % (i + 1);
+		uint64_t j = ((j1 << 32) + j2) % (i + 1);
+#endif 
+		sgp_vid_t v_j = vperm[j];
+		vperm[i] = v_j;
+		vperm[j] = v_i;
+	}
+
+	sgp_vid_t nvertices_coarse = 0;
+	
+	//match the vertices, in random order, with the vertex on their heaviest adjacent edge
+	//if no unmatched adjacent vertex exists, match with self
+	for (sgp_vid_t i = 0; i < n; i++) {
+		sgp_vid_t u = vperm[i];
+		if (vcmap[u] == SGP_INFTY) {
+			sgp_vid_t match = u;
+			sgp_wgt_t max_ewt = 0;
+
+			for (sgp_eid_t j = g.source_offsets[u] + 1;
+				j < g.source_offsets[u + 1]; j++) {
+				sgp_vid_t v = g.destination_indices[j];
+				//v must be unmatched to be considered
+				if (max_ewt < g.eweights[j] && vcmap[v] == SGP_INFTY) {
+					max_ewt = g.eweights[j];
+					match = v;
+				}
+
+			}
+			sgp_vid_t coarse_vtx = nvertices_coarse++;
+			vcmap[u] = coarse_vtx;
+			vcmap[match] = coarse_vtx;//u and match are the same when matching with self
+		}
+	}
+
+	free(vperm);
+
+	*nvertices_coarse_ptr = nvertices_coarse;
+
+	return EXIT_SUCCESS;
+
+}
+
 #ifndef _KOKKOS
 SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap, 
                               sgp_vid_t *nvertices_coarse_ptr, 
@@ -732,7 +797,12 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t *gc, sgp_vid_t *vcmap,
         sgp_vid_t nvertices_coarse;
         sgp_coarsen_HEC(vcmap, &nvertices_coarse, g, coarsening_level, rng);
         gc->nvertices = nvertices_coarse;
-    }
+	}
+	else if (coarsening_alg == 1) {
+		sgp_vid_t nvertices_coarse;
+		sgp_coarsen_heavy_edge_matching(vcmap, &nvertices_coarse, g, coarsening_level, rng);
+		gc->nvertices = nvertices_coarse;
+	}
 
     sgp_build_coarse_graph(gc, vcmap, g, coarsening_level, sort_time_ptr);
 
