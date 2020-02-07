@@ -191,29 +191,54 @@ SGPAR_API int sgp_coarsen_heavy_edge_matching(sgp_vid_t* vcmap,
 
 	sgp_vid_t nvertices_coarse = 0;
 	
-	//match the vertices, in random order, with the vertex on their heaviest adjacent edge
-	//if no unmatched adjacent vertex exists, match with self
-	for (sgp_vid_t i = 0; i < n; i++) {
-		sgp_vid_t u = vperm[i];
-		if (vcmap[u] == SGP_INFTY) {
-			sgp_vid_t match = u;
-			sgp_wgt_t max_ewt = 0;
+    if(coarsening_level == 1){
+        //match each vertex with its first unmatched neighbor
+        for (sgp_vid_t i = 0; i < n; i++) {
+            sgp_vid_t u = vperm[i];
+            if (vcmap[u] == SGP_INFTY) {
+                sgp_vid_t match = u;
 
-			for (sgp_eid_t j = g.source_offsets[u] + 1;
-				j < g.source_offsets[u + 1]; j++) {
-				sgp_vid_t v = g.destination_indices[j];
-				//v must be unmatched to be considered
-				if (max_ewt < g.eweights[j] && vcmap[v] == SGP_INFTY) {
-					max_ewt = g.eweights[j];
-					match = v;
-				}
+                for (sgp_eid_t j = g.source_offsets[u] + 1;
+                    j < g.source_offsets[u + 1]; j++) {
+                    sgp_vid_t v = g.destination_indices[j];
+                    //v must be unmatched to be considered
+                    if (vcmap[v] == SGP_INFTY) {
+                        j = g.source_offsets[u + 1];//break the loop
+                        match = v;
+                    }
 
-			}
-			sgp_vid_t coarse_vtx = nvertices_coarse++;
-			vcmap[u] = coarse_vtx;
-			vcmap[match] = coarse_vtx;//u and match are the same when matching with self
-		}
-	}
+                }
+                sgp_vid_t coarse_vtx = nvertices_coarse++;
+                vcmap[u] = coarse_vtx;
+                vcmap[match] = coarse_vtx;//u and match are the same when matching with self
+            }
+        }
+    }
+    else {        
+        //match the vertices, in random order, with the vertex on their heaviest adjacent edge
+        //if no unmatched adjacent vertex exists, match with self
+        for (sgp_vid_t i = 0; i < n; i++) {
+            sgp_vid_t u = vperm[i];
+            if (vcmap[u] == SGP_INFTY) {
+                sgp_vid_t match = u;
+                sgp_wgt_t max_ewt = 0;
+
+                for (sgp_eid_t j = g.source_offsets[u] + 1;
+                    j < g.source_offsets[u + 1]; j++) {
+                    sgp_vid_t v = g.destination_indices[j];
+                    //v must be unmatched to be considered
+                    if (max_ewt < g.eweights[j] && vcmap[v] == SGP_INFTY) {
+                        max_ewt = g.eweights[j];
+                        match = v;
+                    }
+
+                }
+                sgp_vid_t coarse_vtx = nvertices_coarse++;
+                vcmap[u] = coarse_vtx;
+                vcmap[match] = coarse_vtx;//u and match are the same when matching with self
+            }
+        }
+    }
 
 	free(vperm);
 
@@ -1473,14 +1498,18 @@ SGPAR_API int sgp_improve_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
 SGPAR_API int sgp_load_graph(sgp_graph_t *g, char *csr_filename);
 SGPAR_API int sgp_free_graph(sgp_graph_t *g);
 SGPAR_API int sgp_load_partition(sgp_vid_t *part, int size, char *part_filename);
-SGPAR_API int compute_partition_edit_distance(sgp_vid_t* part1, sgp_vid_t* part2, int size, unsigned int *diff);
-SGPAR_API int sgp_partition_graph(sgp_vid_t *part, sgp_vid_t num_partitions,
-                                  long *edge_cut, 
-                                  int coarsening_alg, int refine_alg,
-                                  int local_search_alg, 
-                                  int perc_imbalance_allowed,
-                                  sgp_graph_t g,
+SGPAR_API int compute_partition_edit_distance(const sgp_vid_t* part1, const sgp_vid_t* part2, int size, unsigned int *diff);
+SGPAR_API int sgp_partition_graph(sgp_vid_t *part, 
+                                  const sgp_vid_t num_partitions,
+                                  long *edge_cut,
+                                  const int coarsening_alg, 
+                                  const int refine_alg,
+                                  const int local_search_alg, 
+                                  const int perc_imbalance_allowed,
+                                  const sgp_graph_t g,
                                   const char *metricsFilename,
+                                  const sgp_vid_t * best_part,
+                                  const int compare_part,
                                   sgp_pcg32_random_t* rng);
 
 
