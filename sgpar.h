@@ -16,6 +16,7 @@
 
 #ifdef _OPENMP
 #include <omp.h>
+#include <stdatomic.h>
 #endif
 
 #ifdef _KOKKOS
@@ -282,49 +283,77 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
     sgp_vid_t *hn = (sgp_vid_t *) malloc(n * sizeof(sgp_vid_t));
     SGPAR_ASSERT(hn != NULL);
 
-    for (sgp_vid_t i=0; i<n; i++) {
-        hn[i] = SGP_INFTY;
-    }
+	omp_lock_t * v_locks = (omp_lock_t*) malloc(n * sizeof(omp_lock_t));
+	SGPAR_ASSERT(v_locks != NULL);
 
-    if (coarsening_level == 1) {
-        for (sgp_vid_t i=0; i<n; i++) {
-            sgp_vid_t adj_size = g.source_offsets[i+1]-g.source_offsets[i];
-            sgp_vid_t offset = (sgp_pcg32_random_r(rng)) % adj_size;
-            // sgp_vid_t offset = 0;
-            hn[i] = g.destination_indices[g.source_offsets[i]+offset];
-        }
-    } else {
-        for (sgp_vid_t i=0; i<n; i++) {
-            sgp_vid_t hn_i = g.destination_indices[g.source_offsets[i]];
-            sgp_wgt_t max_ewt = g.eweights[g.source_offsets[i]];
+#pragma omp parallel
+{
 
-            for (sgp_eid_t j=g.source_offsets[i]+1; 
-                           j<g.source_offsets[i+1]; j++) {
-                if (max_ewt < g.eweights[j]) {
-                    max_ewt = g.eweights[j];
-                    hn_i = g.destination_indices[j];
-                }
+	int tid = omp_get_thread_num();
+	sgp_pcg32_random_t t_rng;
+	t_rng.state = rng->state + tid;
+	t_rng.inc = rng->inc;
 
-            }
-            hn[i] = hn_i;         
-        }
-    }
+	for (sgp_vid_t i = 0; i < n; i++) {
+		hn[i] = SGP_INFTY;
+	}
 
-    sgp_vid_t nvertices_coarse = 0;
-   
-    for (sgp_vid_t i=0; i<n; i++) {
-        sgp_vid_t u = vperm[i];
-        sgp_vid_t v = hn[u];
-        if (vcmap[u] == SGP_INFTY) {
-            if (vcmap[v] == SGP_INFTY) {
-                vcmap[v] = nvertices_coarse++;
-            }
-            vcmap[u] = vcmap[v];
-        }
-    } 
+	if (coarsening_level == 1) {
+#pragma omp for
+		for (sgp_vid_t i = 0; i < n; i++) {
+			sgp_vid_t adj_size = g.source_offsets[i + 1] - g.source_offsets[i];
+			sgp_vid_t offset = (sgp_pcg32_random_r(&t_rng)) % adj_size;
+			// sgp_vid_t offset = 0;
+			hn[i] = g.destination_indices[g.source_offsets[i] + offset];
+		}
+	}
+	else {
+#pragma omp for
+		for (sgp_vid_t i = 0; i < n; i++) {
+			sgp_vid_t hn_i = g.destination_indices[g.source_offsets[i]];
+			sgp_wgt_t max_ewt = g.eweights[g.source_offsets[i]];
+
+			for (sgp_eid_t j = g.source_offsets[i] + 1;
+				j < g.source_offsets[i + 1]; j++) {
+				if (max_ewt < g.eweights[j]) {
+					max_ewt = g.eweights[j];
+					hn_i = g.destination_indices[j];
+				}
+
+			}
+			hn[i] = hn_i;
+		}
+	}
+
+	_Atomic sgp_vid_t nvertices_coarse = 0;
+
+#pragma omp for
+	for (sgp_vid_t i = 0; i < n; i++) {
+		sgp_vid_t u = vperm[i];
+		sgp_vid_t v = hn[u];
+
+		sgp_vid_t less = u, more = v;
+		if (v < u) {
+			less = v;
+			more = u;
+		}
+
+		omp_set_lock(v_locks + less);
+		omp_set_lock(v_locks + more);
+		if (vcmap[u] == SGP_INFTY) {
+			if (vcmap[v] == SGP_INFTY) {
+				vcmap[v] = nvertices_coarse++;
+			}
+			vcmap[u] = vcmap[v];
+		}
+		omp_unset_lock(v_locks + less);
+		omp_unset_lock(v_locks + more);
+	}
+}
     
     free(hn);
     free(vperm);
+	free(v_locks);
 
     *nvertices_coarse_ptr = nvertices_coarse;
     
@@ -749,6 +778,7 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
     SGPAR_ASSERT(gc_source_offsets != NULL);
 
     gc_source_offsets[0] = 0;
+	//prefix sum
     for (sgp_vid_t i=0; i<nc; i++) {
         gc_source_offsets[i+1] = gc_source_offsets[i] + gc_degree[i]; 
     }
@@ -1016,10 +1046,10 @@ SGPAR_API int sgp_power_iter_final(sgp_real_t *u, sgp_graph_t g, const char* met
     }
 
     sgp_real_t tol = SGPAR_POWERITER_TOL;
-    sgp_real_t dotprod = 0;
+    sgp_real_t dotprod = 0, lastDotprod = 1;
     uint64_t niter = 0;
     uint64_t iter_max = (uint64_t) SGPAR_POWERITER_ITER / (uint64_t) n;
-    while ((fabs(dotprod) < (1-tol)) && (niter < iter_max)) {
+    while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
 
         // u = v
         for (sgp_vid_t i=0; i<n; i++) {
@@ -1042,6 +1072,7 @@ SGPAR_API int sgp_power_iter_final(sgp_real_t *u, sgp_graph_t g, const char* met
         }
         sgp_vec_orthogonalize(v, vec1, n); 
         sgp_vec_normalize(v, n);
+		lastDotprod = dotprod;
         sgp_vec_dotproduct(&dotprod, u, v, n); 
         niter++;
         
@@ -1205,8 +1236,8 @@ SGPAR_API int sgp_power_iter_normLap_final(sgp_real_t *u, sgp_graph_t g, const c
     sgp_real_t tol = SGPAR_POWERITER_TOL;
     uint64_t niter = 0;
     uint64_t iter_max = (uint64_t) SGPAR_POWERITER_ITER / (uint64_t) n;
-    sgp_real_t dotprod = 0;
-    while ((fabs(dotprod) < (1-tol)) && (niter < iter_max)) {
+    sgp_real_t dotprod = 0, lastDotprod = 1;
+    while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
 
         // u = v
         for (sgp_vid_t i=0; i<n; i++) {
@@ -1231,6 +1262,7 @@ SGPAR_API int sgp_power_iter_normLap_final(sgp_real_t *u, sgp_graph_t g, const c
 
         // sgp_vec_D_orthogonalize(v, vec1, n);
         sgp_vec_normalize(v, n);
+		lastDotprod = dotprod;
         sgp_vec_dotproduct(&dotprod, u, v, n);
         niter++;
     }
@@ -1584,7 +1616,7 @@ SGPAR_API int sgp_free_graph(sgp_graph_t *g) {
 SGPAR_API int sgp_load_partition(sgp_vid_t *part, int size, char *part_filename){
     FILE *infp = fopen(part_filename, "rb");
     if (infp == NULL) {
-        printf("Error: Could not open partition file. Exiting ...\n");
+        printf("Error: Could not open partition file %s. Exiting ...\n", part_filename);
         return EXIT_FAILURE;
     }
 
