@@ -16,7 +16,6 @@
 
 #ifdef _OPENMP
 #include <omp.h>
-#include <stdatomic.h>
 #endif
 
 #ifdef _KOKKOS
@@ -24,12 +23,15 @@
 #endif
 
 #ifdef __cplusplus
+#include <atomic>
 // #define USE_GNU_PARALLELMODE
 #ifdef USE_GNU_PARALLELMODE
 #include <parallel/algorithm> // for parallel sort
 #else 
 #include <algorithm>          // for STL sort
 #endif
+#else
+#include <stdatomic.h>
 #endif
 
 #ifdef __cplusplus
@@ -286,6 +288,12 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
 	omp_lock_t * v_locks = (omp_lock_t*) malloc(n * sizeof(omp_lock_t));
 	SGPAR_ASSERT(v_locks != NULL);
 
+#ifdef __cplusplus
+	std::atomic<sgp_vid_t> nvertices_coarse(0);
+#else
+    _Atomic sgp_vid_t nvertices_coarse = 0;
+#endif
+
 #pragma omp parallel
 {
 
@@ -297,6 +305,8 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
 	for (sgp_vid_t i = 0; i < n; i++) {
 		hn[i] = SGP_INFTY;
 	}
+
+#pragma omp barrier
 
 	if (coarsening_level == 1) {
 #pragma omp for
@@ -325,7 +335,10 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
 		}
 	}
 
-	_Atomic sgp_vid_t nvertices_coarse = 0;
+#pragma omp for
+    for(sgp_vid_t i = 0; i < n; i++){
+        omp_init_lock(v_locks + i);
+    }
 
 #pragma omp for
 	for (sgp_vid_t i = 0; i < n; i++) {
@@ -346,9 +359,14 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
 			}
 			vcmap[u] = vcmap[v];
 		}
-		omp_unset_lock(v_locks + less);
 		omp_unset_lock(v_locks + more);
+		omp_unset_lock(v_locks + less);
 	}
+
+#pragma omp for
+    for(sgp_vid_t i = 0; i < n; i++){
+        omp_destroy_lock(v_locks + i);
+    }
 }
     
     free(hn);
