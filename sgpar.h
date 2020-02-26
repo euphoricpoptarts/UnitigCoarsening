@@ -710,6 +710,7 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
     int source_index = 0;
 
 #pragma omp for
+	//map fine edges to coarse edges
     for (sgp_eid_t i=0; i<nEdges; i++) {
         if(!thread_initialized){
             source_index = binary_search_find_source_index(g.source_offsets, 0, n, i);
@@ -755,7 +756,7 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
     *sort_time += (sgp_timer() - elt);
     nEdges = binary_search_find_first_self_loop(((edge_triple_t *) edges_uvw), 0, nEdges);
     sgp_vid_t nc = gc->nvertices;
-    sgp_vid_t *gc_degree = (sgp_vid_t *) malloc(nc*sizeof(sgp_vid_t));
+	_Atomic sgp_vid_t *gc_degree = (_Atomic sgp_vid_t *) malloc(nc*sizeof(_Atomic sgp_vid_t));
     SGPAR_ASSERT(gc_degree != NULL);
 
     for (sgp_vid_t i=0; i<nc; i++) {
@@ -763,74 +764,134 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
     }
 
     gc_degree[0]++;
-    for (sgp_vid_t i=1; i<nEdges; i++) {
-        sgp_vid_t prev_u = edges_uvw[3*(i-1)];
-        sgp_vid_t prev_v = edges_uvw[3*(i-1)+1];
-        sgp_vid_t curr_u = edges_uvw[3*i];
-        sgp_vid_t curr_v = edges_uvw[3*i+1];
-        if ((curr_u != prev_u) || (curr_v != prev_v)) {
-            gc_degree[curr_u]++;
-        }
-    }
+	//count unique coarse edges
 
-    sgp_eid_t *gc_source_offsets = (sgp_eid_t *) 
-                                   malloc((gc->nvertices+1)*sizeof(sgp_eid_t));
-    SGPAR_ASSERT(gc_source_offsets != NULL);
+#pragma omp parallel{
 
-    gc_source_offsets[0] = 0;
-	//prefix sum
-    for (sgp_vid_t i=0; i<nc; i++) {
-        gc_source_offsets[i+1] = gc_source_offsets[i] + gc_degree[i]; 
-    }
-    sgp_eid_t gc_nedges = gc_source_offsets[nc]/2;
+	sgp_vid_t total_threads = omp_get_num_threads();
+	sgp_vid_t t_id = omp_get_thread_num();
 
-    sgp_vid_t *gc_destination_indices = (sgp_vid_t *) 
-                                   malloc(2*gc_nedges*sizeof(sgp_eid_t));
-    SGPAR_ASSERT(gc_destination_indices != NULL);
+	sgp_eid_t width = (nEdges - 1) / total_threads;
+	sgp_eid_t start_e = 1 + width * t_id;
+	sgp_eid_t end_e = start_e + width;
+	if (end_e > nEdges) {
+		end_e = nEdges;
+	}
 
-    sgp_wgt_t *gc_eweights = (sgp_wgt_t *) 
-                                   malloc(2*gc_nedges*sizeof(sgp_wgt_t));
-    SGPAR_ASSERT(gc_eweights != NULL);
+#pragma omp for
+	for (sgp_vid_t i = 1; i < nEdges; i++) {
+		sgp_vid_t prev_u = edges_uvw[3 * (i - 1)];
+		sgp_vid_t prev_v = edges_uvw[3 * (i - 1) + 1];
+		sgp_vid_t curr_u = edges_uvw[3 * i];
+		sgp_vid_t curr_v = edges_uvw[3 * i + 1];
+		if ((curr_u != prev_u) || (curr_v != prev_v)) {
+			gc_degree[curr_u]++;
+		}
+	}
 
-    for (sgp_vid_t i=0; i<nc; i++) {
-        gc_degree[i] = 0;
-    }
+#pragma omp single
+	{
+		sgp_eid_t* gc_source_offsets = (sgp_eid_t*)
+			malloc((gc->nvertices + 1) * sizeof(sgp_eid_t));
+		SGPAR_ASSERT(gc_source_offsets != NULL);
 
-    gc_degree[0] = 1;
-    gc_destination_indices[0] = edges_uvw[1];
-    gc_eweights[0] = edges_uvw[2];
-    for (sgp_eid_t i=1; i<nEdges; i++) { 
-        sgp_vid_t curr_u = edges_uvw[3*i];
-        sgp_vid_t curr_v = edges_uvw[3*i+1];
+		gc_source_offsets[0] = 0;
+	}
 
-        sgp_vid_t prev_u = edges_uvw[3*(i-1)];
-        sgp_vid_t prev_v = edges_uvw[3*(i-1)+1];
-        sgp_eid_t eloc   = gc_source_offsets[curr_u] + gc_degree[curr_u];
-        if ((curr_u != prev_u) || (curr_v != prev_v)) {
-            gc_destination_indices[eloc] = curr_v;
-            gc_eweights[eloc] = edges_uvw[3*i+2];
-            gc_degree[curr_u]++;
-        } else {
-            gc_eweights[eloc-1] += edges_uvw[3*i+2];
-        }
-    }
+	//prefix sum for source_offsets
+#pragma omp single
+	for (sgp_vid_t i = 0; i < nc; i++) {
+		gc_source_offsets[i + 1] = gc_source_offsets[i] + gc_degree[i];
+	}
 
-    gc->nedges = gc_nedges;
-    gc->destination_indices = gc_destination_indices;
-    gc->source_offsets = gc_source_offsets;
-    gc->eweights = gc_eweights;
+	sgp_eid_t gc_nedges = gc_source_offsets[nc] / 2;
 
-    gc->weighted_degree = (sgp_wgt_t *) malloc(nc * sizeof(sgp_wgt_t));
-    SGPAR_ASSERT(gc->weighted_degree != NULL);
+#pragma omp single
+		sgp_vid_t* gc_destination_indices = (sgp_vid_t*)
+			malloc(2 * gc_nedges * sizeof(sgp_eid_t));
+#pragma omp single
+		SGPAR_ASSERT(gc_destination_indices != NULL);
+#pragma omp single
+		sgp_wgt_t * gc_eweights = (sgp_wgt_t*)
+			malloc(2 * gc_nedges * sizeof(sgp_wgt_t));
+#pragma omp single
+		SGPAR_ASSERT(gc_eweights != NULL);
 
-    sgp_vid_t gcn = gc->nvertices;
-    for (sgp_vid_t i=0; i<gcn; i++) {
-        sgp_wgt_t degree_wt_i = 0;
-        for (sgp_eid_t j=gc->source_offsets[i]; j<gc->source_offsets[i+1]; j++) {
-            degree_wt_i += gc->eweights[j];
-        }
-        gc->weighted_degree[i] = degree_wt_i;
-    }
+#pragma omp for
+	for (sgp_vid_t i = 0; i < nc; i++) {
+		gc_degree[i] = 0;
+	}
+
+#pragma omp single
+	{
+		gc_degree[0] = 1;
+		gc_destination_indices[0] = edges_uvw[1];
+		gc_eweights[0] = edges_uvw[2];
+	}
+
+	//don't adjust the start edge for thread 0
+	if (t_id > 0) {
+		sgp_vid_t curr_u = edges_uvw[3 * start_e];
+		sgp_vid_t prev_u = edges_uvw[3 * (start_e - 1)];
+		while (curr_u == prev_u && start_e < end_e) {
+			start_e++;
+			curr_u = edges_uvw[3 * start_e];
+			prev_u = edges_uvw[3 * (start_e - 1)];
+		}
+	}
+
+	if (start_e < end_e && end_e < nEdges) {
+		sgp_vid_t curr_u = edges_uvw[3 * end_e];
+		sgp_vid_t prev_u = edges_uvw[3 * (end_e - 1)];
+		while (curr_u == prev_u && end_e < nEdges) {
+			end_e++;
+			if (end_e < nEdges) {
+				curr_u = edges_uvw[3 * end_e];
+				prev_u = edges_uvw[3 * (end_e - 1)];
+			}
+		}
+	}
+
+	//combine weights of like coarse edges and write to destination_indices
+	for (sgp_eid_t i = start_e; i < end_e; i++) {
+		sgp_vid_t curr_u = edges_uvw[3 * i];
+		sgp_vid_t curr_v = edges_uvw[3 * i + 1];
+
+		sgp_vid_t prev_u = edges_uvw[3 * (i - 1)];
+		sgp_vid_t prev_v = edges_uvw[3 * (i - 1) + 1];
+		sgp_eid_t eloc = gc_source_offsets[curr_u] + gc_degree[curr_u];
+		if ((curr_u != prev_u) || (curr_v != prev_v)) {
+			gc_destination_indices[eloc] = curr_v;
+			gc_eweights[eloc] = edges_uvw[3 * i + 2];
+			//only one thread should ever be working with a given curr_u, so there should be no race condition
+			gc_degree[curr_u]++;
+		}
+		else {
+			gc_eweights[eloc - 1] += edges_uvw[3 * i + 2];
+		}
+	}
+
+#pragma omp single
+	{
+		gc->nedges = gc_nedges;
+		gc->destination_indices = gc_destination_indices;
+		gc->source_offsets = gc_source_offsets;
+		gc->eweights = gc_eweights;
+
+		gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
+		SGPAR_ASSERT(gc->weighted_degree != NULL);
+	}
+
+	sgp_vid_t gcn = gc->nvertices;
+#pragma omp for
+	for (sgp_vid_t i = 0; i < gcn; i++) {
+		sgp_wgt_t degree_wt_i = 0;
+		for (sgp_eid_t j = gc->source_offsets[i]; j < gc->source_offsets[i + 1]; j++) {
+			degree_wt_i += gc->eweights[j];
+		}
+		gc->weighted_degree[i] = degree_wt_i;
+	}
+}
 
 
     free(edges_uvw);
