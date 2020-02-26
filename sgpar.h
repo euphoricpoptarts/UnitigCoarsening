@@ -774,7 +774,12 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
     *sort_time += (sgp_timer() - elt);
     nEdges = binary_search_find_first_self_loop(((edge_triple_t *) edges_uvw), 0, nEdges);
     sgp_vid_t nc = gc->nvertices;
-	_Atomic sgp_vid_t *gc_degree = (_Atomic sgp_vid_t *) malloc(nc*sizeof(_Atomic sgp_vid_t));
+
+#ifdef __cplusplus
+	std::atomic<sgp_vid_t> * gc_degree = (std::atomic<sgp_vid_t> *) malloc(nc * sizeof(std::atomic<sgp_vid_t>));
+#else
+	_Atomic sgp_vid_t* gc_degree = (_Atomic sgp_vid_t*) malloc(nc * sizeof(_Atomic sgp_vid_t));
+#endif
     SGPAR_ASSERT(gc_degree != NULL);
 
     for (sgp_vid_t i=0; i<nc; i++) {
