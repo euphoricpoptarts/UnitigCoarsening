@@ -1,8 +1,8 @@
 .POSIX:
 CXX      = g++
 CC       = gcc
-CXXFLAGS = -Wall -O3
-CFLAGS   = -Wall -O3 -std=c99
+CXXFLAGS = -Wall -O3 -D USE_GNU_PARALLELMODE
+CFLAGS   = -Wall -O3 -std=c11
 OMPFLAGS = -fopenmp
 LDLIBS   = 
 

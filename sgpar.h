@@ -776,20 +776,30 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
     sgp_vid_t nc = gc->nvertices;
 
 #ifdef __cplusplus
-	std::atomic<sgp_vid_t> * gc_degree = (std::atomic<sgp_vid_t> *) malloc(nc * sizeof(std::atomic<sgp_vid_t>));
+	std::atomic<sgp_vid_t> gc_degree[nc] = {};
 #else
 	_Atomic sgp_vid_t* gc_degree = (_Atomic sgp_vid_t*) malloc(nc * sizeof(_Atomic sgp_vid_t));
 #endif
     SGPAR_ASSERT(gc_degree != NULL);
-
     for (sgp_vid_t i=0; i<nc; i++) {
         gc_degree[i] = 0;
     }
 
     gc_degree[0]++;
-	//count unique coarse edges
 
-#pragma omp parallel{
+    //have to ensure these are shared variables, so declare them outside parallel region
+    //see malloc initialization of these arrays for explanation
+    sgp_vid_t* gc_destination_indices;
+    sgp_wgt_t * gc_eweights;
+
+    //I guess because of the (nc + 1), the size of the array is not a shared variable
+    //so it won't be a shared array if declared in the parallel region
+    sgp_eid_t* gc_source_offsets = (sgp_eid_t*)	malloc((nc + 1) * sizeof(sgp_eid_t));
+    SGPAR_ASSERT(gc_source_offsets != NULL);
+    gc_source_offsets[0] = 0;
+
+#pragma omp parallel
+{
 
 	sgp_vid_t total_threads = omp_get_num_threads();
 	sgp_vid_t t_id = omp_get_thread_num();
@@ -801,6 +811,7 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
 		end_e = nEdges;
 	}
 
+	//count unique coarse edges
 #pragma omp for
 	for (sgp_vid_t i = 1; i < nEdges; i++) {
 		sgp_vid_t prev_u = edges_uvw[3 * (i - 1)];
@@ -812,33 +823,32 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
 		}
 	}
 
-#pragma omp single
-	{
-		sgp_eid_t* gc_source_offsets = (sgp_eid_t*)
-			malloc((gc->nvertices + 1) * sizeof(sgp_eid_t));
-		SGPAR_ASSERT(gc_source_offsets != NULL);
-
-		gc_source_offsets[0] = 0;
-	}
+#pragma omp barrier
 
 	//prefix sum for source_offsets
 #pragma omp single
+{
 	for (sgp_vid_t i = 0; i < nc; i++) {
 		gc_source_offsets[i + 1] = gc_source_offsets[i] + gc_degree[i];
 	}
+}
 
 	sgp_eid_t gc_nedges = gc_source_offsets[nc] / 2;
+    
+#pragma omp single
+{
+    //gc_nedges is not a shared variable so this must be done by one thread
+    //therefore they are not automatically shared, which is why they are declared outside the parallel region
+    gc_destination_indices = (sgp_vid_t*)
+        malloc(2 * gc_nedges * sizeof(sgp_eid_t));
+    gc_eweights = (sgp_wgt_t*)
+        malloc(2 * gc_nedges * sizeof(sgp_wgt_t));
+}
 
-#pragma omp single
-		sgp_vid_t* gc_destination_indices = (sgp_vid_t*)
-			malloc(2 * gc_nedges * sizeof(sgp_eid_t));
-#pragma omp single
-		SGPAR_ASSERT(gc_destination_indices != NULL);
-#pragma omp single
-		sgp_wgt_t * gc_eweights = (sgp_wgt_t*)
-			malloc(2 * gc_nedges * sizeof(sgp_wgt_t));
-#pragma omp single
-		SGPAR_ASSERT(gc_eweights != NULL);
+    SGPAR_ASSERT(gc_destination_indices != NULL);
+    SGPAR_ASSERT(gc_eweights != NULL);
+
+#pragma omp barrier
 
 #pragma omp for
 	for (sgp_vid_t i = 0; i < nc; i++) {
@@ -900,10 +910,9 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
 		gc->destination_indices = gc_destination_indices;
 		gc->source_offsets = gc_source_offsets;
 		gc->eweights = gc_eweights;
-
-		gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
-		SGPAR_ASSERT(gc->weighted_degree != NULL);
 	}
+    gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
+    SGPAR_ASSERT(gc->weighted_degree != NULL);
 
 	sgp_vid_t gcn = gc->nvertices;
 #pragma omp for
@@ -918,7 +927,11 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
 
 
     free(edges_uvw);
+#ifdef __cplusplus
+    //delete[] gc_degree;
+#else
     free(gc_degree);
+#endif
  
     return EXIT_SUCCESS;
 }
