@@ -708,6 +708,61 @@ Kokkos::finalize();
     return EXIT_SUCCESS;
 }
 #else
+
+void parallel_prefix_sum(sgp_eid_t* gc_source_offsets, sgp_vid_t nc, int t_id, int total_threads) {
+
+	//tree-reduction upwards first (largest index contains sum of whole array)
+	sgp_vid_t multiplier = 1, prev_multiplier = 1;
+	while (multiplier < nc) {
+		multiplier <<= 1;
+		sgp_vid_t pos = 0;
+		//prevent unsigned rollover
+		if (nc >= t_id * multiplier) {
+			//standard reduction would have sum of whole array in lowest index
+			//this makes it easier to compute the indices we need to add
+			pos = nc - t_id * multiplier;
+		}
+#pragma omp barrier
+		//strictly greater because gc_source_offsets[0] is always zero
+		while (pos > prev_multiplier) {
+			gc_source_offsets[pos] = gc_source_offsets[pos] + gc_source_offsets[pos - prev_multiplier];
+			//prevent unsigned rollover
+			if (pos >= multiplier * total_threads) {
+				pos -= multiplier * total_threads;
+			}
+			else {
+				pos = 0;
+			}
+		}
+		prev_multiplier = multiplier;
+	}
+
+	//compute left-sums from the root of the tree downwards
+	multiplier >>= 1;
+	sgp_vid_t next_multiplier = multiplier >> 1;
+	while (next_multiplier > 0) {
+		sgp_vid_t pos = 0;
+		if (nc > (next_multiplier + t_id * multiplier)) {
+			pos = nc - (next_multiplier + t_id * multiplier);
+		}
+		//strictly greater because gc_source_offsets[0] is always zero
+#pragma omp barrier
+		while (pos > next_multiplier) {
+			gc_source_offsets[pos] = gc_source_offsets[pos] + gc_source_offsets[pos - next_multiplier];
+			//prevent unsigned rollover
+			if (pos >= multiplier * total_threads) {
+				pos -= multiplier * total_threads;
+			}
+			else {
+				pos = 0;
+			}
+		}
+		multiplier = next_multiplier;
+		next_multiplier >>= 1;
+	}
+#pragma omp barrier
+}
+
 SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc, 
                                      sgp_vid_t *vcmap, 
                                      const sgp_graph_t g, 
@@ -825,12 +880,23 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
 
 #pragma omp barrier
 
+	//copy into source offsets
+	gc_source_offsets[0] = 0;
+#pragma omp for
+	for (sgp_vid_t i = 0; i < nc; i++) {
+		gc_source_offsets[i + 1] = gc_degree[i];
+	}
+
 	//prefix sum for source_offsets
+	parallel_prefix_sum(gc_source_offsets, nc, t_id, total_threads);
 #pragma omp single
 {
+	sgp_eid_t* gc_so_check = (sgp_eid_t*)malloc((nc + 1) * sizeof(sgp_eid_t));
+	gc_so_check[0] = 0;
 	for (sgp_vid_t i = 0; i < nc; i++) {
-		gc_source_offsets[i + 1] = gc_source_offsets[i] + gc_degree[i];
+		gc_so_check[i + 1] = gc_so_check[i] + gc_degree[i];
 	}
+	SGPAR_ASSERT(gc_so_check[i + 1] == gc_source_offsets[i + 1]);
 }
 
 	sgp_eid_t gc_nedges = gc_source_offsets[nc] / 2;
