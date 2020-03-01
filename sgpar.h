@@ -859,7 +859,8 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
 	sgp_vid_t total_threads = omp_get_num_threads();
 	sgp_vid_t t_id = omp_get_thread_num();
 
-	sgp_eid_t width = (nEdges - 1) / total_threads;
+    //adding total_threads + 1 has the effect of ceil((nEdges - 1) / total_threads)
+	sgp_eid_t width = (nEdges - 1 + total_threads - 1) / total_threads;
 	sgp_eid_t start_e = 1 + width * t_id;
 	sgp_eid_t end_e = start_e + width;
 	if (end_e > nEdges) {
