@@ -889,15 +889,6 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
 
 	//prefix sum for source_offsets
 	parallel_prefix_sum(gc_source_offsets, nc, t_id, total_threads);
-#pragma omp single
-{
-	sgp_eid_t* gc_so_check = (sgp_eid_t*)malloc((nc + 1) * sizeof(sgp_eid_t));
-	gc_so_check[0] = 0;
-	for (sgp_vid_t i = 0; i < nc; i++) {
-		gc_so_check[i + 1] = gc_so_check[i] + gc_degree[i];
-	}
-	SGPAR_ASSERT(gc_so_check[i + 1] == gc_source_offsets[i + 1]);
-}
 
 	sgp_eid_t gc_nedges = gc_source_offsets[nc] / 2;
     
@@ -994,7 +985,7 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
 
     free(edges_uvw);
 #ifdef __cplusplus
-    //delete[] gc_degree;
+    //gc_degree is on the stack (I think) if using c++
 #else
     free(gc_degree);
 #endif
