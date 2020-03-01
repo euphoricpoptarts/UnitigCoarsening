@@ -1200,7 +1200,7 @@ Kokkos::initialize();
     sgp_real_t tol = SGPAR_POWERITER_TOL;
     uint64_t niter = 0;
     uint64_t iter_max = (uint64_t) SGPAR_POWERITER_ITER / (uint64_t) n;
-    sgp_real_t dotprod = 0;
+    sgp_real_t dotprod = 0, lastDotprod = 1;
     while ((fabs(dotprod) < (1-tol)) && (niter < iter_max)) {
 
         // u = v
@@ -1245,6 +1245,7 @@ Kokkos::initialize();
             sgp_vec_orthogonalize_kokkos(v, vec1, n);
         }
         sgp_vec_normalize_kokkos(v, n);
+        lastDotprod = dotprod;
         sgp_vec_dotproduct_kokkos(&dotprod, u, v, n);
         niter++;
     }
@@ -1253,7 +1254,15 @@ Kokkos::initialize();
         printf("exceeded max iter count, ");
         max_iter_reached = 1;
     }
-    printf("number of iterations: %d\n", niter);
+    printf("number of iterations: %lu\n", niter);
+
+    FILE *metricfp = fopen(metricsFilename, "a");
+    if (metricfp == NULL) {
+        printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
+    } else {
+        fprintf(metricfp, "%lu %d ", niter, max_iter_reached);
+        fclose(metricfp);
+    }
 
     if(!normLap && final){
         sgp_power_iter_eigenvalue_log(u, g);
@@ -1267,14 +1276,6 @@ Kokkos::initialize();
 
 }
 Kokkos::finalize();
-
-    FILE *metricfp = fopen(metricsFilename, "a");
-    if (metricfp == NULL) {
-        printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
-    } else {
-        fprintf(metricfp, "%lu %d ", niter, max_iter_reached);
-        fclose(metricfp);
-    }
 
     return EXIT_SUCCESS;
 }
