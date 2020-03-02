@@ -968,9 +968,9 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
 		gc->destination_indices = gc_destination_indices;
 		gc->source_offsets = gc_source_offsets;
 		gc->eweights = gc_eweights;
+        gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
+        SGPAR_ASSERT(gc->weighted_degree != NULL);
 	}
-    gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
-    SGPAR_ASSERT(gc->weighted_degree != NULL);
 
 	sgp_vid_t gcn = gc->nvertices;
 #pragma omp for
