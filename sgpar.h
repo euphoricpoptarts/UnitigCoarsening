@@ -111,6 +111,10 @@ typedef double sgp_real_t;
 #define SGPAR_COARSENING_MAXLEVELS 100
 #endif
 
+#ifdef __cplusplus
+typedef std::atomic<sgp_vid_t> atom_vid_t;
+#endif
+
 static sgp_real_t SGPAR_POWERITER_TOL = 1e-10;
 
 //100 trillion
@@ -545,7 +549,7 @@ static int vu_cmpfn_inc(const void *a, const void *b) {
 
 //assumption: source_offsets[rangeBegin] <= target < source_offsets[rangeEnd] 
 //
-static int binary_search_find_source_index(sgp_eid_t *source_offsets, int rangeBegin, int rangeEnd, sgp_eid_t target){
+static sgp_vid_t binary_search_find_source_index(sgp_eid_t *source_offsets, sgp_vid_t rangeBegin, sgp_vid_t rangeEnd, sgp_eid_t target){
     if(rangeBegin + 1 == rangeEnd){
         return rangeBegin;
     }
@@ -557,7 +561,7 @@ static int binary_search_find_source_index(sgp_eid_t *source_offsets, int rangeB
     }
 }
 
-static int binary_search_find_first_self_loop(edge_triple_t *edges, int rangeBegin, int rangeEnd){
+static sgp_eid_t binary_search_find_first_self_loop(edge_triple_t *edges, sgp_eid_t rangeBegin, sgp_eid_t rangeEnd){
     if(rangeBegin + 1 == rangeEnd){
         return rangeEnd;
     }
@@ -815,10 +819,12 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
     double elt = sgp_timer();
 #ifdef __cplusplus
 #ifdef USE_GNU_PARALLELMODE
+    printf("GNU parallel sort\n");
     __gnu_parallel::sort(((edge_triple_t *) edges_uvw), 
                          ((edge_triple_t *) edges_uvw)+nEdges, uvw_cmpfn_inc,
                         __gnu_parallel::quicksort_tag());
 #else
+    printf("std sort\n");
     std::sort(((edge_triple_t *) edges_uvw), 
               ((edge_triple_t *) edges_uvw)+nEdges,
               uvw_cmpfn_inc);
@@ -831,7 +837,8 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
     sgp_vid_t nc = gc->nvertices;
 
 #ifdef __cplusplus
-	std::atomic<sgp_vid_t> gc_degree[nc] = {};
+	//std::atomic<sgp_vid_t> gc_degree[nc] = {};
+    atom_vid_t * gc_degree = (atom_vid_t *) malloc(nc * sizeof(atom_vid_t));
 #else
 	_Atomic sgp_vid_t* gc_degree = (_Atomic sgp_vid_t*) malloc(nc * sizeof(_Atomic sgp_vid_t));
 #endif
@@ -987,6 +994,7 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
     free(edges_uvw);
 #ifdef __cplusplus
     //gc_degree is on the stack (I think) if using c++
+    free(gc_degree);
 #else
     free(gc_degree);
 #endif
