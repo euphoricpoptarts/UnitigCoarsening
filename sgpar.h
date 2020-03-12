@@ -1938,6 +1938,9 @@ SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
             */
         } 
     }
+
+    free(vu_pair);
+
     printf("After bipartitioning, the partitions have %ld and %ld vertices, "
            "and the edge cut is %ld.\n", 
            curr_split, n-curr_split, edgecut_min/2);
