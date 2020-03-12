@@ -1407,7 +1407,7 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(sgp_real_t *u, sgp_graph_t g){
                     ceil(1.0/(1.0-eigenval*1e-9)));
 }
 
-SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int final, const char* metricsFilename) {
+SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, const int final, const char* metricsFilename) {
 
     sgp_vid_t n = g.nvertices;
 
