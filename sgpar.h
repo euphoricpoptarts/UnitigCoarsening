@@ -1407,154 +1407,6 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(sgp_real_t *u, sgp_graph_t g){
                     ceil(1.0/(1.0-eigenval*1e-9)));
 }
 
-SGPAR_API int sgp_power_iter_loop(uint64_t& niter, uint64_t& iter_max, sgp_vid_t n, sgp_real_t* u, sgp_real_t* v, sgp_real_t* vec1, sgp_graph_t g) {
-    sgp_wgt_t gb = 2 * g.weighted_degree[0];
-    for (sgp_vid_t i = 1; i < n; i++) {
-        if (gb < 2 * g.weighted_degree[i]) {
-            gb = 2 * g.weighted_degree[i];
-        }
-    }
-    
-    sgp_real_t tol = SGPAR_POWERITER_TOL;
-    sgp_real_t dotprod = 0, lastDotprod = 1;
-    while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
-
-        // u = v
-#pragma omp for
-        for (sgp_vid_t i = 0; i < n; i++) {
-            u[i] = v[i];
-        }
-
-        // v = Lu
-#pragma omp for
-        for (sgp_vid_t i = 0; i < n; i++) {
-            // sgp_real_t v_i = g.weighted_degree[i]*u[i];
-            sgp_real_t weighted_degree_inv, v_i;
-            v_i = (gb - g.weighted_degree[i]) * u[i];
-            sgp_real_t matvec_i = 0;
-            for (sgp_eid_t j = g.source_offsets[i];
-                j < g.source_offsets[i + 1]; j++) {
-                    matvec_i += u[g.destination_indices[j]] * g.eweights[j];
-            }
-            v_i += matvec_i;
-            v[i] = v_i;
-        }
-        sgp_vec_orthogonalize_omp(v, vec1, n);
-        sgp_vec_normalize_omp(v, n);
-        lastDotprod = dotprod;
-        sgp_vec_dotproduct_omp(&dotprod, u, v, n);
-        niter++;
-    }
-}
-
-SGPAR_API int sgp_power_iter_loop_normLap(uint64_t& niter, uint64_t& iter_max, sgp_vid_t n, sgp_real_t* u, sgp_real_t* v, sgp_graph_t g) {
-    sgp_real_t tol = SGPAR_POWERITER_TOL;
-    sgp_real_t dotprod = 0, lastDotprod = 1;
-    while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
-
-        // u = v
-#pragma omp for
-        for (sgp_vid_t i = 0; i < n; i++) {
-            u[i] = v[i];
-        }
-
-        // v = Lu
-#pragma omp for
-        for (sgp_vid_t i = 0; i < n; i++) {
-            // sgp_real_t v_i = g.weighted_degree[i]*u[i];
-            sgp_real_t weighted_degree_inv, v_i;
-            weighted_degree_inv = 1.0 / g.weighted_degree[i];
-            v_i = 0.5 * u[i];
-            sgp_real_t matvec_i = 0;
-            for (sgp_eid_t j = g.source_offsets[i];
-                j < g.source_offsets[i + 1]; j++) {
-                    matvec_i += u[g.destination_indices[j]] * g.eweights[j];
-            }
-            v_i += 0.5 * matvec_i * weighted_degree_inv;
-            v[i] = v_i;
-        }
-        sgp_vec_normalize_omp(v, n);
-        lastDotprod = dotprod;
-        sgp_vec_dotproduct_omp(&dotprod, u, v, n);
-        niter++;
-    }
-}
-
-SGPAR_API int sgp_power_iter_loop_final(uint64_t& niter, uint64_t& iter_max, sgp_vid_t n, sgp_real_t* u, sgp_real_t* v, sgp_real_t* vec1, sgp_graph_t g) {
-    sgp_wgt_t gb = 2 * (g.source_offsets[1] - g.source_offsets[0]);
-    for (sgp_vid_t i = 1; i < n; i++) {
-        if (gb < 2 * (g.source_offsets[i + 1] - g.source_offsets[i])) {
-            gb = 2 * (g.source_offsets[i + 1] - g.source_offsets[i]);
-        }
-    }
-    
-    sgp_real_t tol = SGPAR_POWERITER_TOL;
-    sgp_real_t dotprod = 0, lastDotprod = 1;
-    while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
-
-        // u = v
-#pragma omp for
-        for (sgp_vid_t i = 0; i < n; i++) {
-            u[i] = v[i];
-        }
-
-        // v = Lu
-#pragma omp for
-        for (sgp_vid_t i = 0; i < n; i++) {
-            // sgp_real_t v_i = g.weighted_degree[i]*u[i];
-            sgp_real_t weighted_degree_inv, v_i;
-            sgp_vid_t weighted_degree = g.source_offsets[i + 1] - g.source_offsets[i];
-            v_i = (gb - weighted_degree) * u[i];
-            sgp_real_t matvec_i = 0;
-            for (sgp_eid_t j = g.source_offsets[i];
-                j < g.source_offsets[i + 1]; j++) {
-                    matvec_i += u[g.destination_indices[j]];
-            }
-            v_i += matvec_i;
-            v[i] = v_i;
-        }
-
-        sgp_vec_orthogonalize_omp(v, vec1, n);
-        sgp_vec_normalize_omp(v, n);
-        lastDotprod = dotprod;
-        sgp_vec_dotproduct_omp(&dotprod, u, v, n);
-        niter++;
-    }
-}
-
-SGPAR_API int sgp_power_iter_loop_normLap_final(uint64_t& niter, uint64_t& iter_max, sgp_vid_t n, sgp_real_t* u, sgp_real_t* v, sgp_graph_t g) {
-    sgp_real_t tol = SGPAR_POWERITER_TOL;
-    sgp_real_t dotprod = 0, lastDotprod = 1;
-    while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
-
-        // u = v
-#pragma omp for
-        for (sgp_vid_t i = 0; i < n; i++) {
-            u[i] = v[i];
-        }
-
-        // v = Lu
-#pragma omp for
-        for (sgp_vid_t i = 0; i < n; i++) {
-            // sgp_real_t v_i = g.weighted_degree[i]*u[i];
-            sgp_real_t weighted_degree_inv, v_i;
-            weighted_degree_inv = 1.0 / g.weighted_degree[i];
-            v_i = 0.5 * u[i];
-            sgp_real_t matvec_i = 0;
-            for (sgp_eid_t j = g.source_offsets[i];
-                j < g.source_offsets[i + 1]; j++) {
-                matvec_i += u[g.destination_indices[j]];
-            }
-            v_i += 0.5 * matvec_i * weighted_degree_inv;
-            v[i] = v_i;
-        }
-        sgp_vec_normalize_omp(v, n);
-        lastDotprod = dotprod;
-        sgp_vec_dotproduct_omp(&dotprod, u, v, n);
-        niter++;
-    }
-}
-
 SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, const int final, const char* metricsFilename) {
 
     sgp_vid_t n = g.nvertices;
@@ -1571,6 +1423,26 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
             weighted_degree[i] = g.source_offsets[i+1] - g.source_offsets[i];
         }
     }
+
+    sgp_wgt_t gb;
+    if(!normLap){
+        if(!final){
+            gb = 2*g.weighted_degree[0];
+            for (sgp_vid_t i=1; i<n; i++) {
+                if(gb < 2*g.weighted_degree[i]) {
+                    gb = 2*g.weighted_degree[i];
+                }
+            }
+        } else {
+            gb = 2*(g.source_offsets[1]-g.source_offsets[0]);
+            for (sgp_vid_t i=1; i<n; i++) {
+                if (gb < 2*(g.source_offsets[i+1]-g.source_offsets[i])) {
+                    gb = 2*(g.source_offsets[i+1]-g.source_offsets[i]);
+                }
+            }
+        }
+    }
+
 
     uint64_t g_niter = 0;
     uint64_t iter_max = (uint64_t)SGPAR_POWERITER_ITER / (uint64_t)n;
@@ -1610,21 +1482,57 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
         v[i] = u[i];
     }
 
-    if (normLap) {
-        if (final) {
-            sgp_power_iter_loop_normLap_final(niter, iter_max, n, u, v, g);
+    sgp_real_t tol = SGPAR_POWERITER_TOL;
+    sgp_real_t dotprod = 0, lastDotprod = 1;
+    while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
+
+        // u = v
+#pragma omp for
+        for (sgp_vid_t i=0; i<n; i++) {
+            u[i] = v[i];
         }
-        else {
-            sgp_power_iter_loop_normLap(niter, iter_max, n, u, v, g);
+
+        // v = Lu
+#pragma omp for
+        for (sgp_vid_t i=0; i<n; i++) {
+            // sgp_real_t v_i = g.weighted_degree[i]*u[i];
+            sgp_real_t weighted_degree_inv, v_i;
+            if(!normLap){
+                if(!final){
+                    v_i = (gb-g.weighted_degree[i])*u[i];
+                } else {
+                    sgp_vid_t weighted_degree = g.source_offsets[i+1]-g.source_offsets[i];
+                    v_i = (gb-weighted_degree)*u[i];
+                }
+            } else {
+                weighted_degree_inv = 1.0/g.weighted_degree[i];
+                v_i = 0.5*u[i];
+            }
+            sgp_real_t matvec_i = 0;
+            for (sgp_eid_t j=g.source_offsets[i]; 
+                           j<g.source_offsets[i+1]; j++) {
+                if(!final){
+                    matvec_i += u[g.destination_indices[j]]*g.eweights[j];
+                } else {
+                    matvec_i += u[g.destination_indices[j]];
+                }
+            }
+            // v_i -= matvec_i;
+            if(!normLap){
+                v_i += matvec_i;
+            } else {
+                v_i += 0.5*matvec_i*weighted_degree_inv;
+            }
+            v[i] = v_i;
         }
-    }
-    else {
-        if (final) {
-            sgp_power_iter_loop_final(niter, iter_max, n, u, v, vec1, g);
+
+        if(!normLap){
+            sgp_vec_orthogonalize_omp(v, vec1, n);
         }
-        else {
-            sgp_power_iter_loop(niter, iter_max, n, u, v, vec1, g);
-        }
+        sgp_vec_normalize_omp(v, n);
+		lastDotprod = dotprod;
+        sgp_vec_dotproduct_omp(&dotprod, u, v, n);
+        niter++;
     }
 
 #pragma omp single
