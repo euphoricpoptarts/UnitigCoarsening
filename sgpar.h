@@ -16,6 +16,8 @@
 
 #ifdef _OPENMP
 #include <omp.h>
+#else
+#include <sys/time.h>
 #endif
 
 #ifdef _KOKKOS
@@ -573,14 +575,18 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
     edges_uvw = (sgp_vid_t *) malloc(3*nEdges*sizeof(sgp_vid_t));
     SGPAR_ASSERT(edges_uvw != NULL);
 
+#ifdef _OPENMP
 #pragma omp parallel
+#endif
 {
 
     int thread_initialized = 0;
     sgp_vid_t u;
     int source_index = 0;
 
+#ifdef _OPENMP
 #pragma omp for
+#endif
     for (sgp_eid_t i=0; i<nEdges; i++) {
         if(!thread_initialized){
             source_index = binary_search_find_source_index(g.source_offsets, 0, n, i);
