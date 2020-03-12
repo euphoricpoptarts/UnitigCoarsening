@@ -1407,7 +1407,7 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(sgp_real_t *u, sgp_graph_t g){
                     ceil(1.0/(1.0-eigenval*1e-9)));
 }
 
-SGPAR_API int spg_power_iter_loop(uint64_t & niter, uint64_t & iter_max, sgp_real_t * u, spg_real_t * v, sgp_graph_t g) {
+SGPAR_API int sgp_power_iter_loop(uint64_t & niter, uint64_t & iter_max, sgp_real_t * u, spg_real_t * v, sgp_graph_t g) {
     sgp_real_t tol = SGPAR_POWERITER_TOL;
     sgp_real_t dotprod = 0, lastDotprod = 1;
     while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
