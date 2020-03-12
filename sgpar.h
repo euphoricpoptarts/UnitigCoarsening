@@ -1446,6 +1446,9 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int fina
 
     uint64_t g_niter = 0;
     uint64_t iter_max = (uint64_t)SGPAR_POWERITER_ITER / (uint64_t)n;
+
+    sgp_real_t* v = (sgp_real_t*)malloc(n * sizeof(sgp_real_t));
+    SGPAR_ASSERT(v != NULL);
 #pragma omp parallel shared(u)
 {
 
@@ -1473,9 +1476,6 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int fina
         sgp_vec_D_orthogonalize_omp(u, vec1, g.weighted_degree, n);
     }
     sgp_vec_normalize_omp(u, n);
-
-    sgp_real_t *v = (sgp_real_t *) malloc(n*sizeof(sgp_real_t));
-    SGPAR_ASSERT(v != NULL);
 
 #pragma omp for
     for (sgp_vid_t i=0; i<n; i++) {
@@ -1539,8 +1539,8 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int fina
     {
         g_niter = niter;
     }
-    free(v);
 }
+    free(v);
 
     int max_iter_reached = 0;
     if (g_niter >= iter_max) {
