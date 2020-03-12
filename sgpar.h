@@ -1287,7 +1287,7 @@ Kokkos::finalize();
 
     return EXIT_SUCCESS;
 }
-#else
+#elif defined(MP_REFINE)
 SGPAR_API int sgp_vec_normalize_omp(sgp_real_t *u, int64_t n) {
 
     assert(u != NULL);
@@ -1562,6 +1562,292 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int fina
 
     free(vec1);
     if(normLap && final){
+        free(weighted_degree);
+    }
+    return EXIT_SUCCESS;
+}
+#else
+SGPAR_API int sgp_vec_normalize_omp(sgp_real_t* u, int64_t n) {
+
+    assert(u != NULL);
+    static sgp_real_t squared_sum = 0;
+
+//#pragma omp single
+    squared_sum = 0;
+
+//#pragma omp for reduction(+:squared_sum)
+    for (int64_t i = 0; i < n; i++) {
+        squared_sum += u[i] * u[i];
+    }
+    sgp_real_t sum_inv = 1 / sqrt(squared_sum);
+
+//#pragma omp single 
+    {
+        //printf("squared_sum %3.3f\n", squared_sum);
+    }
+
+//#pragma omp for
+    for (int64_t i = 0; i < n; i++) {
+        u[i] = u[i] * sum_inv;
+    }
+    return EXIT_SUCCESS;
+}
+
+SGPAR_API int sgp_vec_dotproduct_omp(sgp_real_t* dot_prod_ptr,
+    sgp_real_t* u1, sgp_real_t* u2, int64_t n) {
+
+    static sgp_real_t dot_prod = 0;
+
+//#pragma omp single
+    dot_prod = 0;
+
+//#pragma omp for reduction(+:dot_prod)
+    for (int64_t i = 0; i < n; i++) {
+        dot_prod += u1[i] * u2[i];
+    }
+    *dot_prod_ptr = dot_prod;
+
+    return EXIT_SUCCESS;
+}
+
+
+SGPAR_API int sgp_vec_orthogonalize_omp(sgp_real_t* u1, sgp_real_t* u2, int64_t n) {
+
+    sgp_real_t mult1;
+    sgp_vec_dotproduct_omp(&mult1, u1, u2, n);
+
+//#pragma omp for
+    for (int64_t i = 0; i < n; i++) {
+        u1[i] -= mult1 * u2[i];
+    }
+    return EXIT_SUCCESS;
+}
+
+SGPAR_API int sgp_vec_D_orthogonalize_omp(sgp_real_t* u1, sgp_real_t* u2,
+    sgp_wgt_t* D, int64_t n) {
+
+    //u1[i] = u1[i] - (dot(u1, D*u2)/dot(u2, D*u2)) * u2[i]
+
+    sgp_real_t mult1;
+    sgp_vec_dotproduct_omp(&mult1, u1, u2, n);
+
+    static sgp_real_t mult_numer = 0;
+    static sgp_real_t mult_denom = 0;
+
+//#pragma omp single
+    {
+        mult_numer = 0;
+        mult_denom = 0;
+    }
+
+//#pragma omp for reduction(+:mult_numer, mult_denom)
+    for (int64_t i = 0; i < n; i++) {
+        mult_numer += u1[i] * D[i] * u2[i];
+        mult_denom += u2[i] * D[i] * u2[i];
+    }
+
+//#pragma omp for
+    for (int64_t i = 0; i < n; i++) {
+        u1[i] -= mult_numer * u2[i] / mult_denom;
+    }
+
+    return EXIT_SUCCESS;
+}
+
+SGPAR_API void sgp_power_iter_eigenvalue_log(sgp_real_t* u, sgp_graph_t g) {
+    sgp_real_t eigenval = 0;
+    sgp_real_t eigenval_max = 0;
+    sgp_real_t eigenval_min = 2;
+    for (sgp_vid_t i = 0; i < (g.nvertices); i++) {
+        sgp_vid_t weighted_degree = g.source_offsets[i + 1] - g.source_offsets[i];
+        sgp_real_t u_i = weighted_degree * u[i];
+        sgp_real_t matvec_i = 0;
+        for (sgp_eid_t j = g.source_offsets[i];
+            j < g.source_offsets[i + 1]; j++) {
+            matvec_i += u[g.destination_indices[j]];
+        }
+        u_i -= matvec_i;
+        sgp_real_t eigenval_est = u_i / u[i];
+        if (eigenval_est < eigenval_min) {
+            eigenval_min = eigenval_est;
+        }
+        if (eigenval_est > eigenval_max) {
+            eigenval_max = eigenval_est;
+        }
+        eigenval += (u_i * u_i) * 1e9;
+    }
+
+    printf("eigenvalue = %1.9lf (%1.9lf %1.9lf), "
+        "edge cut lb %5.0lf "
+        "gap ratio %.0lf\n",
+        eigenval * 1e-9,
+        eigenval_min, eigenval_max,
+        eigenval * 1e-9 * (g.nvertices) / 4,
+        ceil(1.0 / (1.0 - eigenval * 1e-9)));
+}
+
+SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int final, const char* metricsFilename) {
+
+    sgp_vid_t n = g.nvertices;
+
+    sgp_real_t* vec1 = (sgp_real_t*)malloc(n * sizeof(sgp_real_t));
+    SGPAR_ASSERT(vec1 != NULL);
+
+    sgp_wgt_t* weighted_degree;
+
+    if (normLap && final) {
+        weighted_degree = (sgp_wgt_t*)malloc(n * sizeof(sgp_wgt_t));
+        assert(weighted_degree != NULL);
+        for (sgp_vid_t i = 0; i < n; i++) {
+            weighted_degree[i] = g.source_offsets[i + 1] - g.source_offsets[i];
+        }
+    }
+
+    sgp_wgt_t gb;
+    if (!normLap) {
+        if (!final) {
+            gb = 2 * g.weighted_degree[0];
+            for (sgp_vid_t i = 1; i < n; i++) {
+                if (gb < 2 * g.weighted_degree[i]) {
+                    gb = 2 * g.weighted_degree[i];
+                }
+            }
+        }
+        else {
+            gb = 2 * (g.source_offsets[1] - g.source_offsets[0]);
+            for (sgp_vid_t i = 1; i < n; i++) {
+                if (gb < 2 * (g.source_offsets[i + 1] - g.source_offsets[i])) {
+                    gb = 2 * (g.source_offsets[i + 1] - g.source_offsets[i]);
+                }
+            }
+        }
+    }
+
+    uint64_t niter = 0;
+    uint64_t iter_max = (uint64_t)SGPAR_POWERITER_ITER / (uint64_t)n;
+
+//#pragma omp parallel shared(u)
+  //  {
+
+//#pragma omp for
+        for (sgp_vid_t i = 0; i < n; i++) {
+            vec1[i] = 1.0;
+        }
+
+#if 0
+        sgp_real_t mult = 0;
+        sgp_vec_dotproduct_omp(&mult, vec1, u, n);
+
+#pragma omp for
+        for (sgp_vid_t i = 0; i < n; i++) {
+            u[i] -= mult * u[i] / n;
+        }
+        sgp_vec_normalize_omp(u, n);
+#endif
+
+        sgp_vec_normalize_omp(vec1, n);
+        if (!normLap) {
+            sgp_vec_orthogonalize_omp(u, vec1, n);
+        }
+        else {
+            sgp_vec_D_orthogonalize_omp(u, vec1, g.weighted_degree, n);
+        }
+        sgp_vec_normalize_omp(u, n);
+
+        sgp_real_t* v = (sgp_real_t*)malloc(n * sizeof(sgp_real_t));
+        SGPAR_ASSERT(v != NULL);
+
+//#pragma omp for
+        for (sgp_vid_t i = 0; i < n; i++) {
+            v[i] = u[i];
+        }
+
+        sgp_real_t tol = SGPAR_POWERITER_TOL;
+        sgp_real_t dotprod = 0, lastDotprod = 1;
+        while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
+
+            // u = v
+//#pragma omp for
+            for (sgp_vid_t i = 0; i < n; i++) {
+                u[i] = v[i];
+            }
+
+            // v = Lu
+//#pragma omp for
+            for (sgp_vid_t i = 0; i < n; i++) {
+                // sgp_real_t v_i = g.weighted_degree[i]*u[i];
+                sgp_real_t weighted_degree_inv, v_i;
+                if (!normLap) {
+                    if (!final) {
+                        v_i = (gb - g.weighted_degree[i]) * u[i];
+                    }
+                    else {
+                        sgp_vid_t weighted_degree = g.source_offsets[i + 1] - g.source_offsets[i];
+                        v_i = (gb - weighted_degree) * u[i];
+                    }
+                }
+                else {
+                    weighted_degree_inv = 1.0 / g.weighted_degree[i];
+                    v_i = 0.5 * u[i];
+                }
+                sgp_real_t matvec_i = 0;
+                for (sgp_eid_t j = g.source_offsets[i];
+                    j < g.source_offsets[i + 1]; j++) {
+                    if (!final) {
+                        matvec_i += u[g.destination_indices[j]] * g.eweights[j];
+                    }
+                    else {
+                        matvec_i += u[g.destination_indices[j]];
+                    }
+                }
+                // v_i -= matvec_i;
+                if (!normLap) {
+                    v_i += matvec_i;
+                }
+                else {
+                    v_i += 0.5 * matvec_i * weighted_degree_inv;
+                }
+                v[i] = v_i;
+            }
+
+            if (!normLap) {
+                sgp_vec_orthogonalize_omp(v, vec1, n);
+            }
+            sgp_vec_normalize_omp(v, n);
+            lastDotprod = dotprod;
+            sgp_vec_dotproduct_omp(&dotprod, u, v, n);
+            niter++;
+        }
+
+        if (omp_get_thread_num() == 0) {
+            if (niter == iter_max) {
+                printf("exceeded max iter count, ");
+            }
+            printf("number of iterations: %d\n", niter);
+        }
+        free(v);
+    //}
+
+    int max_iter_reached = 0;
+    if (niter >= iter_max) {
+        printf("exceeded max iter count, ");
+        max_iter_reached = 1;
+    }
+    printf("number of iterations: %lu\n", niter);
+    FILE* metricfp = fopen(metricsFilename, "a");
+    if (metricfp == NULL) {
+        printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
+    }
+    else {
+        fprintf(metricfp, "%lu %d ", niter, max_iter_reached);
+        fclose(metricfp);
+    }
+    if (!normLap && final) {
+        sgp_power_iter_eigenvalue_log(u, g);
+    }
+
+    free(vec1);
+    if (normLap && final) {
         free(weighted_degree);
     }
     return EXIT_SUCCESS;
