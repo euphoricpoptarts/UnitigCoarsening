@@ -1407,7 +1407,7 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(sgp_real_t *u, sgp_graph_t g){
                     ceil(1.0/(1.0-eigenval*1e-9)));
 }
 
-SGPAR_API int sgp_power_iter_loop(uint64_t& niter, uint64_t& iter_max, sgp_vid_t n, sgp_real_t* u, sgp_real_t* v, sgp_graph_t g) {
+SGPAR_API int sgp_power_iter_loop(uint64_t& niter, uint64_t& iter_max, sgp_vid_t n, sgp_real_t* u, sgp_real_t* v, sgp_real_t* vec1, sgp_graph_t g) {
     sgp_wgt_t gb = 2 * g.weighted_degree[0];
     for (sgp_vid_t i = 1; i < n; i++) {
         if (gb < 2 * g.weighted_degree[i]) {
@@ -1480,7 +1480,7 @@ SGPAR_API int sgp_power_iter_loop_normLap(uint64_t& niter, uint64_t& iter_max, s
     }
 }
 
-SGPAR_API int sgp_power_iter_loop_final(uint64_t& niter, uint64_t& iter_max, sgp_vid_t n, sgp_real_t* u, sgp_real_t* v, sgp_graph_t g) {
+SGPAR_API int sgp_power_iter_loop_final(uint64_t& niter, uint64_t& iter_max, sgp_vid_t n, sgp_real_t* u, sgp_real_t* v, sgp_real_t* vec1, sgp_graph_t g) {
     sgp_wgt_t gb = 2 * (g.source_offsets[1] - g.source_offsets[0]);
     for (sgp_vid_t i = 1; i < n; i++) {
         if (gb < 2 * (g.source_offsets[i + 1] - g.source_offsets[i])) {
@@ -1620,10 +1620,10 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
     }
     else {
         if (final) {
-            sgp_power_iter_loop_final(niter, iter_max, n, u, v, g);
+            sgp_power_iter_loop_final(niter, iter_max, n, u, v, vec1, g);
         }
         else {
-            sgp_power_iter_loop(niter, iter_max, n, u, v, g);
+            sgp_power_iter_loop(niter, iter_max, n, u, v, vec1, g);
         }
     }
 
