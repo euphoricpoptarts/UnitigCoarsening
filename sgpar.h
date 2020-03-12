@@ -1497,31 +1497,40 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
         for (sgp_vid_t i=0; i<n; i++) {
             // sgp_real_t v_i = g.weighted_degree[i]*u[i];
             sgp_real_t weighted_degree_inv, v_i;
-            if(!normLap){
-                if(!final){
-                    v_i = (gb-g.weighted_degree[i])*u[i];
-                } else {
-                    sgp_vid_t weighted_degree = g.source_offsets[i+1]-g.source_offsets[i];
-                    v_i = (gb-weighted_degree)*u[i];
+            if (normLap) {
+                if (final) {
+                    weighted_degree_inv = 1.0 / weighted_degree[i];
+                    v_i = 0.5 * u[i];
                 }
-            } else {
-                weighted_degree_inv = 1.0/g.weighted_degree[i];
-                v_i = 0.5*u[i];
+                else {
+                    weighted_degree_inv = 1.0 / g.weighted_degree[i];
+                    v_i = 0.5 * u[i];
+                }
+            }
+            else {
+                if (final) {
+                    sgp_vid_t weighted_degree = g.source_offsets[i + 1] - g.source_offsets[i];
+                    v_i = (gb - weighted_degree) * u[i];
+                }
+                else {
+                    v_i = (gb - g.weighted_degree[i]) * u[i];
+                }
             }
             sgp_real_t matvec_i = 0;
             for (sgp_eid_t j=g.source_offsets[i]; 
                            j<g.source_offsets[i+1]; j++) {
-                if(!final){
-                    matvec_i += u[g.destination_indices[j]]*g.eweights[j];
-                } else {
+                if (final) {
                     matvec_i += u[g.destination_indices[j]];
                 }
+                else {
+                    matvec_i += u[g.destination_indices[j]] * g.eweights[j];
+                }
             }
-            // v_i -= matvec_i;
-            if(!normLap){
+            if (normLap) {
+                v_i += 0.5 * matvec_i * weighted_degree_inv;
+            }
+            else {
                 v_i += matvec_i;
-            } else {
-                v_i += 0.5*matvec_i*weighted_degree_inv;
             }
             v[i] = v_i;
         }
