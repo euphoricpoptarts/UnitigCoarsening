@@ -1443,12 +1443,12 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int fina
         }
     }
 
-    uint64_t niter = 0;
-    uint64_t iter_max = (uint64_t) SGPAR_POWERITER_ITER / (uint64_t) n;
 
 #pragma omp parallel shared(u)
 {
 
+    uint64_t niter = 0;
+    uint64_t iter_max = (uint64_t)SGPAR_POWERITER_ITER / (uint64_t)n;
 #pragma omp for
     for (sgp_vid_t i=0; i<n; i++) {
         vec1[i] = 1.0;
