@@ -1408,6 +1408,13 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(sgp_real_t *u, sgp_graph_t g){
 }
 
 SGPAR_API int sgp_power_iter_loop(uint64_t& niter, uint64_t& iter_max, sgp_vid_t n, sgp_real_t* u, sgp_real_t* v, sgp_graph_t g) {
+    sgp_wgt_t gb = 2 * g.weighted_degree[0];
+    for (sgp_vid_t i = 1; i < n; i++) {
+        if (gb < 2 * g.weighted_degree[i]) {
+            gb = 2 * g.weighted_degree[i];
+        }
+    }
+    
     sgp_real_t tol = SGPAR_POWERITER_TOL;
     sgp_real_t dotprod = 0, lastDotprod = 1;
     while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
@@ -1474,6 +1481,13 @@ SGPAR_API int sgp_power_iter_loop_normLap(uint64_t& niter, uint64_t& iter_max, s
 }
 
 SGPAR_API int sgp_power_iter_loop_final(uint64_t& niter, uint64_t& iter_max, sgp_vid_t n, sgp_real_t* u, sgp_real_t* v, sgp_graph_t g) {
+    sgp_wgt_t gb = 2 * (g.source_offsets[1] - g.source_offsets[0]);
+    for (sgp_vid_t i = 1; i < n; i++) {
+        if (gb < 2 * (g.source_offsets[i + 1] - g.source_offsets[i])) {
+            gb = 2 * (g.source_offsets[i + 1] - g.source_offsets[i]);
+        }
+    }
+    
     sgp_real_t tol = SGPAR_POWERITER_TOL;
     sgp_real_t dotprod = 0, lastDotprod = 1;
     while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
@@ -1557,26 +1571,6 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
             weighted_degree[i] = g.source_offsets[i+1] - g.source_offsets[i];
         }
     }
-
-    sgp_wgt_t gb;
-    if(!normLap){
-        if(!final){
-            gb = 2*g.weighted_degree[0];
-            for (sgp_vid_t i=1; i<n; i++) {
-                if(gb < 2*g.weighted_degree[i]) {
-                    gb = 2*g.weighted_degree[i];
-                }
-            }
-        } else {
-            gb = 2*(g.source_offsets[1]-g.source_offsets[0]);
-            for (sgp_vid_t i=1; i<n; i++) {
-                if (gb < 2*(g.source_offsets[i+1]-g.source_offsets[i])) {
-                    gb = 2*(g.source_offsets[i+1]-g.source_offsets[i]);
-                }
-            }
-        }
-    }
-
 
     uint64_t g_niter = 0;
     uint64_t iter_max = (uint64_t)SGPAR_POWERITER_ITER / (uint64_t)n;
