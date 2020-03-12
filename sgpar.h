@@ -1407,6 +1407,65 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(sgp_real_t *u, sgp_graph_t g){
                     ceil(1.0/(1.0-eigenval*1e-9)));
 }
 
+SGPAR_API int spg_power_iter_loop(uint64_t & niter, uint64_t & iter_max, sgp_real_t * u, spg_real_t * v, sgp_graph_t g) {
+    sgp_real_t tol = SGPAR_POWERITER_TOL;
+    sgp_real_t dotprod = 0, lastDotprod = 1;
+    while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
+
+        // u = v
+#pragma omp for
+        for (sgp_vid_t i = 0; i < n; i++) {
+            u[i] = v[i];
+        }
+
+        // v = Lu
+#pragma omp for
+        for (sgp_vid_t i = 0; i < n; i++) {
+            // sgp_real_t v_i = g.weighted_degree[i]*u[i];
+            sgp_real_t weighted_degree_inv, v_i;
+            if (!normLap) {
+                if (!final) {
+                    v_i = (gb - g.weighted_degree[i]) * u[i];
+                }
+                else {
+                    sgp_vid_t weighted_degree = g.source_offsets[i + 1] - g.source_offsets[i];
+                    v_i = (gb - weighted_degree) * u[i];
+                }
+            }
+            else {
+                weighted_degree_inv = 1.0 / g.weighted_degree[i];
+                v_i = 0.5 * u[i];
+            }
+            sgp_real_t matvec_i = 0;
+            for (sgp_eid_t j = g.source_offsets[i];
+                j < g.source_offsets[i + 1]; j++) {
+                if (!final) {
+                    matvec_i += u[g.destination_indices[j]] * g.eweights[j];
+                }
+                else {
+                    matvec_i += u[g.destination_indices[j]];
+                }
+            }
+            // v_i -= matvec_i;
+            if (!normLap) {
+                v_i += matvec_i;
+            }
+            else {
+                v_i += 0.5 * matvec_i * weighted_degree_inv;
+            }
+            v[i] = v_i;
+        }
+
+        if (!normLap) {
+            sgp_vec_orthogonalize_omp(v, vec1, n);
+        }
+        sgp_vec_normalize_omp(v, n);
+        lastDotprod = dotprod;
+        sgp_vec_dotproduct_omp(&dotprod, u, v, n);
+        niter++;
+    }
+}
+
 SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, const int final, const char* metricsFilename) {
 
     sgp_vid_t n = g.nvertices;
@@ -1482,58 +1541,7 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
         v[i] = u[i];
     }
 
-    sgp_real_t tol = SGPAR_POWERITER_TOL;
-    sgp_real_t dotprod = 0, lastDotprod = 1;
-    while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
-
-        // u = v
-#pragma omp for
-        for (sgp_vid_t i=0; i<n; i++) {
-            u[i] = v[i];
-        }
-
-        // v = Lu
-#pragma omp for
-        for (sgp_vid_t i=0; i<n; i++) {
-            // sgp_real_t v_i = g.weighted_degree[i]*u[i];
-            sgp_real_t weighted_degree_inv, v_i;
-            if(!normLap){
-                if(!final){
-                    v_i = (gb-g.weighted_degree[i])*u[i];
-                } else {
-                    sgp_vid_t weighted_degree = g.source_offsets[i+1]-g.source_offsets[i];
-                    v_i = (gb-weighted_degree)*u[i];
-                }
-            } else {
-                weighted_degree_inv = 1.0/g.weighted_degree[i];
-                v_i = 0.5*u[i];
-            }
-            sgp_real_t matvec_i = 0;
-            for (sgp_eid_t j=g.source_offsets[i]; 
-                           j<g.source_offsets[i+1]; j++) {
-                if(!final){
-                    matvec_i += u[g.destination_indices[j]]*g.eweights[j];
-                } else {
-                    matvec_i += u[g.destination_indices[j]];
-                }
-            }
-            // v_i -= matvec_i;
-            if(!normLap){
-                v_i += matvec_i;
-            } else {
-                v_i += 0.5*matvec_i*weighted_degree_inv;
-            }
-            v[i] = v_i;
-        }
-
-        if(!normLap){
-            sgp_vec_orthogonalize_omp(v, vec1, n);
-        }
-        sgp_vec_normalize_omp(v, n);
-		lastDotprod = dotprod;
-        sgp_vec_dotproduct_omp(&dotprod, u, v, n);
-        niter++;
-    }
+    sgp_power_iter_loop(niter, iter_max, u, v, g);
 
 #pragma omp single
     {
