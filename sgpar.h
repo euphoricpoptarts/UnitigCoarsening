@@ -1444,6 +1444,7 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int fina
     }
 
 
+    uint64_t g_niter = 0;
 #pragma omp parallel shared(u)
 {
 
@@ -1534,26 +1535,24 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int fina
         niter++;
     }
 
-    if(omp_get_thread_num()==0){
-        if (niter == iter_max) {
-            printf("exceeded max iter count, ");
-        }
-        printf("number of iterations: %d\n", niter);
+#pragma omp single
+    {
+        g_niter = niter;
     }
     free(v);
 }
 
     int max_iter_reached = 0;
-    if (niter >= iter_max) {
+    if (g_niter >= iter_max) {
         printf("exceeded max iter count, ");
         max_iter_reached = 1;
     }
-    printf("number of iterations: %lu\n", niter);
+    printf("number of iterations: %lu\n", g_niter);
     FILE *metricfp = fopen(metricsFilename, "a");
     if (metricfp == NULL) {
         printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
     } else {
-        fprintf(metricfp, "%lu %d ", niter, max_iter_reached);
+        fprintf(metricfp, "%lu %d ", g_niter, max_iter_reached);
         fclose(metricfp);
     }
     if(!normLap && final){
