@@ -34,6 +34,9 @@ sgpar_lg: sgpar.c sgpar.h
 sgpar_hg: sgpar.c sgpar.h
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DMP_REFINE -DSGPAR_HUGEGRAPHS  -o sgpar_hg  sgpar.c     $(LDLIBS)
 
+sgpar_hg_srefine: sgpar.c sgpar.h
+	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DSGPAR_HUGEGRAPHS  -o sgpar_hg  sgpar.c     $(LDLIBS)
+
 sgpar_c: sgpar.c sgpar.h
 	$(CC) $(CFLAGS) $(OMPFLAGS) -DMP_REFINE -o sgpar_c  sgpar.c   -lm $(LDLIBS)
 
