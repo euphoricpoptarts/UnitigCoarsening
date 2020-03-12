@@ -22,7 +22,7 @@ mtx2csr: mtx2csr.cpp
 sgpar: sgpar.c sgpar.h
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DMP_REFINE -o sgpar    sgpar.c     $(LDLIBS)
 
-sgpar: sgpar.c sgpar.h
+sgpar_srefine: sgpar.c sgpar.h
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -o sgpar    sgpar.c     $(LDLIBS)
 
 sgpar_kokkos: $(OBJ) $(KOKKOS_LINK_DEPENDS)
