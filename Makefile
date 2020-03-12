@@ -10,6 +10,8 @@ KOKKOS_PATH = ${HOME}/kokkos
 KOKKOS_DEVICES = "OpenMP"
 KOKKOS_ARCH = "BDW"
 
+#dummy commit
+
 include $(KOKKOS_PATH)/Makefile.kokkos
 SRC = $(wildcard *par.c)
 OBJ = $(SRC:.c=.o)
