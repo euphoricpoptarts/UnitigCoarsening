@@ -1407,7 +1407,7 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(sgp_real_t *u, sgp_graph_t g){
                     ceil(1.0/(1.0-eigenval*1e-9)));
 }
 
-SGPAR_API int sgp_power_iter_loop(uint64_t& niter, uint64_t& iter_max, sgp_real_t* u, spg_real_t* v, sgp_graph_t g) {
+SGPAR_API int sgp_power_iter_loop(uint64_t& niter, uint64_t& iter_max, sgp_vid_t n, sgp_real_t* u, spg_real_t* v, sgp_graph_t g) {
     sgp_real_t tol = SGPAR_POWERITER_TOL;
     sgp_real_t dotprod = 0, lastDotprod = 1;
     while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
@@ -1440,7 +1440,7 @@ SGPAR_API int sgp_power_iter_loop(uint64_t& niter, uint64_t& iter_max, sgp_real_
     }
 }
 
-SGPAR_API int sgp_power_iter_loop_normLap(uint64_t& niter, uint64_t& iter_max, sgp_real_t* u, spg_real_t* v, sgp_graph_t g) {
+SGPAR_API int sgp_power_iter_loop_normLap(uint64_t& niter, uint64_t& iter_max, sgp_vid_t n, sgp_real_t* u, spg_real_t* v, sgp_graph_t g) {
     sgp_real_t tol = SGPAR_POWERITER_TOL;
     sgp_real_t dotprod = 0, lastDotprod = 1;
     while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
@@ -1473,7 +1473,7 @@ SGPAR_API int sgp_power_iter_loop_normLap(uint64_t& niter, uint64_t& iter_max, s
     }
 }
 
-SGPAR_API int sgp_power_iter_loop_final(uint64_t& niter, uint64_t& iter_max, sgp_real_t* u, spg_real_t* v, sgp_graph_t g) {
+SGPAR_API int sgp_power_iter_loop_final(uint64_t& niter, uint64_t& iter_max, sgp_vid_t n, sgp_real_t* u, spg_real_t* v, sgp_graph_t g) {
     sgp_real_t tol = SGPAR_POWERITER_TOL;
     sgp_real_t dotprod = 0, lastDotprod = 1;
     while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
@@ -1508,7 +1508,7 @@ SGPAR_API int sgp_power_iter_loop_final(uint64_t& niter, uint64_t& iter_max, sgp
     }
 }
 
-SGPAR_API int sgp_power_iter_loop_normLap_final(uint64_t& niter, uint64_t& iter_max, sgp_real_t* u, spg_real_t* v, sgp_graph_t g) {
+SGPAR_API int sgp_power_iter_loop_normLap_final(uint64_t& niter, uint64_t& iter_max, sgp_vid_t n, sgp_real_t* u, spg_real_t* v, sgp_graph_t g) {
     sgp_real_t tol = SGPAR_POWERITER_TOL;
     sgp_real_t dotprod = 0, lastDotprod = 1;
     while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
@@ -1618,18 +1618,18 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
 
     if (normLap) {
         if (final) {
-            sgp_power_iter_loop_normLap_final(niter, iter_max, u, v, g);
+            sgp_power_iter_loop_normLap_final(niter, iter_max, n, u, v, g);
         }
         else {
-            sgp_power_iter_loop_normLap(niter, iter_max, u, v, g);
+            sgp_power_iter_loop_normLap(niter, iter_max, n, u, v, g);
         }
     }
     else {
         if (final) {
-            sgp_power_iter_loop_final(niter, iter_max, u, v, g);
+            sgp_power_iter_loop_final(niter, iter_max, n, u, v, g);
         }
         else {
-            sgp_power_iter_loop(niter, iter_max, u, v, g);
+            sgp_power_iter_loop(niter, iter_max, n, u, v, g);
         }
     }
 
