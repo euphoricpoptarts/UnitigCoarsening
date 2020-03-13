@@ -2314,8 +2314,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         }
     }
 
+#ifdef COARSE_EIGEN_EC
     sgp_real_t* prolonged_eigenvec[SGPAR_COARSENING_MAXLEVELS];
-
     for (int l=num_coarsening_levels-2; l>=0; l--) {
         sgp_vid_t gcl_n = g_all[l].nvertices;
         eigenvec[l] = (sgp_real_t *) malloc(gcl_n*sizeof(sgp_real_t));
@@ -2354,6 +2354,36 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
             }
         }
     }
+#else
+    for (int l = num_coarsening_levels - 2; l >= 0; l--) {
+        sgp_vid_t gcl_n = g_all[l].nvertices;
+        eigenvec[l] = (sgp_real_t*)malloc(gcl_n * sizeof(sgp_real_t));
+        SGPAR_ASSERT(eigenvec[l] != NULL);
+
+        sgp_real_t * prolonged_eigenvec = (sgp_real_t*)malloc(gcl_n * sizeof(sgp_real_t));
+        SGPAR_ASSERT(prolonged_eigenvec != NULL);
+        //prolong eigenvector from coarser level to finer level
+        for (sgp_vid_t i = 0; i < gcl_n; i++) {
+            eigenvec[l][i] = eigenvec[l + 1][vcmap[l][i]];
+            prolonged_eigenvec[i] = eigenvec[l][i];
+        }
+        free(eigenvec[l + 1]);
+        free(vcmap[l]);
+
+        sgp_vec_normalize(eigenvec[l], gcl_n);
+
+        //don't do refinement for finest level here
+        if (l > 0) {
+            printf("Coarsening level %d, ", l);
+            if (refine_alg == 0) {
+                sgp_power_iter(eigenvec[l], g_all[l], 0, 0, metricsFilename);
+            }
+            else {
+                sgp_power_iter(eigenvec[l], g_all[l], 1, 0, metricsFilename);
+            }
+        }
+    }
+#endif
 
     double fin_refine_time = sgp_timer();
 
@@ -2394,7 +2424,9 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
             fin_coarsening_time-start_time,
             fin_final_level_time-fin_coarsening_time);
 
+#ifdef COARSE_EIGEN_EC
         for (int l = num_coarsening_levels - 1; l >= 1; l--) {
+            printf("Computing edge cut for eigenvector prolonged from coarse level %d\n", l);
             sgp_compute_partition(part, num_partitions, edge_cut,
                 perc_imbalance_allowed,
                 local_search_alg,
@@ -2409,6 +2441,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
 
             fprintf(metricfp, " %lu %lu", *edge_cut, part_diff);
         }
+#endif
 
     }
 

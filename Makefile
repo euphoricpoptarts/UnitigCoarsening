@@ -25,6 +25,9 @@ mtx2csr_hg: mtx2csr_large.cpp
 sgpar: sgpar.c sgpar.h
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DMP_REFINE -o sgpar    sgpar.c     $(LDLIBS)
 
+sgpar_coarse_ec: sgpar.c sgpar.h
+	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DMP_REFINE -DCOARSE_EIGEN_EC -o sgpar    sgpar.c     $(LDLIBS)
+
 sgpar_srefine: sgpar.c sgpar.h
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -o sgpar_srefine sgpar.c     $(LDLIBS)
 
@@ -35,7 +38,10 @@ sgpar_lg: sgpar.c sgpar.h
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DMP_REFINE -DSGPAR_LARGEGRAPHS -o sgpar_lg  sgpar.c     $(LDLIBS)
 
 sgpar_hg: sgpar.c sgpar.h
-	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DMP_REFINE -DSGPAR_HUGEGRAPHS  -o sgpar_hg  sgpar.c     $(LDLIBS)
+	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DMP_REFINE -DSGPAR_HUGEGRAPHS -o sgpar_hg  sgpar.c     $(LDLIBS)
+
+sgpar_hg_coarse_ec: sgpar.c sgpar.h
+	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DMP_REFINE -DSGPAR_HUGEGRAPHS -DCOARSE_EIGEN_EC -o sgpar_hg  sgpar.c     $(LDLIBS)
 
 sgpar_hg_srefine: sgpar.c sgpar.h
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DSGPAR_HUGEGRAPHS  -o sgpar_hg_srefine  sgpar.c     $(LDLIBS)
