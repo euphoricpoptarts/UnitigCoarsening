@@ -80,6 +80,7 @@ public:
 			f << "'coarsen-duration-seconds':" << coarsenDurationSeconds << ',';
 			f << "'refine-duration-seconds':" << refineDurationSeconds << ',';
 			f << "'coarsen-sort-duration-seconds':" << coarsenSortDurationSeconds << ',';
+			f << "'number-coarse-levels':" << numCoarseLevels << ',';
 			f << "'coarse-levels:':[";
 
 			bool firstLog = true;
