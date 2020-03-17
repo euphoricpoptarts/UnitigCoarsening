@@ -14,7 +14,15 @@ include $(KOKKOS_PATH)/Makefile.kokkos
 SRC = $(wildcard *par.c)
 OBJ = $(SRC:.c=.o)
 
-all: mtx2csr mtx2csr_hg sgpar sgpar_coarse_ec sgpar_lg sgpar_hg sgpar_hg_coarse_ec sgpar_c sgpar_kokkos sgpar_hg_srefine sgpar_srefine
+all: standard coarse_ec experiments single_thread_refine
+
+standard: mtx2csr mtx2csr_hg sgpar sgpar_lg sgpar_hg sgpar_c sgpar_kokkos
+
+coarse_ec: sgpar_coarse_ec sgpar_hg_coarse_ec 
+
+experiments: sgpar_exp sgpar_hg_exp
+
+single_thread_refine: sgpar_hg_srefine sgpar_srefine
 
 mtx2csr: mtx2csr.cpp
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -o mtx2csr  mtx2csr.cpp
@@ -31,6 +39,9 @@ sgpar_coarse_ec: sgpar.c sgpar.h
 sgpar_srefine: sgpar.c sgpar.h
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -o sgpar_srefine sgpar.c     $(LDLIBS)
 
+sgpar_exp: sgpar.c sgpar.h
+	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DMP_REFINE -DEXPERIMENT -o sgpar_exp    sgpar.c     $(LDLIBS)
+
 sgpar_kokkos: $(OBJ) $(KOKKOS_LINK_DEPENDS)
 	$(CXX) $(CXXFLAGS) $(KOKKOS_LDFLAGS) $(OBJ) $(KOKKOS_LIBS) $(LDLIBS) -o sgpar.kokkos
 
@@ -39,6 +50,9 @@ sgpar_lg: sgpar.c sgpar.h
 
 sgpar_hg: sgpar.c sgpar.h
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DMP_REFINE -DSGPAR_HUGEGRAPHS -o sgpar_hg  sgpar.c     $(LDLIBS)
+
+sgpar_hg_exp: sgpar.c sgpar.h
+	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DMP_REFINE -DSGPAR_HUGEGRAPHS -DEXPERIMENT -o sgpar_hg_exp  sgpar.c     $(LDLIBS)
 
 sgpar_hg_coarse_ec: sgpar.c sgpar.h
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DMP_REFINE -DSGPAR_HUGEGRAPHS -DCOARSE_EIGEN_EC -o sgpar_hg_coarse_ec sgpar.c     $(LDLIBS)
