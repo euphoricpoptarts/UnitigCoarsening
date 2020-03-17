@@ -71,14 +71,30 @@ int main(int argc, char **argv) {
     
     for (int i=0; i<num_iter; i++) {
         long edgecut = 0;
+#ifdef EXPERIMENT
+        ExperimentLoggerUtil experiment;
+#endif
         CHECK_SGPAR( sgp_partition_graph(part, 2, &edgecut, coarsening_alg, 
                                         refine_alg, local_search_alg, 0, g,
-                                        metrics, best_part, compare_part, &rng) );
+#ifdef EXPERIMENT
+            experiment,
+#endif
+                                        best_part, compare_part, &rng) );
 
         
         if (edgecut < edgecut_min) {
             edgecut_min = edgecut;
         }
+#ifdef EXPERIMENT
+        bool first = true, last = true;
+        if (i > 0) {
+            first = false;
+        }
+        if (last + 1 < num_iter) {
+            last = false;
+        }
+        experiment.log(metrics, first, last);
+#endif
     }
     printf("graph %s, min edgecut found is %ld\n", 
                     filename, edgecut_min);

@@ -30,6 +30,10 @@
 #else 
 #include <algorithm>          // for STL sort
 #endif
+
+#ifdef EXPERIMENT
+#include "ExperimentLoggerUtil.cpp"
+#endif
 #else
 #include <stdatomic.h>
 #endif
@@ -1141,7 +1145,11 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(sgp_real_t *u, sgp_graph_t g){
                     ceil(1.0/(1.0-eigenval*1e-9)));
 }
 
-SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int final, const char* metricsFilename) {
+SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int final
+#ifdef EXPERIMENT
+    , ExperimentalLoggerUtil& experiment
+#endif
+) {
 
     sgp_vid_t n = g.nvertices;
 
@@ -1264,13 +1272,9 @@ Kokkos::initialize();
     }
     printf("number of iterations: %lu\n", niter);
 
-    FILE *metricfp = fopen(metricsFilename, "a");
-    if (metricfp == NULL) {
-        printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
-    } else {
-        fprintf(metricfp, "%lu %d ", niter, max_iter_reached);
-        fclose(metricfp);
-    }
+#ifdef EXPERIMENT
+    experiment.addCoarseLevel(niter, max_iter_reached, 0);
+#endif
 
     if(!normLap && final){
         sgp_power_iter_eigenvalue_log(u, g);
@@ -1407,7 +1411,11 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(sgp_real_t *u, sgp_graph_t g){
                     ceil(1.0/(1.0-eigenval*1e-9)));
 }
 
-SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, const int final, const char* metricsFilename) {
+SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, const int final
+#ifdef EXPERIMENT
+    , ExperimentalLoggerUtil& experiment
+#endif
+) {
 
     sgp_vid_t n = g.nvertices;
 
@@ -1557,13 +1565,9 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
         max_iter_reached = 1;
     }
     printf("number of iterations: %lu\n", g_niter);
-    FILE *metricfp = fopen(metricsFilename, "a");
-    if (metricfp == NULL) {
-        printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
-    } else {
-        fprintf(metricfp, "%lu %d ", g_niter, max_iter_reached);
-        fclose(metricfp);
-    }
+#ifdef EXPERIMENT
+    experiment.addCoarseLevel(niter, max_iter_reached, 0);
+#endif
     if(!normLap && final){
         sgp_power_iter_eigenvalue_log(u, g);
     }
@@ -1694,7 +1698,11 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(sgp_real_t* u, sgp_graph_t g) {
         ceil(1.0 / (1.0 - eigenval * 1e-9)));
 }
 
-SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int final, const char* metricsFilename) {
+SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int final
+#ifdef EXPERIMENT
+    , ExperimentalLoggerUtil& experiment
+#endif
+                            ) {
 
     sgp_vid_t n = g.nvertices;
 
@@ -1842,14 +1850,9 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int fina
         max_iter_reached = 1;
     }
     printf("number of iterations: %lu\n", niter);
-    FILE* metricfp = fopen(metricsFilename, "a");
-    if (metricfp == NULL) {
-        printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
-    }
-    else {
-        fprintf(metricfp, "%lu %d ", niter, max_iter_reached);
-        fclose(metricfp);
-    }
+#ifdef EXPERIMENT
+        experiment.addCoarseLevel(niter, max_iter_reached, 0);
+#endif
     if (!normLap && final) {
         sgp_power_iter_eigenvalue_log(u, g);
     }
@@ -2117,7 +2120,9 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                   const int local_search_alg, 
                                   const int perc_imbalance_allowed,
                                   const sgp_graph_t g,
-                                  const char *metricsFilename,
+#ifdef EXPERIMENT
+    ExperimentalLoggerUtil& experiment,
+#endif
                                   const sgp_vid_t * best_part,
                                   const int compare_part,
                                   sgp_pcg32_random_t* rng);
@@ -2236,7 +2241,9 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                   const int local_search_alg, 
                                   const int perc_imbalance_allowed,
                                   const sgp_graph_t g,
-                                  const char *metricsFilename,
+#ifdef EXPERIMENT
+                                  ExperimentalLoggerUtil& experiment,
+#endif
                                   const sgp_vid_t * best_part,
                                   const int compare_part,
                                   sgp_pcg32_random_t* rng) {
@@ -2307,10 +2314,18 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         printf("Coarsening level %d, ", num_coarsening_levels-1);        
         if (refine_alg == 0) {
             CHECK_SGPAR( sgp_power_iter(eigenvec[num_coarsening_levels-1], 
-                   g_all[num_coarsening_levels-1], 0, 0, metricsFilename) );
+                g_all[num_coarsening_levels-1], 0, 0
+#ifdef EXPERIMENT
+                , experiment 
+#endif
+            ) );
         } else {
             CHECK_SGPAR( sgp_power_iter(eigenvec[num_coarsening_levels-1], 
-                   g_all[num_coarsening_levels-1], 1, 0, metricsFilename) );
+                   g_all[num_coarsening_levels-1], 1, 0
+#ifdef EXPERIMENT
+                , experiment
+#endif
+            ) );
         }
     }
 
@@ -2348,9 +2363,17 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         if (l > 0) {
             printf("Coarsening level %d, ", l);
             if (refine_alg == 0) {
-                sgp_power_iter(eigenvec[l], g_all[l], 0, 0, metricsFilename);
+                sgp_power_iter(eigenvec[l], g_all[l], 0, 0
+#ifdef EXPERIMENT
+                    , experiment
+#endif
+                );
             } else {
-                sgp_power_iter(eigenvec[l], g_all[l], 1, 0, metricsFilename);
+                sgp_power_iter(eigenvec[l], g_all[l], 1, 0
+#ifdef EXPERIMENT
+                    , experiment
+#endif
+                );
             }
         }
     }
@@ -2376,10 +2399,18 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         if (l > 0) {
             printf("Coarsening level %d, ", l);
             if (refine_alg == 0) {
-                sgp_power_iter(eigenvec[l], g_all[l], 0, 0, metricsFilename);
+                sgp_power_iter(eigenvec[l], g_all[l], 0, 0
+#ifdef EXPERIMENT
+                    , experiment
+#endif
+                );
             }
             else {
-                sgp_power_iter(eigenvec[l], g_all[l], 1, 0, metricsFilename);
+                sgp_power_iter(eigenvec[l], g_all[l], 1, 0
+#ifdef EXPERIMENT
+                    , experiment
+#endif
+                );
             }
         }
     }
@@ -2389,9 +2420,17 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
 
     printf("Coarsening level %d, ", 0);
     if (refine_alg == 0) {
-        CHECK_SGPAR( sgp_power_iter(eigenvec[0], g_all[0], 0, 1, metricsFilename) );
+        CHECK_SGPAR( sgp_power_iter(eigenvec[0], g_all[0], 0, 1
+#ifdef EXPERIMENT
+            , experiment
+#endif
+        ) );
     } else {
-        CHECK_SGPAR( sgp_power_iter(eigenvec[0], g_all[0], 1, 1, metricsFilename) );
+        CHECK_SGPAR( sgp_power_iter(eigenvec[0], g_all[0], 1, 1
+#ifdef EXPERIMENT
+            , experiment
+#endif
+        ));
     }
     double fin_final_level_time = sgp_timer();
 
@@ -2410,19 +2449,17 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                     100*(fin_refine_time-fin_coarsening_time)/
                     (fin_final_level_time-start_time));
 
+#ifdef EXPERIMENT
+    experiment.setTotalDurationSeconds(fin_final_level_time - start_time);
+    experiment.setCoarsenDurationSeconds(fin_coarsening_time - start_time);
+    experiment.setRefineDurationSeconds(fin_refine_time - fin_coarsening_time);
+    experiment.setCoarsenSortDurationSeconds(coarsening_sort_time);
+#endif
+
 
     for (int i=1; i<num_coarsening_levels; i++) {
         sgp_free_graph(&g_all[i]);
     }
-
-    FILE *metricfp = fopen(metricsFilename, "a");
-    if (metricfp == NULL) {
-        printf("Error: Could not open metrics file to append data. Metrics will not be recorded!\n");
-    } else {
-        fprintf(metricfp, "a %3.3lf %3.3lf %3.3lf b", 
-            fin_final_level_time-start_time,
-            fin_coarsening_time-start_time,
-            fin_final_level_time-fin_coarsening_time);
 
 #ifdef COARSE_EIGEN_EC
         for (int l = num_coarsening_levels - 1; l >= 1; l--) {
@@ -2439,11 +2476,9 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                 CHECK_SGPAR(compute_partition_edit_distance(part, best_part, g.nvertices, &part_diff));
             }
 
-            fprintf(metricfp, " %lu %lu", *edge_cut, part_diff);
+            //fprintf(metricfp, " %lu %lu", *edge_cut, part_diff);
         }
 #endif
-
-    }
 
     
 
@@ -2457,10 +2492,10 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         CHECK_SGPAR(compute_partition_edit_distance(part, best_part, g.nvertices, &part_diff));
     }
 
-    if (metricfp != NULL) {
-        fprintf(metricfp, " %lu %lu\n", *edge_cut, part_diff);
-        fclose(metricfp);
-    }
+#ifdef EXPERIMENT
+        experiment.setFinestEdgeCut(*edge_cut);
+        experiment.setPartitionDiff(part_diff);
+#endif
 
     sgp_improve_partition(part, num_partitions, edge_cut,
                            perc_imbalance_allowed,
