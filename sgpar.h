@@ -1273,7 +1273,7 @@ Kokkos::initialize();
     printf("number of iterations: %lu\n", niter);
 
 #ifdef EXPERIMENT
-    experiment.addCoarseLevel(niter, max_iter_reached, 0);
+    experiment.addCoarseLevel(g_niter, max_iter_reached, 0);
 #endif
 
     if(!normLap && final){
@@ -1566,7 +1566,7 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
     }
     printf("number of iterations: %lu\n", g_niter);
 #ifdef EXPERIMENT
-    experiment.addCoarseLevel(niter, max_iter_reached, 0);
+    experiment.addCoarseLevel(g_niter, max_iter_reached, 0);
 #endif
     if(!normLap && final){
         sgp_power_iter_eigenvalue_log(u, g);
