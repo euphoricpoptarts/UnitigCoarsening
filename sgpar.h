@@ -1147,7 +1147,7 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(sgp_real_t *u, sgp_graph_t g){
 
 SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int final
 #ifdef EXPERIMENT
-    , ExperimentalLoggerUtil& experiment
+    , ExperimentLoggerUtil& experiment
 #endif
 ) {
 
@@ -1413,7 +1413,7 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(sgp_real_t *u, sgp_graph_t g){
 
 SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, const int final
 #ifdef EXPERIMENT
-    , ExperimentalLoggerUtil& experiment
+    , ExperimentLoggerUtil& experiment
 #endif
 ) {
 
@@ -1700,7 +1700,7 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(sgp_real_t* u, sgp_graph_t g) {
 
 SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int final
 #ifdef EXPERIMENT
-    , ExperimentalLoggerUtil& experiment
+    , ExperimentLoggerUtil& experiment
 #endif
                             ) {
 
@@ -2121,7 +2121,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                   const int perc_imbalance_allowed,
                                   const sgp_graph_t g,
 #ifdef EXPERIMENT
-    ExperimentalLoggerUtil& experiment,
+    ExperimentLoggerUtil& experiment,
 #endif
                                   const sgp_vid_t * best_part,
                                   const int compare_part,
@@ -2242,7 +2242,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                   const int perc_imbalance_allowed,
                                   const sgp_graph_t g,
 #ifdef EXPERIMENT
-                                  ExperimentalLoggerUtil& experiment,
+                                  ExperimentLoggerUtil& experiment,
 #endif
                                   const sgp_vid_t * best_part,
                                   const int compare_part,
