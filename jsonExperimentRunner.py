@@ -48,7 +48,7 @@ def processGraph(filepath, metricDir, logFile):
             printStat("Coarsening sort duration", coarsenSortTimes, output)
             printStat("Refine duration", refineTimes, output)
             printStat("Edge cut", edgeCuts, output)
-            printStat("Coarse levels", coarseLevels, output)
+            printStat("Coarse levels", numCoarseLevels, output)
             coarseLevel = numCoarseLevels - 1
             for level in coarseLevels:
                 printStat("Coarse level {} refine iterations".format(coarseLevel), [l['refine-iterations'] for l in level], output)
