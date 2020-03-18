@@ -64,7 +64,7 @@ sgpar_c: sgpar.c sgpar.h
 	$(CC) $(CFLAGS) $(OMPFLAGS) -DMP_REFINE -o sgpar_c  sgpar.c   -lm $(LDLIBS)
 
 clean:
-	rm -f mtx2csr sgpar_c sgpar sgpar_coarse_ec sgpar_lg sgpar_hg sgpar_hg_coarse_ec sgpar.kokkos sgpar_hg_srefine sgpar_srefine *.o KokkosCore_config.h KokkosCore_config.tmp
+	rm -f mtx2csr sgpar_c sgpar sgpar_coarse_ec sgpar_lg sgpar_hg sgpar_hg_coarse_ec sgpar.kokkos sgpar_hg_srefine sgpar_srefine sgpar_exp sgpar_hg_exp *.o KokkosCore_config.h KokkosCore_config.tmp
 
 %.o:%.c $(KOKKOS_CPP_DEPENDS)
 	$(CXX) $(KOKKOS_CPPFLAGS) $(KOKKOS_CXXFLAGS) $(CXXFLAGS) $(EXTRA_INC) $(OMPFLAGS) -D_KOKKOS -c $<
