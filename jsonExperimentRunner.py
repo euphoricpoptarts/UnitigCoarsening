@@ -39,8 +39,8 @@ def processGraph(filepath, metricDir, logFile):
         coarsenSortTimes = [d['coarsen-sort-duration-seconds'] for d in data]
         refineTimes = [d['refine-duration-seconds'] for d in data]
         edgeCuts = [d['edge-cut'] for d in data]
-        refineIterations = list(zip(*[d['coarse-levels'] for d in data]))
-        coarseLevels = [d['number-coarse-levels'] for d in data]
+        coarseLevels = list(zip(*[d['coarse-levels'] for d in data]))
+        numCoarseLevels = [d['number-coarse-levels'] for d in data]
 
         with open(logFile, "w") as output:
             printStat("Total duration", times, output)
@@ -49,7 +49,7 @@ def processGraph(filepath, metricDir, logFile):
             printStat("Refine duration", refineTimes, output)
             printStat("Edge cut", edgeCuts, output)
             printStat("Coarse levels", coarseLevels, output)
-            coarseLevel = coarseLevels - 1
+            coarseLevel = numCoarseLevels - 1
             for level in coarseLevels:
                 printStat("Coarse level {} refine iterations".format(coarseLevel), [l['refine-iterations'] for l in level], output)
                 coarseLevel = coarseLevel - 1
