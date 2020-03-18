@@ -89,7 +89,7 @@ public:
 					f << ',';
 				}
 				l.log(f);
-				firstLog = true;
+				firstLog = false;
 			}
 
 			f << "]";
