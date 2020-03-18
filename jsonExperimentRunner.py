@@ -15,7 +15,7 @@ def printStat(fieldTitle, statList, outfile):
     max_s = max(statList)
     avg = mean(statList)
     sdev = stdev(statList)
-    print("{}: mean={}, min={}, max={}, std-dev={}".format(fieldTitle, min_s, max_s, avg, sdev), file=outfile)
+    print("{}: mean={}, min={}, max={}, std-dev={}".format(fieldTitle, avg, min_s, max_s, sdev), file=outfile)
 
 def processGraph(filepath, metricDir, logFile):
     
