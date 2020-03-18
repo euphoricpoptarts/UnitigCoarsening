@@ -2,7 +2,7 @@ import sys
 import os
 from glob import glob
 from parse import parse
-from statistics import mean, stdev
+from statistics import mean, stdev, median
 import secrets
 import json
 from pathlib import Path
@@ -15,7 +15,8 @@ def printStat(fieldTitle, statList, outfile):
     max_s = max(statList)
     avg = mean(statList)
     sdev = stdev(statList)
-    print("{}: mean={}, min={}, max={}, std-dev={}".format(fieldTitle, avg, min_s, max_s, sdev), file=outfile)
+    med = median(statList)
+    print("{}: mean={}, median={}, min={}, max={}, std-dev={}".format(fieldTitle, avg, med, min_s, max_s, sdev), file=outfile)
 
 def processGraph(filepath, metricDir, logFile):
     
