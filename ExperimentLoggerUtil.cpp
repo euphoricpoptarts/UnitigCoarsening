@@ -19,9 +19,9 @@ private:
 
 		void log(std::ofstream& f) {
 			f << "{";
-			f << "'refine-iterations':" << refineIterations << ',';
-			f << "'iteration-max-reached':" << iterationMaxReached << ',';
-			f << "'unrefined-edge-cut':" << unrefinedEdgeCut;
+			f << "\"refine-iterations\":" << refineIterations << ',';
+			f << "\"iteration-max-reached\":" << iterationMaxReached << ',';
+			f << "\"unrefined-edge-cut\":" << unrefinedEdgeCut;
 			f << "}";
 		}
 	};
@@ -74,14 +74,14 @@ public:
 				f << "[";
 			}
 			f << "{";
-			f << "'edge-cut':" << finestEdgeCut << ',';
-			f << "'partition-diff':" << partitionDiff << ',';
-			f << "'total-duration-seconds':" << totalDurationSeconds << ',';
-			f << "'coarsen-duration-seconds':" << coarsenDurationSeconds << ',';
-			f << "'refine-duration-seconds':" << refineDurationSeconds << ',';
-			f << "'coarsen-sort-duration-seconds':" << coarsenSortDurationSeconds << ',';
-			f << "'number-coarse-levels':" << numCoarseLevels << ',';
-			f << "'coarse-levels:':[";
+			f << "\"edge-cut\":" << finestEdgeCut << ',';
+			f << "\"partition-diff\":" << partitionDiff << ',';
+			f << "\"total-duration-seconds\":" << totalDurationSeconds << ',';
+			f << "\"coarsen-duration-seconds\":" << coarsenDurationSeconds << ',';
+			f << "\"refine-duration-seconds\":" << refineDurationSeconds << ',';
+			f << "\"coarsen-sort-duration-seconds\":" << coarsenSortDurationSeconds << ',';
+			f << "\"number-coarse-levels\":" << numCoarseLevels << ',';
+			f << "\"coarse-levels\":[";
 
 			bool firstLog = true;
 			for (CoarseLevel l : coarseLevels) {
