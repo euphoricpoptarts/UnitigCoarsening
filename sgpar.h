@@ -2452,7 +2452,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
 #ifdef EXPERIMENT
     experiment.setTotalDurationSeconds(fin_final_level_time - start_time);
     experiment.setCoarsenDurationSeconds(fin_coarsening_time - start_time);
-    experiment.setRefineDurationSeconds(fin_refine_time - fin_coarsening_time);
+    experiment.setRefineDurationSeconds(fin_final_level_time - fin_coarsening_time);
     experiment.setCoarsenSortDurationSeconds(coarsening_sort_time);
 #endif
 
