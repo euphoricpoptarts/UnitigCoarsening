@@ -259,7 +259,7 @@ SGPAR_API int sgp_coarsen_heavy_edge_matching(sgp_vid_t* vcmap,
 
 }
 
-#ifndef _KOKKOS
+#ifdef _OPENMP
 SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap, 
                               sgp_vid_t *nvertices_coarse_ptr, 
                               const sgp_graph_t g, 
@@ -385,7 +385,7 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
     
     return EXIT_SUCCESS;
 }
-#else
+#elif defined(_KOKKOS)
 SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap, 
                               sgp_vid_t *nvertices_coarse_ptr, 
                               const sgp_graph_t g, 
@@ -468,6 +468,89 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
     Kokkos::finalize();
 
     
+    return EXIT_SUCCESS;
+}
+#else
+SGPAR_API int sgp_coarsen_HEC(sgp_vid_t* vcmap,
+    sgp_vid_t* nvertices_coarse_ptr,
+    const sgp_graph_t g,
+    const int coarsening_level,
+    sgp_pcg32_random_t* rng) {
+    sgp_vid_t n = g.nvertices;
+
+    sgp_vid_t* vperm = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(vperm != NULL);
+
+    for (sgp_vid_t i = 0; i < n; i++) {
+        vcmap[i] = SGP_INFTY;
+        vperm[i] = i;
+    }
+
+
+    for (sgp_vid_t i = n - 1; i > 0; i--) {
+        sgp_vid_t v_i = vperm[i];
+#ifndef SGPAR_HUGEGRAPHS
+        uint32_t j = (sgp_pcg32_random_r(rng)) % (i + 1);
+#else
+        uint64_t j1 = (sgp_pcg32_random_r(rng)) % (i + 1);
+        uint64_t j2 = (sgp_pcg32_random_r(rng)) % (i + 1);
+        uint64_t j = ((j1 << 32) + j2) % (i + 1);
+#endif 
+        sgp_vid_t v_j = vperm[j];
+        vperm[i] = v_j;
+        vperm[j] = v_i;
+    }
+
+    sgp_vid_t* hn = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(hn != NULL);
+
+    for (sgp_vid_t i = 0; i < n; i++) {
+        hn[i] = SGP_INFTY;
+    }
+
+    if (coarsening_level == 1) {
+        for (sgp_vid_t i = 0; i < n; i++) {
+            sgp_vid_t adj_size = g.source_offsets[i + 1] - g.source_offsets[i];
+            sgp_vid_t offset = (sgp_pcg32_random_r(rng)) % adj_size;
+            // sgp_vid_t offset = 0;
+            hn[i] = g.destination_indices[g.source_offsets[i] + offset];
+        }
+    }
+    else {
+        for (sgp_vid_t i = 0; i < n; i++) {
+            sgp_vid_t hn_i = g.destination_indices[g.source_offsets[i]];
+            sgp_wgt_t max_ewt = g.eweights[g.source_offsets[i]];
+
+            for (sgp_eid_t j = g.source_offsets[i] + 1;
+                j < g.source_offsets[i + 1]; j++) {
+                if (max_ewt < g.eweights[j]) {
+                    max_ewt = g.eweights[j];
+                    hn_i = g.destination_indices[j];
+                }
+
+            }
+            hn[i] = hn_i;
+        }
+    }
+
+    sgp_vid_t nvertices_coarse = 0;
+
+    for (sgp_vid_t i = 0; i < n; i++) {
+        sgp_vid_t u = vperm[i];
+        sgp_vid_t v = hn[u];
+        if (vcmap[u] == SGP_INFTY) {
+            if (vcmap[v] == SGP_INFTY) {
+                vcmap[v] = nvertices_coarse++;
+            }
+            vcmap[u] = vcmap[v];
+        }
+    }
+
+    free(hn);
+    free(vperm);
+
+    *nvertices_coarse_ptr = nvertices_coarse;
+
     return EXIT_SUCCESS;
 }
 #endif
@@ -715,7 +798,7 @@ Kokkos::finalize();
  
     return EXIT_SUCCESS;
 }
-#else
+#elif defined(_OPENMP)
 
 void parallel_prefix_sum(sgp_eid_t* gc_source_offsets, sgp_vid_t nc, int t_id, int total_threads) {
 
@@ -1005,6 +1088,150 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
  
     return EXIT_SUCCESS;
 }
+#else
+SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc, 
+                                     sgp_vid_t *vcmap, 
+                                     const sgp_graph_t g, 
+                                     const int coarsening_level, 
+                                     double *sort_time) {
+    sgp_vid_t n  = g.nvertices;
+    sgp_eid_t ec_noloops = 0, self_loops = 0;
+    sgp_vid_t *edges_uvw;
+
+    for (sgp_vid_t i=0; i<n; i++) {
+        sgp_vid_t u = vcmap[i];
+        for (sgp_eid_t j=g.source_offsets[i]; j<g.source_offsets[i+1]; j++) {
+            sgp_vid_t v = vcmap[g.destination_indices[j]];
+            if (u == v) {
+                self_loops++;
+            } else {
+                ec_noloops++;
+            }
+        }
+    }
+
+    edges_uvw = (sgp_vid_t *) malloc(3*ec_noloops*sizeof(sgp_vid_t));
+    SGPAR_ASSERT(edges_uvw != NULL);
+
+    sgp_eid_t ec = 0;
+
+    for (sgp_vid_t i=0; i<n; i++) {
+        sgp_vid_t u = vcmap[i];
+        for (sgp_eid_t j=g.source_offsets[i]; j<g.source_offsets[i+1]; j++) {
+            sgp_vid_t v = vcmap[g.destination_indices[j]];
+            if (u != v) {
+                assert(ec < ec_noloops);
+                edges_uvw[3*ec] = u;
+                edges_uvw[3*ec+1] = v;
+                if (coarsening_level != 1) {
+                    edges_uvw[3*ec+2] = g.eweights[j];
+                } else {
+                    edges_uvw[3*ec+2] = 1;
+                }
+                ec++;
+            }
+        }
+    }
+
+    double elt = sgp_timer();
+#ifdef __cplusplus
+#ifdef USE_GNU_PARALLELMODE
+    __gnu_parallel::sort(((edge_triple_t *) edges_uvw), 
+                         ((edge_triple_t *) edges_uvw)+ec_noloops, uvw_cmpfn_inc,
+                        __gnu_parallel::quicksort_tag());
+#else
+    std::sort(((edge_triple_t *) edges_uvw), 
+              ((edge_triple_t *) edges_uvw)+ec_noloops,
+              uvw_cmpfn_inc);
+#endif
+#else
+    qsort(edges_uvw, ec_noloops, 3*sizeof(sgp_vid_t), uvw_cmpfn_inc);
+#endif
+    *sort_time += (sgp_timer() - elt);
+    sgp_vid_t nc = gc->nvertices;
+    sgp_vid_t *gc_degree = (sgp_vid_t *) malloc(nc*sizeof(sgp_vid_t));
+    SGPAR_ASSERT(gc_degree != NULL);
+
+    for (sgp_vid_t i=0; i<nc; i++) {
+        gc_degree[i] = 0;
+    }
+
+    gc_degree[0]++;
+    for (sgp_vid_t i=1; i<ec_noloops; i++) {
+        sgp_vid_t prev_u = edges_uvw[3*(i-1)];
+        sgp_vid_t prev_v = edges_uvw[3*(i-1)+1];
+        sgp_vid_t curr_u = edges_uvw[3*i];
+        sgp_vid_t curr_v = edges_uvw[3*i+1];
+        if ((curr_u != prev_u) || (curr_v != prev_v)) {
+            gc_degree[curr_u]++;
+        }
+    }
+
+    sgp_eid_t *gc_source_offsets = (sgp_eid_t *) 
+                                   malloc((gc->nvertices+1)*sizeof(sgp_eid_t));
+    SGPAR_ASSERT(gc_source_offsets != NULL);
+
+    gc_source_offsets[0] = 0;
+    for (sgp_vid_t i=0; i<nc; i++) {
+        gc_source_offsets[i+1] = gc_source_offsets[i] + gc_degree[i]; 
+    }
+    sgp_eid_t gc_nedges = gc_source_offsets[nc]/2;
+
+    sgp_vid_t *gc_destination_indices = (sgp_vid_t *) 
+                                   malloc(2*gc_nedges*sizeof(sgp_eid_t));
+    SGPAR_ASSERT(gc_destination_indices != NULL);
+
+    sgp_wgt_t *gc_eweights = (sgp_wgt_t *) 
+                                   malloc(2*gc_nedges*sizeof(sgp_wgt_t));
+    SGPAR_ASSERT(gc_eweights != NULL);
+
+    for (sgp_vid_t i=0; i<nc; i++) {
+        gc_degree[i] = 0;
+    }
+
+    gc_degree[0] = 1;
+    gc_destination_indices[0] = edges_uvw[1];
+    gc_eweights[0] = edges_uvw[2];
+    for (sgp_eid_t i=1; i<ec_noloops; i++) { 
+        sgp_vid_t curr_u = edges_uvw[3*i];
+        sgp_vid_t curr_v = edges_uvw[3*i+1];
+
+        sgp_vid_t prev_u = edges_uvw[3*(i-1)];
+        sgp_vid_t prev_v = edges_uvw[3*(i-1)+1];
+        sgp_eid_t eloc   = gc_source_offsets[curr_u] + gc_degree[curr_u];
+        if ((curr_u != prev_u) || (curr_v != prev_v)) {
+            gc_destination_indices[eloc] = curr_v;
+            gc_eweights[eloc] = edges_uvw[3*i+2];
+            gc_degree[curr_u]++;
+        } else {
+            gc_eweights[eloc-1] += edges_uvw[3*i+2];
+        }
+    }
+
+    gc->nedges = gc_nedges;
+    gc->destination_indices = gc_destination_indices;
+    gc->source_offsets = gc_source_offsets;
+    gc->eweights = gc_eweights;
+    
+    gc->weighted_degree = (sgp_wgt_t *) malloc(gc->nvertices 
+                                               * sizeof(sgp_wgt_t));
+    assert(gc->weighted_degree != NULL);
+
+    sgp_vid_t gcn = gc->nvertices;
+    for (sgp_vid_t i=0; i<gcn; i++) {
+        sgp_wgt_t degree_wt_i = 0;
+        for (sgp_eid_t j=gc->source_offsets[i]; j<gc->source_offsets[i+1]; j++) {
+            degree_wt_i += gc->eweights[j];
+        }
+        gc->weighted_degree[i] = degree_wt_i;
+    }
+
+
+    free(edges_uvw);
+    free(gc_degree);
+ 
+    return EXIT_SUCCESS;
+}
 #endif 
 
 SGPAR_API int sgp_coarsen_one_level(sgp_graph_t *gc, sgp_vid_t *vcmap, 
@@ -1291,7 +1518,7 @@ Kokkos::finalize();
 
     return EXIT_SUCCESS;
 }
-#elif defined(MP_REFINE)
+#elif defined(_OPENMP)
 SGPAR_API int sgp_vec_normalize_omp(sgp_real_t *u, int64_t n) {
 
     assert(u != NULL);
@@ -1584,21 +1811,13 @@ SGPAR_API int sgp_vec_normalize_omp(sgp_real_t* u, int64_t n) {
     assert(u != NULL);
     static sgp_real_t squared_sum = 0;
 
-//#pragma omp single
     squared_sum = 0;
 
-//#pragma omp for reduction(+:squared_sum)
     for (int64_t i = 0; i < n; i++) {
         squared_sum += u[i] * u[i];
     }
     sgp_real_t sum_inv = 1 / sqrt(squared_sum);
 
-//#pragma omp single 
-    {
-        //printf("squared_sum %3.3f\n", squared_sum);
-    }
-
-//#pragma omp for
     for (int64_t i = 0; i < n; i++) {
         u[i] = u[i] * sum_inv;
     }
@@ -1610,10 +1829,8 @@ SGPAR_API int sgp_vec_dotproduct_omp(sgp_real_t* dot_prod_ptr,
 
     static sgp_real_t dot_prod = 0;
 
-//#pragma omp single
     dot_prod = 0;
 
-//#pragma omp for reduction(+:dot_prod)
     for (int64_t i = 0; i < n; i++) {
         dot_prod += u1[i] * u2[i];
     }
@@ -1628,7 +1845,6 @@ SGPAR_API int sgp_vec_orthogonalize_omp(sgp_real_t* u1, sgp_real_t* u2, int64_t 
     sgp_real_t mult1;
     sgp_vec_dotproduct_omp(&mult1, u1, u2, n);
 
-//#pragma omp for
     for (int64_t i = 0; i < n; i++) {
         u1[i] -= mult1 * u2[i];
     }
@@ -1646,19 +1862,14 @@ SGPAR_API int sgp_vec_D_orthogonalize_omp(sgp_real_t* u1, sgp_real_t* u2,
     static sgp_real_t mult_numer = 0;
     static sgp_real_t mult_denom = 0;
 
-//#pragma omp single
-    {
-        mult_numer = 0;
-        mult_denom = 0;
-    }
+    mult_numer = 0;
+    mult_denom = 0;
 
-//#pragma omp for reduction(+:mult_numer, mult_denom)
     for (int64_t i = 0; i < n; i++) {
         mult_numer += u1[i] * D[i] * u2[i];
         mult_denom += u2[i] * D[i] * u2[i];
     }
 
-//#pragma omp for
     for (int64_t i = 0; i < n; i++) {
         u1[i] -= mult_numer * u2[i] / mult_denom;
     }
@@ -1742,10 +1953,6 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int fina
     uint64_t niter = 0;
     uint64_t iter_max = (uint64_t)SGPAR_POWERITER_ITER / (uint64_t)n;
 
-//#pragma omp parallel shared(u)
-  //  {
-
-//#pragma omp for
         for (sgp_vid_t i = 0; i < n; i++) {
             vec1[i] = 1.0;
         }
@@ -1773,7 +1980,6 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int fina
         sgp_real_t* v = (sgp_real_t*)malloc(n * sizeof(sgp_real_t));
         SGPAR_ASSERT(v != NULL);
 
-//#pragma omp for
         for (sgp_vid_t i = 0; i < n; i++) {
             v[i] = u[i];
         }
@@ -1783,13 +1989,11 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int fina
         while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
 
             // u = v
-//#pragma omp for
             for (sgp_vid_t i = 0; i < n; i++) {
                 u[i] = v[i];
             }
 
             // v = Lu
-//#pragma omp for
             for (sgp_vid_t i = 0; i < n; i++) {
                 // sgp_real_t v_i = g.weighted_degree[i]*u[i];
                 sgp_real_t weighted_degree_inv, v_i;
@@ -1842,7 +2046,6 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int fina
             printf("number of iterations: %d\n", niter);
         }
         free(v);
-    //}
 
     int max_iter_reached = 0;
     if (niter >= iter_max) {
