@@ -2442,7 +2442,9 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                 CHECK_SGPAR(compute_partition_edit_distance(part, best_part, g.nvertices, &part_diff));
             }
 
+#ifdef EXPERIMENT
             experiment.modifyCoarseLevelEC(l, *edge_cut);
+#endif
         }
 #endif
 
