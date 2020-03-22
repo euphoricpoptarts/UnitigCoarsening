@@ -1135,15 +1135,9 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
 
     double elt = sgp_timer();
 #ifdef __cplusplus
-#ifdef USE_GNU_PARALLELMODE
-    __gnu_parallel::sort(((edge_triple_t *) edges_uvw), 
-                         ((edge_triple_t *) edges_uvw)+ec_noloops, uvw_cmpfn_inc,
-                        __gnu_parallel::quicksort_tag());
-#else
     std::sort(((edge_triple_t *) edges_uvw), 
               ((edge_triple_t *) edges_uvw)+ec_noloops,
               uvw_cmpfn_inc);
-#endif
 #else
     qsort(edges_uvw, ec_noloops, 3*sizeof(sgp_vid_t), uvw_cmpfn_inc);
 #endif
