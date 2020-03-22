@@ -37,7 +37,7 @@ sgpar_coarse_ec: sgpar.c sgpar.h
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DCOARSE_EIGEN_EC -DEXPERIMENT -o sgpar_coarse_ec sgpar.c     $(LDLIBS)
 
 sgpar_serial: sgpar.c sgpar.h
-	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -o sgpar_serial -DEXPERIMENT sgpar.c     $(LDLIBS)
+	$(CXX) $(CXXFLAGS) -o sgpar_serial -DEXPERIMENT sgpar.c     $(LDLIBS)
 
 sgpar_exp: sgpar.c sgpar.h
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DEXPERIMENT -o sgpar_exp    sgpar.c     $(LDLIBS)
@@ -58,7 +58,7 @@ sgpar_hg_coarse_ec: sgpar.c sgpar.h
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DSGPAR_HUGEGRAPHS -DCOARSE_EIGEN_EC -DEXPERIMENT -o sgpar_hg_coarse_ec sgpar.c     $(LDLIBS)
 
 sgpar_hg_serial: sgpar.c sgpar.h
-	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -DSGPAR_HUGEGRAPHS -DEXPERIMENT -o sgpar_hg_serial  sgpar.c     $(LDLIBS)
+	$(CXX) $(CXXFLAGS) -DSGPAR_HUGEGRAPHS -DEXPERIMENT -o sgpar_hg_serial  sgpar.c     $(LDLIBS)
 
 sgpar_c: sgpar.c sgpar.h
 	$(CC) $(CFLAGS) $(OMPFLAGS) -o sgpar_c  sgpar.c   -lm $(LDLIBS)

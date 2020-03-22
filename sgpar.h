@@ -2077,7 +2077,7 @@ SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
         vu_pair[i].u  = i;
     }   
 #ifdef __cplusplus
-#ifdef USE_GNU_PARALLELMODE
+#if defined(USE_GNU_PARALLELMODE) && defined(_OPENMP)
     __gnu_parallel::sort(((sgp_vv_pair_t *) vu_pair), 
                          ((sgp_vv_pair_t *) vu_pair)+n,
                          vu_cmpfn_inc,
