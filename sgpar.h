@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <math.h>
 #include <time.h>
+#include <sys/time.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -1800,7 +1801,7 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
     return EXIT_SUCCESS;
 }
 #else
-SGPAR_API int sgp_vec_normalize_omp(sgp_real_t* u, int64_t n) {
+SGPAR_API int sgp_vec_normalize_serial(sgp_real_t* u, int64_t n) {
 
     assert(u != NULL);
     static sgp_real_t squared_sum = 0;
@@ -1818,7 +1819,7 @@ SGPAR_API int sgp_vec_normalize_omp(sgp_real_t* u, int64_t n) {
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int sgp_vec_dotproduct_omp(sgp_real_t* dot_prod_ptr,
+SGPAR_API int sgp_vec_dotproduct_serial(sgp_real_t* dot_prod_ptr,
     sgp_real_t* u1, sgp_real_t* u2, int64_t n) {
 
     static sgp_real_t dot_prod = 0;
@@ -1834,10 +1835,10 @@ SGPAR_API int sgp_vec_dotproduct_omp(sgp_real_t* dot_prod_ptr,
 }
 
 
-SGPAR_API int sgp_vec_orthogonalize_omp(sgp_real_t* u1, sgp_real_t* u2, int64_t n) {
+SGPAR_API int sgp_vec_orthogonalize_serial(sgp_real_t* u1, sgp_real_t* u2, int64_t n) {
 
     sgp_real_t mult1;
-    sgp_vec_dotproduct_omp(&mult1, u1, u2, n);
+    sgp_vec_dotproduct_serial(&mult1, u1, u2, n);
 
     for (int64_t i = 0; i < n; i++) {
         u1[i] -= mult1 * u2[i];
@@ -1845,13 +1846,13 @@ SGPAR_API int sgp_vec_orthogonalize_omp(sgp_real_t* u1, sgp_real_t* u2, int64_t 
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int sgp_vec_D_orthogonalize_omp(sgp_real_t* u1, sgp_real_t* u2,
+SGPAR_API int sgp_vec_D_orthogonalize_serial(sgp_real_t* u1, sgp_real_t* u2,
     sgp_wgt_t* D, int64_t n) {
 
     //u1[i] = u1[i] - (dot(u1, D*u2)/dot(u2, D*u2)) * u2[i]
 
     sgp_real_t mult1;
-    sgp_vec_dotproduct_omp(&mult1, u1, u2, n);
+    sgp_vec_dotproduct_serial(&mult1, u1, u2, n);
 
     static sgp_real_t mult_numer = 0;
     static sgp_real_t mult_denom = 0;
@@ -1953,23 +1954,23 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int fina
 
 #if 0
         sgp_real_t mult = 0;
-        sgp_vec_dotproduct_omp(&mult, vec1, u, n);
+        sgp_vec_dotproduct_serial(&mult, vec1, u, n);
 
 #pragma omp for
         for (sgp_vid_t i = 0; i < n; i++) {
             u[i] -= mult * u[i] / n;
         }
-        sgp_vec_normalize_omp(u, n);
+        sgp_vec_normalize_serial(u, n);
 #endif
 
-        sgp_vec_normalize_omp(vec1, n);
+        sgp_vec_normalize_serial(vec1, n);
         if (!normLap) {
-            sgp_vec_orthogonalize_omp(u, vec1, n);
+            sgp_vec_orthogonalize_serial(u, vec1, n);
         }
         else {
-            sgp_vec_D_orthogonalize_omp(u, vec1, g.weighted_degree, n);
+            sgp_vec_D_orthogonalize_serial(u, vec1, g.weighted_degree, n);
         }
-        sgp_vec_normalize_omp(u, n);
+        sgp_vec_normalize_serial(u, n);
 
         sgp_real_t* v = (sgp_real_t*)malloc(n * sizeof(sgp_real_t));
         SGPAR_ASSERT(v != NULL);
@@ -2025,20 +2026,18 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int fina
             }
 
             if (!normLap) {
-                sgp_vec_orthogonalize_omp(v, vec1, n);
+                sgp_vec_orthogonalize_serial(v, vec1, n);
             }
-            sgp_vec_normalize_omp(v, n);
+            sgp_vec_normalize_serial(v, n);
             lastDotprod = dotprod;
-            sgp_vec_dotproduct_omp(&dotprod, u, v, n);
+            sgp_vec_dotproduct_serial(&dotprod, u, v, n);
             niter++;
         }
 
-        if (omp_get_thread_num() == 0) {
-            if (niter == iter_max) {
-                printf("exceeded max iter count, ");
-            }
-            printf("number of iterations: %d\n", niter);
+        if (niter == iter_max) {
+            printf("exceeded max iter count, ");
         }
+        printf("number of iterations: %d\n", niter);
         free(v);
 
     int max_iter_reached = 0;
