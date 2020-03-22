@@ -2329,55 +2329,6 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         }
     }
 
-#ifdef COARSE_EIGEN_EC
-    sgp_real_t* prolonged_eigenvec[SGPAR_COARSENING_MAXLEVELS];
-    for (int l=num_coarsening_levels-2; l>=0; l--) {
-        sgp_vid_t gcl_n = g_all[l].nvertices;
-        eigenvec[l] = (sgp_real_t *) malloc(gcl_n*sizeof(sgp_real_t));
-        SGPAR_ASSERT(eigenvec[l] != NULL);
-
-        prolonged_eigenvec[l + 1] = (sgp_real_t*)malloc(gcl_n * sizeof(sgp_real_t));
-        SGPAR_ASSERT(prolonged_eigenvec[l+1] != NULL);
-        //prolong eigenvector from coarser level to finer level
-        for (sgp_vid_t i=0; i<gcl_n; i++) {
-            eigenvec[l][i] = eigenvec[l+1][vcmap[l][i]];
-            prolonged_eigenvec[l + 1][i] = eigenvec[l][i];
-        }
-        free(eigenvec[l+1]);
-
-        //prolong l+1 eigenvector to finest level
-        for (int l2 = l - 1; l2 >= 0; l2--) {
-            sgp_real_t* prev_prolonged = prolonged_eigenvec[l + 1];
-            sgp_vid_t gcl2_n = g_all[l2].nvertices;
-            prolonged_eigenvec[l + 1] = (sgp_real_t*)malloc(gcl2_n * sizeof(sgp_real_t));
-            SGPAR_ASSERT(prolonged_eigenvec[l + 1] != NULL);
-            for (sgp_vid_t i = 0; i < gcl2_n; i++) {
-                prolonged_eigenvec[l + 1][i] = prev_prolonged[vcmap[l2][i]];
-            }
-            free(prev_prolonged);
-        }
-
-        free(vcmap[l]);
-
-        sgp_vec_normalize(eigenvec[l], gcl_n);
-        if (l > 0) {
-            printf("Coarsening level %d, ", l);
-            if (refine_alg == 0) {
-                sgp_power_iter(eigenvec[l], g_all[l], 0, 0
-#ifdef EXPERIMENT
-                    , experiment
-#endif
-                );
-            } else {
-                sgp_power_iter(eigenvec[l], g_all[l], 1, 0
-#ifdef EXPERIMENT
-                    , experiment
-#endif
-                );
-            }
-        }
-    }
-#else
     for (int l = num_coarsening_levels - 2; l >= 0; l--) {
         sgp_vid_t gcl_n = g_all[l].nvertices;
         eigenvec[l] = (sgp_real_t*)malloc(gcl_n * sizeof(sgp_real_t));
@@ -2390,8 +2341,10 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
             eigenvec[l][i] = eigenvec[l + 1][vcmap[l][i]];
             prolonged_eigenvec[i] = eigenvec[l][i];
         }
+#ifndef COARSE_EIGEN_EC
         free(eigenvec[l + 1]);
         free(vcmap[l]);
+#endif
 
         sgp_vec_normalize(eigenvec[l], gcl_n);
 
@@ -2414,7 +2367,6 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
             }
         }
     }
-#endif
 
     double fin_refine_time = sgp_timer();
 
@@ -2464,19 +2416,33 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
 #ifdef COARSE_EIGEN_EC
         for (int l = num_coarsening_levels - 1; l >= 1; l--) {
             printf("Computing edge cut for eigenvector prolonged from coarse level %d\n", l);
+
+            //prolong eigenvector to finest level
+            for (int l2 = l - 1; l2 >= 0; l2--) {
+                sgp_real_t* prev_prolonged = eigenvec[l];
+                sgp_vid_t gcl2_n = g_all[l2].nvertices;
+                sgp_real_t* prolonged_eigenvec = (sgp_real_t*)malloc(gcl2_n * sizeof(sgp_real_t));
+                SGPAR_ASSERT(prolonged_eigenvec != NULL);
+                for (sgp_vid_t i = 0; i < gcl2_n; i++) {
+                    prolonged_eigenvec[i] = prev_prolonged[vcmap[l2][i]];
+                }
+                free(prev_prolonged);
+                eigenvec[l] = prolonged_eigenvec;
+            }
             sgp_compute_partition(part, num_partitions, edge_cut,
                 perc_imbalance_allowed,
                 local_search_alg,
-                prolonged_eigenvec[l], g);
+                eigenvec[l], g);
 
-            free(prolonged_eigenvec[l]);
-            
+            free(vcmap[l - 1]);
+            free(eigenvec[l]);
+
             unsigned int part_diff = 0;
             if (compare_part) {
                 CHECK_SGPAR(compute_partition_edit_distance(part, best_part, g.nvertices, &part_diff));
             }
 
-            //fprintf(metricfp, " %lu %lu", *edge_cut, part_diff);
+            experiment.modifyCoarseLevelEC(l, *edge_cut);
         }
 #endif
 

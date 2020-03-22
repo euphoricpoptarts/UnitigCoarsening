@@ -41,6 +41,11 @@ public:
 		numCoarseLevels++;
 	}
 
+	void modifyCoarseLevelEC(int level, uint64_t unrefinedEdgeCut) {
+		//coarse levels are 1-indexed
+		coarseLevels[level - 1].unrefinedEdgeCut = unrefinedEdgeCut;
+	}
+
 	void setFinestEdgeCut(uint64_t finestEdgeCut) {
 		this->finestEdgeCut = finestEdgeCut;
 	}
