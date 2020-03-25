@@ -16,6 +16,8 @@
 
 #ifdef _OPENMP
 #include <omp.h>
+#else
+#include <sys/time.h>
 #endif
 
 #ifdef _KOKKOS
@@ -289,8 +291,10 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
     sgp_vid_t *hn = (sgp_vid_t *) malloc(n * sizeof(sgp_vid_t));
     SGPAR_ASSERT(hn != NULL);
 
+#ifdef _OPENMP
 	omp_lock_t * v_locks = (omp_lock_t*) malloc(n * sizeof(omp_lock_t));
 	SGPAR_ASSERT(v_locks != NULL);
+#endif
 
 #ifdef __cplusplus
 	std::atomic<sgp_vid_t> nvertices_coarse(0);
@@ -301,7 +305,11 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
 #pragma omp parallel
 {
 
+#ifdef _OPENMP
 	int tid = omp_get_thread_num();
+#else
+    int tid = 0;
+#endif
 	sgp_pcg32_random_t t_rng;
 	t_rng.state = rng->state + tid;
 	t_rng.inc = rng->inc;
@@ -339,43 +347,53 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
 		}
 	}
 
+#ifdef _OPENMP
 #pragma omp for
     for(sgp_vid_t i = 0; i < n; i++){
         omp_init_lock(v_locks + i);
     }
+#endif
 
 #pragma omp for
 	for (sgp_vid_t i = 0; i < n; i++) {
 		sgp_vid_t u = vperm[i];
 		sgp_vid_t v = hn[u];
 
+#ifdef _OPENMP
 		sgp_vid_t less = u, more = v;
 		if (v < u) {
 			less = v;
 			more = u;
 		}
-
 		omp_set_lock(v_locks + less);
 		omp_set_lock(v_locks + more);
+#endif
 		if (vcmap[u] == SGP_INFTY) {
 			if (vcmap[v] == SGP_INFTY) {
 				vcmap[v] = nvertices_coarse++;
 			}
 			vcmap[u] = vcmap[v];
 		}
+#ifdef _OPENMP
 		omp_unset_lock(v_locks + more);
 		omp_unset_lock(v_locks + less);
+#endif
 	}
 
+#ifdef _OPENMP
 #pragma omp for
     for(sgp_vid_t i = 0; i < n; i++){
         omp_destroy_lock(v_locks + i);
     }
+#endif
 }
     
     free(hn);
     free(vperm);
+
+#ifdef _OPENMP
 	free(v_locks);
+#endif
 
     *nvertices_coarse_ptr = nvertices_coarse;
     
@@ -863,8 +881,13 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
 #pragma omp parallel
 {
 
+#ifdef _OPENMP
 	sgp_vid_t total_threads = omp_get_num_threads();
 	sgp_vid_t t_id = omp_get_thread_num();
+#else
+    sgp_vid_t total_threads = 1;
+    sgp_vid_t t_id = 0;
+#endif
 
     //adding total_threads + 1 has the effect of ceil((nEdges - 1) / total_threads)
 	sgp_eid_t width = (nEdges - 1 + total_threads - 1) / total_threads;
@@ -1829,7 +1852,12 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int fina
             niter++;
         }
 
-        if (omp_get_thread_num() == 0) {
+#ifdef _OPENMP
+        int tid = omp_get_thread_num();
+#else
+        int tid = 0;
+#endif
+        if (tid == 0) {
             if (niter == iter_max) {
                 printf("exceeded max iter count, ");
             }
