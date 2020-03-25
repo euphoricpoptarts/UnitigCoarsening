@@ -1,7 +1,7 @@
 .POSIX:
 CXX      = g++
 CC       = gcc
-CXXFLAGS = -Wall -O3 -D USE_GNU_PARALLELMODE
+CXXFLAGS = -Wall -O3 -DUSE_GNU_PARALLELMODE
 CFLAGS   = -Wall -O3 -std=c11
 OMPFLAGS = -fopenmp
 LDLIBS   = 
@@ -10,11 +10,11 @@ KOKKOS_PATH = ${HOME}/kokkos
 KOKKOS_DEVICES = "OpenMP"
 KOKKOS_ARCH = "BDW"
 
-include $(KOKKOS_PATH)/Makefile.kokkos
-SRC = $(wildcard *par.c)
-OBJ = $(SRC:.c=.o)
+#include $(KOKKOS_PATH)/Makefile.kokkos
+#SRC = $(wildcard *par.c)
+#OBJ = $(SRC:.c=.o)
 
-all: mtx2csr mtx2csr_hg sgpar sgpar_coarse_ec sgpar_lg sgpar_hg sgpar_hg_coarse_ec sgpar_c sgpar_kokkos sgpar_hg_srefine sgpar_srefine
+all: mtx2csr sgpar mtx2csr_hg sgpar_coarse_ec sgpar_lg sgpar_hg sgpar_hg_coarse_ec sgpar_c sgpar_hg_srefine sgpar_srefine # sgpar_kokkos
 
 mtx2csr: mtx2csr.cpp
 	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -o mtx2csr  mtx2csr.cpp
