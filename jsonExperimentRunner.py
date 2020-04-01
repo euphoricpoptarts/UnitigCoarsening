@@ -42,11 +42,12 @@ def analyzeMetrics(metricsPath, logFile):
         printStat("Edge cut", edgeCuts, output)
         printStat("Coarse levels", numCoarseLevels, output)
         
-        for coarseLevel in reversed(range(0,len(coarseLevels))):
-            level = coarseLevels[coarseLevel]
+        for levelIdx in range(0,len(coarseLevels)):
+            level = coarseLevels[levelIdx]
+            coarseLevel = len(coarseLevels) - 1 - levelIdx
             numVertices = [l['number-vertices'] for l in level]
             if coarseLevel > 0:
-                fineLevelVertices = [l['number-vertices'] for l in coarseLevels[coarseLevel-1]]
+                fineLevelVertices = [l['number-vertices'] for l in coarseLevels[levelIdx-1]]
                 ratios = [ i / j for i, j in zip(numVertices, fineLevelVertices)]
                 printStat("Coarse level {} coarsening ratio".format(coarseLevel), ratios, output)
             printStat("Coarse level {} number of vertices".format(coarseLevel), numVertices, output)
