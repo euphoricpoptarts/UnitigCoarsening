@@ -121,6 +121,7 @@ typedef std::atomic<sgp_vid_t> atom_vid_t;
 #endif
 
 static sgp_real_t SGPAR_POWERITER_TOL = 1e-10;
+static sgp_real_t MAX_COARSEN_RATIO = 0.9;
 
 //100 trillion
 #define SGPAR_POWERITER_ITER 100000000000000
@@ -1495,7 +1496,7 @@ Kokkos::initialize();
     printf("number of iterations: %lu\n", niter);
 
 #ifdef EXPERIMENT
-    experiment.addCoarseLevel(g_niter, max_iter_reached, 0);
+    experiment.addCoarseLevel(g_niter, max_iter_reached, n);
 #endif
 
     if(!normLap && final){
@@ -1788,7 +1789,7 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
     }
     printf("number of iterations: %lu\n", g_niter);
 #ifdef EXPERIMENT
-    experiment.addCoarseLevel(g_niter, max_iter_reached, 0);
+    experiment.addCoarseLevel(g_niter, max_iter_reached, n);
 #endif
     if(!normLap && final){
         sgp_power_iter_eigenvalue_log(u, g);
@@ -2047,7 +2048,7 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int fina
     }
     printf("number of iterations: %lu\n", niter);
 #ifdef EXPERIMENT
-        experiment.addCoarseLevel(niter, max_iter_reached, 0);
+        experiment.addCoarseLevel(niter, max_iter_reached, n);
 #endif
     if (!normLap && final) {
         sgp_power_iter_eigenvalue_log(u, g);
@@ -2470,8 +2471,10 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     coarsen_rng.state = 0xfedcba9876543210;
     coarsen_rng.inc = 1;
 
+    int coarsen_ratio_exceeded = 0;
     //generate all coarse graphs
     while ((coarsening_level < (SGPAR_COARSENING_MAXLEVELS-1)) && 
+           (coarsen_ratio_exceeded == 0) && 
            (g_all[coarsening_level].nvertices > SGPAR_COARSENING_VTX_CUTOFF) &&
            (coarsening_alg != 5)) {
         coarsening_level++;
@@ -2485,6 +2488,12 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                             coarsening_level, coarsening_alg, 
                                             rng, &coarsening_sort_time) );
 
+        if (coarsening_alg == 1) {
+            sgp_real_t coarsen_ratio = (sgp_real_t)g_all[coarsening_level - 1].nvertices / (sgp_real_t)g_all[coarsening_level].nvertices;
+            if (coarsen_ratio > MAX_COARSEN_RATIO) {
+                coarsen_ratio_exceeded = 1;
+            }
+        }
         printf("Coarsening graph at level %d\n", coarsening_level);
     }
 

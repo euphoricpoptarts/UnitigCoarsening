@@ -11,16 +11,18 @@ private:
 		int refineIterations = 0;
 		bool iterationMaxReached = false;
 		uint64_t unrefinedEdgeCut = 0;
+		uint64_t numVertices = 0;
 
-		CoarseLevel(int refineIterations, bool iterationMaxReached, uint64_t unrefinedEdgeCut) :
+		CoarseLevel(int refineIterations, bool iterationMaxReached, uint64_t numVertices) :
 			refineIterations(refineIterations),
 			iterationMaxReached(iterationMaxReached),
-			unrefinedEdgeCut(unrefinedEdgeCut) {}
+			numVertices(numVertices) {}
 
 		void log(std::ofstream& f) {
 			f << "{";
 			f << "\"refine-iterations\":" << refineIterations << ',';
 			f << "\"iteration-max-reached\":" << iterationMaxReached << ',';
+			f << "\"number-vertices\":" << numVertices << ',';
 			f << "\"unrefined-edge-cut\":" << unrefinedEdgeCut;
 			f << "}";
 		}
