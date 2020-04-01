@@ -54,41 +54,41 @@ def processGraph(filepath, metricDir, logFileTemplate):
 
     #parallel HEC
     metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
-    print("running parallel HEC sgpar on {}, data logged in {}".format(filepath, metricsPath))
+    print("running parallel HEC sgpar on {}, data logged in {}".format(filepath, metricsPath), flush=True)
     err = os.system(parCall.format(filepath, metricsPath))
-    if(err == 256):
+    if(err != 0):
         print("error code: {}".format(err))
         print("error produced by:")
-        print(parCall.format(filepath, metricsPath))
+        print(parCall.format(filepath, metricsPath), flush=True)
     else:
         logFile = logFileTemplate.format("parHEC")
         analyzeMetrics(metricsPath, logFile)
 
     #serial HEC
     metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
-    print("running serial HEC sgpar on {}, data logged in {}".format(filepath, metricsPath))
+    print("running serial HEC sgpar on {}, data logged in {}".format(filepath, metricsPath), flush=True)
     err = os.system(serialCall.format(filepath, metricsPath, 0))
-    if(err == 256):
+    if(err != 0):
         print("error code: {}".format(err))
         print("error produced by:")
-        print(serialCall.format(filepath, metricsPath, 0))
+        print(serialCall.format(filepath, metricsPath, 0), flush=True)
     else:
         logFile = logFileTemplate.format("serialHEC")
         analyzeMetrics(metricsPath, logFile)
 
     #serial matching
     metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
-    print("running serial match sgpar on {}, data logged in {}".format(filepath, metricsPath))
+    print("running serial match sgpar on {}, data logged in {}".format(filepath, metricsPath), flush=True)
     err = os.system(serialCall.format(filepath, metricsPath, 1))
-    if(err == 256):
+    if(err != 0):
         print("error code: {}".format(err))
         print("error produced by:")
-        print(serialCall.format(filepath, metricsPath, 1))
+        print(serialCall.format(filepath, metricsPath, 1), flush=True)
     else:
         logFile = logFileTemplate.format("serialMatch")
         analyzeMetrics(metricsPath, logFile)
 
-    print("end {} processing".format(filepath))
+    print("end {} processing".format(filepath), flush=True)
 
 def main():
 
