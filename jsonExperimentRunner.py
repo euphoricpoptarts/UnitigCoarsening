@@ -42,7 +42,7 @@ def analyzeMetrics(metricsPath, logFile):
         printStat("Edge cut", edgeCuts, output)
         printStat("Coarse levels", numCoarseLevels, output)
         
-        for coarseLevel in reversed(range(0,numCoarseLevels)):
+        for coarseLevel in reversed(range(0,len(coarseLevels))):
             level = coarseLevels[coarseLevel]
             numVertices = [d['number-vertices'] for l in level]
             if coarseLevel > 0:
