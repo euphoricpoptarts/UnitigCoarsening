@@ -49,6 +49,9 @@ def analyzeMetrics(metricsPath, logFile):
 
 def processGraph(filepath, metricDir, logFileTemplate):
     
+    #set omp thread count
+    os.system(set_threads.format(8))
+
     #parallel HEC
     metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
     print("running parallel HEC sgpar on {}, data logged in {}".format(filepath, metricsPath))
