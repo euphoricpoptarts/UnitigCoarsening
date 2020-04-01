@@ -46,8 +46,8 @@ def analyzeMetrics(metricsPath, logFile):
             level = coarseLevels[levelIdx]
             coarseLevel = len(coarseLevels) - 1 - levelIdx
             numVertices = [l['number-vertices'] for l in level]
-            if coarseLevel > 0:
-                fineLevelVertices = [l['number-vertices'] for l in coarseLevels[levelIdx-1]]
+            if levelIdx < len(coarseLevels) - 1:
+                fineLevelVertices = [l['number-vertices'] for l in coarseLevels[levelIdx+1]]
                 ratios = [ i / j for i, j in zip(numVertices, fineLevelVertices)]
                 printStat("Coarse level {} coarsening ratio".format(coarseLevel), ratios, output)
             printStat("Coarse level {} number of vertices".format(coarseLevel), numVertices, output)
