@@ -2489,7 +2489,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                             rng, &coarsening_sort_time) );
 
         if (coarsening_alg == 1) {
-            sgp_real_t coarsen_ratio = (sgp_real_t)g_all[coarsening_level - 1].nvertices / (sgp_real_t)g_all[coarsening_level].nvertices;
+            sgp_real_t coarsen_ratio = (sgp_real_t)g_all[coarsening_level].nvertices / (sgp_real_t)g_all[coarsening_level - 1].nvertices;
             if (coarsening_level > 20 && coarsen_ratio > MAX_COARSEN_RATIO) {
                 coarsen_ratio_exceeded = 1;
             }
