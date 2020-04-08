@@ -17,7 +17,9 @@ def printStat(fieldTitle, statList, outfile):
     min_s = min(statList)
     max_s = max(statList)
     avg = mean(statList)
-    sdev = stdev(statList)
+    sdev = "only one data-point"
+    if len(statList > 1):
+        sdev = stdev(statList)
     med = median(statList)
     print("{}: mean={}, median={}, min={}, max={}, std-dev={}".format(fieldTitle, avg, med, min_s, max_s, sdev), file=outfile)
 
