@@ -97,7 +97,7 @@ def processGraph(filepath, metricDir, logFileTemplate):
 
     print("end {} processing".format(filepath), flush=True)
 
-def convert(fp):
+def convert(f_path):
     form = "running {} sgpar on csr/{}.csr, data logged in {}"
     reprocessList = []
     with open(f_path) as fp:
