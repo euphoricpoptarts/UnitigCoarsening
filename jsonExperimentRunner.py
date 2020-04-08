@@ -45,6 +45,7 @@ def analyzeMetrics(metricsPath, logFile):
         
         for levelIdx in range(0,len(coarseLevels)):
             level = coarseLevels[levelIdx]
+            level = list(filter(None, level))
             numVertices = [l['number-vertices'] for l in level]
             if levelIdx > 0:
                 fineLevelVertices = [l['number-vertices'] for l in coarseLevels[levelIdx-1]]
@@ -106,7 +107,7 @@ def convert(f_path):
             if r != None:
                 reprocess = {}
                 reprocess['metrics'] = r[2]
-                reprocess['log'] = "redo_stats/" + r[0].replace(" ","_") + r[1] + ".txt"
+                reprocess['log'] = "redo_stats/" + r[0].replace(" ","_") + "_" + r[1] + ".txt"
                 reprocessList.append(reprocess)
 
     for reprocess in reprocessList:
