@@ -106,7 +106,7 @@ def convert(fp):
             if r != None:
                 reprocess = {}
                 reprocess['metrics'] = r[2]
-                reprocess['log'] = "redo_stats/" r[0].replace(" ","_") + r[1] + ".txt"
+                reprocess['log'] = "redo_stats/" + r[0].replace(" ","_") + r[1] + ".txt"
                 reprocessList.append(reprocess)
 
     for reprocess in reprocessList:
