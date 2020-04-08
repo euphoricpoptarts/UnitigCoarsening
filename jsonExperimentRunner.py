@@ -7,6 +7,7 @@ import secrets
 import json
 from pathlib import Path
 from threading import Thread
+from itertools import zip_longest
 
 parCall = "./sgpar_hg_exp {} {} 0 0 0 10 > /dev/null"
 serialCall = "./sgpar_hg_serial {} {} {} 0 0 10 > /dev/null"
@@ -29,7 +30,7 @@ def analyzeMetrics(metricsPath, logFile):
     coarsenSortTimes = [d['coarsen-sort-duration-seconds'] for d in data]
     refineTimes = [d['refine-duration-seconds'] for d in data]
     edgeCuts = [d['edge-cut'] for d in data]
-    coarseLevels = list(zip(*[d['coarse-levels'] for d in data]))
+    coarseLevels = list(zip_longest(*[reversed(d['coarse-levels']) for d in data]))
     numCoarseLevels = [d['number-coarse-levels'] for d in data]
     coarsenNonSortTimes = [i - j for i, j in zip(coarsenTimes, coarsenSortTimes)]
 
@@ -44,16 +45,14 @@ def analyzeMetrics(metricsPath, logFile):
         
         for levelIdx in range(0,len(coarseLevels)):
             level = coarseLevels[levelIdx]
-            coarseLevel = len(coarseLevels) - 1 - levelIdx
             numVertices = [l['number-vertices'] for l in level]
-            if levelIdx < len(coarseLevels) - 1:
-                fineLevelVertices = [l['number-vertices'] for l in coarseLevels[levelIdx+1]]
+            if levelIdx > 0:
+                fineLevelVertices = [l['number-vertices'] for l in coarseLevels[levelIdx-1]]
                 ratios = [ i / j for i, j in zip(numVertices, fineLevelVertices)]
-                printStat("Coarse level {} coarsening ratio".format(coarseLevel), ratios, output)
-            printStat("Coarse level {} number of vertices".format(coarseLevel), numVertices, output)
-            printStat("Coarse level {} refine iterations".format(coarseLevel), [l['refine-iterations'] for l in level], output)
-            printStat("Coarse level {} unrefined edge cuts".format(coarseLevel), [l['unrefined-edge-cut'] for l in level], output)
-            coarseLevel = coarseLevel - 1
+                printStat("Coarse level {} coarsening ratio".format(levelIdx), ratios, output)
+            printStat("Coarse level {} number of vertices".format(levelIdx), numVertices, output)
+            printStat("Coarse level {} refine iterations".format(levelIdx), [l['refine-iterations'] for l in level], output)
+            printStat("Coarse level {} unrefined edge cuts".format(levelIdx), [l['unrefined-edge-cut'] for l in level], output)
 
 def processGraph(filepath, metricDir, logFileTemplate):
     
@@ -97,6 +96,21 @@ def processGraph(filepath, metricDir, logFileTemplate):
         analyzeMetrics(metricsPath, logFile)
 
     print("end {} processing".format(filepath), flush=True)
+
+def convert(fp):
+    form = "running {} sgpar on csr/{}.csr, data logged in {}"
+    reprocessList = []
+    with open(f_path) as fp:
+        for line in fp:
+            r = parse(form, line)
+            if r != None:
+                reprocess = {}
+                reprocess['metrics'] = r[2]
+                reprocess['log'] = "redo_stats/" r[0].replace(" ","_") + r[1] + ".txt"
+                reprocessList.append(reprocess)
+
+    for reprocess in reprocessList:
+        analyzeMetrics(reprocess['metrics'], reprocess['log'])
 
 def main():
 
