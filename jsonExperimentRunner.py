@@ -116,6 +116,8 @@ def convert(f_path):
         print(reprocess)
         try:
             analyzeMetrics(reprocess['metrics'], reprocess['log'])
+        except:
+            print("Couldn't process last")
 
 def main():
 
