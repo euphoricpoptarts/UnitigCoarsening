@@ -34,6 +34,7 @@ def analyzeMetrics(metricsPath, logFile):
     edgeCuts = [d['edge-cut'] for d in data]
     coarseLevels = list(zip_longest(*[reversed(d['coarse-levels']) for d in data]))
     numCoarseLevels = [d['number-coarse-levels'] for d in data]
+    numCoarseLevels = list(map(lambda x: x - 1, numCoarseLevels))
     coarsenNonSortTimes = [i - j for i, j in zip(coarsenTimes, coarsenSortTimes)]
 
     with open(logFile, "w") as output:
@@ -109,7 +110,7 @@ def reprocessMetricsFromLogFile(f_path):
             if r != None:
                 reprocess = {}
                 reprocess['metrics'] = r[2]
-                reprocess['log'] = "redo_stats/" + r[0].replace(" ","_") + "_" + r[1] + ".txt"
+                reprocess['log'] = "redo_stats/" + r[1] + "_" + r[0].replace(" ","_") + ".txt"
                 reprocessList.append(reprocess)
 
     for reprocess in reprocessList:
