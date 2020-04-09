@@ -113,8 +113,8 @@ def convert(f_path):
                 reprocessList.append(reprocess)
 
     for reprocess in reprocessList:
-        existCheck = Path(reprocess['metrics'])
-        if existCheck.is_file():
+        print(reprocess)
+        try:
             analyzeMetrics(reprocess['metrics'], reprocess['log'])
 
 def main():
