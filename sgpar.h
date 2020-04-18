@@ -1097,6 +1097,7 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
                                      const int coarsening_level, 
                                      double *sort_time) {
     sgp_vid_t n  = g.nvertices;
+    sgp_vid_t nc = gc->nvertices;
     sgp_eid_t ec_noloops = 0, self_loops = 0;
     sgp_vid_t *edges_uvw;
 
@@ -1136,14 +1137,64 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
     }
 
     double elt = sgp_timer();
-#ifdef __cplusplus
-    std::sort(((edge_triple_t *) edges_uvw), 
-              ((edge_triple_t *) edges_uvw)+ec_noloops,
-              uvw_cmpfn_inc);
-#else
-    qsort(edges_uvw, ec_noloops, 3*sizeof(sgp_vid_t), uvw_cmpfn_inc);
-#endif
+
+    //radix lsd sort
+
+    //count edges per vectrex
+    sgp_vid_t * edges_per_source = (sgp_vid_t*)calloc(nc, sizeof(sgp_vid_t));
+    sgp_vid_t * edges_per_dest = (sgp_vid_t*)calloc(nc, sizeof(sgp_vid_t));
+    SGPAR_ASSERT(edges_per_source != NULL);
+    SGPAR_ASSERT(edges_per_dest != NULL);
+    for (sgp_eid_t i = 0; i < ec_noloops; i++) {
+        sgp_vid_t u = edges_uvw[3 * i];
+        sgp_vid_t v = edges_uvw[3 * i + 1];
+        edges_per_source[u]++;
+        edges_per_dest[v]++;
+    }
+
+    //prefix sums to compute bucket offsets
+    sgp_eid_t * source_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
+    sgp_eid_t * dest_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
+    SGPAR_ASSERT(source_bucket_offset != NULL);
+    SGPAR_ASSERT(dest_bucket_offset != NULL);
+    for (sgp_vid_t i = 0; i < nc; i++) {
+        source_bucket_offset[i + 1] = source_bucket_offset[i] + edges_per_source[i];
+        dest_bucket_offset[i + 1] = dest_bucket_offset[i] + edges_per_dest[i];
+        edges_per_source[i] = 0;//reset to be used as a counter
+        edges_per_dest[i] = 0;//reset to be used as a counter
+    }
+
+    //sort by dest first
+    sgp_vid_t * edges_uvw2 = (sgp_vid_t*) malloc(3 * ec_noloops * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(edges_uvw2 != NULL);
+    for (sgp_eid_t i = 0; i < ec_noloops; i++) {
+        sgp_vid_t v = edges_uvw[3 * i + 1];
+        sgp_eid_t offset = 3 * (dest_bucket_offset[v] + edges_per_dest[v]);
+        edges_per_dest[v]++;
+
+        edges_uvw2[offset] = edges_uvw[3 * i];
+        edges_uvw2[offset + 1] = edges_uvw[3 * i + 1];
+        edges_uvw2[offset + 2] = edges_uvw[3 * i + 2];
+    }
+
+    //sort by source
+    for (sgp_eid_t i = 0; i < ec_noloops; i++) {
+        sgp_vid_t u = edges_uvw2[3 * i];
+        sgp_eid_t offset = 3 * (source_bucket_offset[u] + edges_per_source[u]);
+        edges_per_source[u]++;
+
+        edges_uvw[offset] = edges_uvw2[3 * i];
+        edges_uvw[offset + 1] = edges_uvw2[3 * i + 1];
+        edges_uvw[offset + 2] = edges_uvw2[3 * i + 2];
+    }
+    free(edges_uvw2);
+    free(source_bucket_offset);
+    free(dest_bucket_offset);
+    free(edges_per_source);
+    free(edges_per_dest);
+
     *sort_time += (sgp_timer() - elt);
+
     sgp_vid_t nc = gc->nvertices;
     sgp_vid_t *gc_degree = (sgp_vid_t *) malloc(nc*sizeof(sgp_vid_t));
     SGPAR_ASSERT(gc_degree != NULL);
