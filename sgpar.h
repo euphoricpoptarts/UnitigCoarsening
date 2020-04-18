@@ -1195,7 +1195,6 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
 
     *sort_time += (sgp_timer() - elt);
 
-    sgp_vid_t nc = gc->nvertices;
     sgp_vid_t *gc_degree = (sgp_vid_t *) malloc(nc*sizeof(sgp_vid_t));
     SGPAR_ASSERT(gc_degree != NULL);
 
