@@ -1228,8 +1228,8 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
         sgp_eid_t u_offset = gc_source_offsets[i];
         sgp_eid_t bucket_offset = source_bucket_offset[i];
         for (sgp_eid_t j = 0; j < edges_per_source[i]; j++) {
-            gc_destination_indices[u_offset + j] = edges_uvw[3 * bucket_offset + 1];
-            gc_eweights[u_offset + j] = edges_uvw[3 * bucket_offset + 2];
+            gc_destination_indices[u_offset + j] = edges_uvw[3 * (bucket_offset + j) + 1];
+            gc_eweights[u_offset + j] = edges_uvw[3 * (bucket_offset + j) + 2];
         }
     }
 
