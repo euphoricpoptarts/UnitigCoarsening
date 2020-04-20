@@ -1149,7 +1149,12 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
                 edges_per_dest[v]++;
 
                 source_by_dest[offset] = u;
-                wgt_by_dest[offset] = g.eweights[j];
+                if (coarsening_level != 1) {
+                    wgt_by_dest[offset] = g.eweights[j];
+                }
+                else {
+                    wgt_by_dest[offset] = 1;
+                }
             }
         }
     }
