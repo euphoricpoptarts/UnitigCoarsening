@@ -1164,7 +1164,7 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
     SGPAR_ASSERT(dest_by_source != NULL);
     sgp_wgt_t* wgt_by_source = (sgp_wgt_t*)malloc(ec * sizeof(sgp_wgt_t));
     SGPAR_ASSERT(wgt_by_source != NULL);
-    for (sgp_vid_t v = 0; v < n; v++) {
+    for (sgp_vid_t v = 0; v < nc; v++) {
         
         for (sgp_eid_t j = dest_bucket_offset[v]; j < dest_bucket_offset[v + 1]; j++) {
             sgp_vid_t u = source_by_dest[j];
