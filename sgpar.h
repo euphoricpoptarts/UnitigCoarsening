@@ -1098,58 +1098,29 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
                                      double *sort_time) {
     sgp_vid_t n  = g.nvertices;
     sgp_vid_t nc = gc->nvertices;
-    sgp_eid_t ec_noloops = 0, self_loops = 0;
-    sgp_vid_t *edges_uvw;
-
-    for (sgp_vid_t i=0; i<n; i++) {
-        sgp_vid_t u = vcmap[i];
-        for (sgp_eid_t j=g.source_offsets[i]; j<g.source_offsets[i+1]; j++) {
-            sgp_vid_t v = vcmap[g.destination_indices[j]];
-            if (u == v) {
-                self_loops++;
-            } else {
-                ec_noloops++;
-            }
-        }
-    }
-
-    edges_uvw = (sgp_vid_t *) malloc(3*ec_noloops*sizeof(sgp_vid_t));
-    SGPAR_ASSERT(edges_uvw != NULL);
 
     sgp_eid_t ec = 0;
-
-    for (sgp_vid_t i=0; i<n; i++) {
-        sgp_vid_t u = vcmap[i];
-        for (sgp_eid_t j=g.source_offsets[i]; j<g.source_offsets[i+1]; j++) {
-            sgp_vid_t v = vcmap[g.destination_indices[j]];
-            if (u != v) {
-                assert(ec < ec_noloops);
-                edges_uvw[3*ec] = u;
-                edges_uvw[3*ec+1] = v;
-                if (coarsening_level != 1) {
-                    edges_uvw[3*ec+2] = g.eweights[j];
-                } else {
-                    edges_uvw[3*ec+2] = 1;
-                }
-                ec++;
-            }
-        }
-    }
 
     double elt = sgp_timer();
 
     //radix lsd sort
 
-    //count edges per vectrex
+    //count edges per vertex
     sgp_vid_t * edges_per_source = (sgp_vid_t*)calloc(nc, sizeof(sgp_vid_t));
     sgp_vid_t * edges_per_dest = (sgp_vid_t*)calloc(nc, sizeof(sgp_vid_t));
     SGPAR_ASSERT(edges_per_source != NULL);
     SGPAR_ASSERT(edges_per_dest != NULL);
-    for (sgp_eid_t i = 0; i < ec_noloops; i++) {
-        sgp_vid_t u = edges_uvw[3 * i];
-        sgp_vid_t v = edges_uvw[3 * i + 1];
-        edges_per_source[u]++;
-        edges_per_dest[v]++;
+
+    for (sgp_vid_t i = 0; i < n; i++) {
+        sgp_vid_t u = vcmap[i];
+        for (sgp_eid_t j = g.source_offsets[i]; j < g.source_offsets[i + 1]; j++) {
+            sgp_vid_t v = vcmap[g.destination_indices[j]];
+            if (u != v) {
+                edges_per_source[u]++;
+                edges_per_dest[v]++;
+                ec++;
+            }
+        }
     }
 
     //prefix sums to compute bucket offsets
@@ -1165,42 +1136,53 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
     }
 
     //sort by dest first
-    sgp_vid_t * edges_uvw2 = (sgp_vid_t*) malloc(3 * ec_noloops * sizeof(sgp_vid_t));
-    SGPAR_ASSERT(edges_uvw2 != NULL);
-    for (sgp_eid_t i = 0; i < ec_noloops; i++) {
-        sgp_vid_t v = edges_uvw[3 * i + 1];
-        sgp_eid_t offset = 3 * (dest_bucket_offset[v] + edges_per_dest[v]);
-        edges_per_dest[v]++;
+    sgp_vid_t * source_by_dest = (sgp_vid_t*) malloc(3 * ec * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(source_by_dest != NULL);
+    sgp_wgt_t* wgt_by_dest = (sgp_wgt_t*) malloc(ec * sizeof(sgp_wgt_t));
+    SGPAR_ASSERT(wgt_by_dest != NULL);
+    for (sgp_vid_t i = 0; i < n; i++) {
+        sgp_vid_t u = vcmap[i];
+        for (sgp_eid_t j = g.source_offsets[i]; j < g.source_offsets[i + 1]; j++) {
+            sgp_vid_t v = vcmap[g.destination_indices[j]];
+            sgp_eid_t offset = dest_bucket_offset[v] + edges_per_dest[v];
+            edges_per_dest[v]++;
 
-        edges_uvw2[offset] = edges_uvw[3 * i];
-        edges_uvw2[offset + 1] = edges_uvw[3 * i + 1];
-        edges_uvw2[offset + 2] = edges_uvw[3 * i + 2];
+            source_by_dest[offset] = u;
+            wgt_by_dest[offset] = g.eweights[j];
+        }
     }
 
-    //sort by source
-    for (sgp_eid_t i = 0; i < ec_noloops; i++) {
-        sgp_vid_t u = edges_uvw2[3 * i];
-        sgp_eid_t offset = 3 * (source_bucket_offset[u] + edges_per_source[u]);
+    //sort by source and deduplicate
+    sgp_vid_t* dest_by_source = (sgp_vid_t*)malloc(3 * ec * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(dest_by_source != NULL);
+    sgp_wgt_t* wgt_by_source = (sgp_wgt_t*)malloc(ec * sizeof(sgp_wgt_t));
+    SGPAR_ASSERT(wgt_by_source != NULL);
+    for (sgp_vid_t v = 0; v < n; v++) {
+        
+        for (sgp_eid_t j = dest_bucket_offset[v]; j < dest_bucket_offset[v + 1]; j++) {
+            sgp_vid_t u = source_by_dest[j];
+            sgp_wgt_t wgt = wgt_by_dest[j];
+            sgp_eid_t offset = source_bucket_offset[u] + edges_per_source[u];
 
-        if (edges_per_source[u] == 0) {
-            edges_uvw[offset] = edges_uvw2[3 * i];
-            edges_uvw[offset + 1] = edges_uvw2[3 * i + 1];
-            edges_uvw[offset + 2] = edges_uvw2[3 * i + 2];
-            edges_per_source[u]++;
-        }
-        else {
-            if (edges_uvw[offset + 1 - 3] == edges_uvw2[3 * i + 1]) {
-                edges_uvw[offset + 2 - 3] += edges_uvw2[3 * i + 2];
-            }
-            else {
-                edges_uvw[offset] = edges_uvw2[3 * i];
-                edges_uvw[offset + 1] = edges_uvw2[3 * i + 1];
-                edges_uvw[offset + 2] = edges_uvw2[3 * i + 2];
+            if (edges_per_source[u] == 0) {
+                dest_by_source[offset] = v;
+                wgt_by_source[offset] = wgt;
                 edges_per_source[u]++;
             }
+            else {
+                if (dest_by_source[offset - 1] == v) {
+                    wgt_by_source[offset] += wgt;
+                }
+                else {
+                    dest_by_source[offset] = v;
+                    wgt_by_source[offset] = wgt;
+                    edges_per_source[u]++;
+                }
+            }
         }
     }
-    free(edges_uvw2);
+    free(source_by_dest);
+    free(wgt_by_dest);
     free(dest_bucket_offset);
     free(edges_per_dest);
 
@@ -1228,11 +1210,13 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
         sgp_eid_t u_offset = gc_source_offsets[i];
         sgp_eid_t bucket_offset = source_bucket_offset[i];
         for (sgp_eid_t j = 0; j < edges_per_source[i]; j++) {
-            gc_destination_indices[u_offset + j] = edges_uvw[3 * (bucket_offset + j) + 1];
-            gc_eweights[u_offset + j] = edges_uvw[3 * (bucket_offset + j) + 2];
+            gc_destination_indices[u_offset + j] = dest_by_source[bucket_offset + j];
+            gc_eweights[u_offset + j] = wgt_by_source[bucket_offset + j];
         }
     }
 
+    free(dest_by_source);
+    free(wgt_by_source);
     free(edges_per_source);
     free(source_bucket_offset);
 
@@ -1253,9 +1237,6 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
         }
         gc->weighted_degree[i] = degree_wt_i;
     }
-
-
-    free(edges_uvw);
  
     return EXIT_SUCCESS;
 }
