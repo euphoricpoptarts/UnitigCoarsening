@@ -1178,7 +1178,7 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
             }
             else {
                 if (dest_by_source[offset - 1] == v) {
-                    wgt_by_source[offset] += wgt;
+                    wgt_by_source[offset - 1] += wgt;
                 }
                 else {
                     dest_by_source[offset] = v;
@@ -1213,10 +1213,10 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
                                    malloc(2*gc_nedges*sizeof(sgp_wgt_t));
     SGPAR_ASSERT(gc_eweights != NULL);
 
-    for (sgp_vid_t i = 0; i < nc; i++) {
-        sgp_eid_t u_offset = gc_source_offsets[i];
-        sgp_eid_t bucket_offset = source_bucket_offset[i];
-        for (sgp_eid_t j = 0; j < edges_per_source[i]; j++) {
+    for (sgp_vid_t u = 0; u < nc; u++) {
+        sgp_eid_t u_offset = gc_source_offsets[u];
+        sgp_eid_t bucket_offset = source_bucket_offset[u];
+        for (sgp_eid_t j = 0; j < edges_per_source[u]; j++) {
             gc_destination_indices[u_offset + j] = dest_by_source[bucket_offset + j];
             gc_eweights[u_offset + j] = wgt_by_source[bucket_offset + j];
         }
