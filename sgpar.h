@@ -1110,6 +1110,7 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
     sgp_vid_t * edges_per_dest = (sgp_vid_t*)calloc(nc, sizeof(sgp_vid_t));
     SGPAR_ASSERT(edges_per_source != NULL);
     SGPAR_ASSERT(edges_per_dest != NULL);
+    sgp_vid_t* mapped_edges = (sgp_vid_t*) malloc(g.source_offsets[n] * sizeof(sgp_vid_t));
 
     for (sgp_vid_t i = 0; i < n; i++) {
         sgp_vid_t u = vcmap[i];
@@ -1119,6 +1120,7 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
         }
         for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
             sgp_vid_t v = vcmap[g.destination_indices[j]];
+            mapped_edges[j] = v;
             if (u != v) {
                 edges_per_source[u]++;
                 edges_per_dest[v]++;
@@ -1151,7 +1153,7 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
             end_offset = g.source_offsets[i] + g.edges_per_source[i];
         }
         for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
-            sgp_vid_t v = vcmap[g.destination_indices[j]];
+            sgp_vid_t v = mapped_edges[j];
             if (u != v) {
                 sgp_eid_t offset = dest_bucket_offset[v] + edges_per_dest[v];
                 edges_per_dest[v]++;
@@ -1166,6 +1168,7 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
             }
         }
     }
+    free(mapped_edges);
 
     //sort by source and deduplicate
     sgp_vid_t* dest_by_source = (sgp_vid_t*)malloc(ec * sizeof(sgp_vid_t));
