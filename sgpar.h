@@ -2484,6 +2484,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
            (g_all[coarsening_level].nvertices > SGPAR_COARSENING_VTX_CUTOFF) &&
            (coarsening_alg != 5)) {
         coarsening_level++;
+        printf("Calculating coarse graph %d\n", coarsening_level);
         vcmap[coarsening_level-1] = (sgp_vid_t *) 
                                     malloc(g_all[coarsening_level-1].nvertices
                                                  * sizeof(sgp_vid_t));
@@ -2500,7 +2501,12 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                 coarsen_ratio_exceeded = 1;
             }
         }
-        printf("Coarsening graph at level %d\n", coarsening_level);
+    }
+
+    //don't use the coarsest level if it has too few vertices
+    if (g_all[coarsening_level].nvertices < 30) {
+        sgp_free_graph(g_all + coarsening_level);
+        coarsening_level--;
     }
 
     printf("Coarsest level: %d\n", coarsening_level);
