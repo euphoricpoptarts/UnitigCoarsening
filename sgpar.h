@@ -1388,18 +1388,18 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
     double* sort_time_ptr) {
 
 
-    if (coarsening_alg & 1 == 0) {
+    if ((coarsening_alg & 1) == 0) {
         sgp_vid_t nvertices_coarse;
         sgp_coarsen_HEC(vcmap, &nvertices_coarse, g, coarsening_level, rng);
         gc->nvertices = nvertices_coarse;
     }
-    else if (coarsening_alg & 1 == 1) {
+    else if ((coarsening_alg & 1) == 1) {
         sgp_vid_t nvertices_coarse;
         sgp_coarsen_heavy_edge_matching(vcmap, &nvertices_coarse, g, coarsening_level, rng);
         gc->nvertices = nvertices_coarse;
     }
 
-    if (coarsening_alg & 2 == 2) {
+    if ((coarsening_alg & 2) == 2) {
         sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, sort_time_ptr);
     }
     else {
