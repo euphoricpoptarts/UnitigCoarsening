@@ -1091,7 +1091,7 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
     return EXIT_SUCCESS;
 }
 #else
-SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc, 
+SGPAR_API int sgp_build_coarse_graph_lsd(sgp_graph_t *gc, 
                                      sgp_vid_t *vcmap, 
                                      const sgp_graph_t g, 
                                      const int coarsening_level, 
@@ -1231,28 +1231,180 @@ SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc,
  
     return EXIT_SUCCESS;
 }
+
+SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
+    sgp_vid_t* vcmap,
+    const sgp_graph_t g,
+    const int coarsening_level,
+    double* sort_time) {
+    sgp_vid_t n = g.nvertices;
+    sgp_vid_t nc = gc->nvertices;
+
+    sgp_eid_t ec = 0;
+
+    double elt = sgp_timer();
+
+    //radix lsd sort
+
+    //count edges per vertex
+    sgp_vid_t* edges_per_source = (sgp_vid_t*)calloc(nc, sizeof(sgp_vid_t));
+    SGPAR_ASSERT(edges_per_source != NULL);
+    sgp_vid_t* mapped_edges = (sgp_vid_t*)malloc(g.source_offsets[n] * sizeof(sgp_vid_t));
+
+    for (sgp_vid_t i = 0; i < n; i++) {
+        sgp_vid_t u = vcmap[i];
+        sgp_eid_t end_offset = g.source_offsets[i + 1];
+        if (coarsening_level != 1) {
+            end_offset = g.source_offsets[i] + g.edges_per_source[i];
+        }
+        for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
+            sgp_vid_t v = vcmap[g.destination_indices[j]];
+            mapped_edges[j] = v;
+            if (u != v) {
+                edges_per_source[u]++;
+                ec++;
+            }
+        }
+    }
+
+    //prefix sums to compute bucket offsets
+    sgp_eid_t* source_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
+    SGPAR_ASSERT(source_bucket_offset != NULL);
+    for (sgp_vid_t i = 0; i < nc; i++) {
+        source_bucket_offset[i + 1] = source_bucket_offset[i] + edges_per_source[i];
+        edges_per_source[i] = 0;//reset to be used as a counter
+    }
+
+    //sort by source first
+    sgp_vid_t* dest_by_source = (sgp_vid_t*)malloc(ec * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(dest_by_source != NULL);
+    sgp_wgt_t* wgt_by_source = (sgp_wgt_t*)malloc(ec * sizeof(sgp_wgt_t));
+    SGPAR_ASSERT(wgt_by_source != NULL);
+    for (sgp_vid_t i = 0; i < n; i++) {
+        sgp_vid_t u = vcmap[i];
+        sgp_eid_t end_offset = g.source_offsets[i + 1];
+        if (coarsening_level != 1) {
+            end_offset = g.source_offsets[i] + g.edges_per_source[i];
+        }
+        for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
+            sgp_vid_t v = mapped_edges[j];
+            if (u != v) {
+                sgp_eid_t offset = source_bucket_offset[u] + edges_per_source[u];
+                edges_per_source[u]++;
+
+                dest_by_source[offset] = v;
+                if (coarsening_level != 1) {
+                    wgt_by_source[offset] = g.eweights[j];
+                }
+                else {
+                    wgt_by_source[offset] = 1;
+                }
+            }
+        }
+    }
+    free(mapped_edges);
+
+    //sort by dest and deduplicate
+    sgp_eid_t gc_nedges = 0;
+    for (sgp_vid_t u = 0; u < nc; u++) {
+
+        sgp_eid_t offset = source_bucket_offset[u];
+        sgp_eid_t last_offset = offset;
+
+        //insertion sort
+        for (sgp_eid_t i = source_bucket_offset[u]; i < source_bucket_offset[u + 1]; i++) {
+            
+            sgp_vid_t min = dest_by_source[i];
+            sgp_eid_t argmin = i;
+
+            for (sgp_eid_t j = i + 1; j < source_bucket_offset[u + 1]; j++) {
+                if (min > dest_by_source[j]) {
+                    min = dest_by_source[j];
+                    argmin = j;
+                }
+            }
+
+            if (argmin != i) {
+                dest_by_source[argmin] = dest_by_source[i];
+                dest_by_source[i] = min;
+
+                sgp_wgt_t wgt = wgt_by_source[argmin];
+                wgt_by_source[argmin] = wgt_by_source[i];
+                wgt_by_source[i] = wgt;
+            }
+
+            if (last_offset < offset) {
+                if (dest_by_source[last_offset] == dest_by_source[i]) {
+                    wgt_by_source[last_offset] += wgt_by_source[i];
+                }
+                else {
+                    dest_by_source[offset] = dest_by_source[i];
+                    wgt_by_source[offset] = wgt_by_source[i];
+                    last_offset = offset;
+                    offset++;
+                    gc_nedges++;
+                }
+            }
+            else {
+                offset++;
+                gc_nedges++;
+            }
+        }
+
+        edges_per_source[u] = offset - source_bucket_offset[u];
+    }
+
+    *sort_time += (sgp_timer() - elt);
+
+    gc_nedges /= 2;
+
+    gc->nedges = gc_nedges;
+    gc->destination_indices = dest_by_source;
+    gc->source_offsets = source_bucket_offset;
+    gc->eweights = wgt_by_source;
+    gc->edges_per_source = edges_per_source;
+
+    gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
+    assert(gc->weighted_degree != NULL);
+
+    for (sgp_vid_t i = 0; i < nc; i++) {
+        sgp_wgt_t degree_wt_i = 0;
+        sgp_eid_t end_offset = gc->source_offsets[i] + gc->edges_per_source[i];
+        for (sgp_eid_t j = gc->source_offsets[i]; j < end_offset; j++) {
+            degree_wt_i += gc->eweights[j];
+        }
+        gc->weighted_degree[i] = degree_wt_i;
+    }
+
+    return EXIT_SUCCESS;
+}
 #endif 
 
-SGPAR_API int sgp_coarsen_one_level(sgp_graph_t *gc, sgp_vid_t *vcmap, 
-                                    const sgp_graph_t g, 
-                                    const int coarsening_level, 
-                                    const int coarsening_alg,
-                                    sgp_pcg32_random_t *rng, 
-                                    double *sort_time_ptr) {
-   
-    
-    if (coarsening_alg == 0) {
+SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
+    const sgp_graph_t g,
+    const int coarsening_level,
+    const int coarsening_alg,
+    sgp_pcg32_random_t* rng,
+    double* sort_time_ptr) {
+
+
+    if (coarsening_alg & 1 == 0) {
         sgp_vid_t nvertices_coarse;
         sgp_coarsen_HEC(vcmap, &nvertices_coarse, g, coarsening_level, rng);
         gc->nvertices = nvertices_coarse;
-	}
-	else if (coarsening_alg == 1) {
-		sgp_vid_t nvertices_coarse;
-		sgp_coarsen_heavy_edge_matching(vcmap, &nvertices_coarse, g, coarsening_level, rng);
-		gc->nvertices = nvertices_coarse;
-	}
+    }
+    else if (coarsening_alg & 1 == 1) {
+        sgp_vid_t nvertices_coarse;
+        sgp_coarsen_heavy_edge_matching(vcmap, &nvertices_coarse, g, coarsening_level, rng);
+        gc->nvertices = nvertices_coarse;
+    }
 
-    sgp_build_coarse_graph(gc, vcmap, g, coarsening_level, sort_time_ptr);
+    if (coarsening_alg & 2 == 2) {
+        sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, sort_time_ptr);
+    }
+    else {
+        sgp_build_coarse_graph_lsd(gc, vcmap, g, coarsening_level, sort_time_ptr);
+    }
 
     return EXIT_SUCCESS;
 }
@@ -2495,7 +2647,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                             coarsening_level, coarsening_alg, 
                                             rng, &coarsening_sort_time) );
 
-        if (coarsening_alg == 1) {
+        if (coarsening_alg & 1) {
             sgp_real_t coarsen_ratio = (sgp_real_t)g_all[coarsening_level].nvertices / (sgp_real_t)g_all[coarsening_level - 1].nvertices;
             if (coarsen_ratio > MAX_COARSEN_RATIO) {
                 coarsen_ratio_exceeded = 1;
