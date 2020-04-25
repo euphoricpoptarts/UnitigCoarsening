@@ -1265,7 +1265,7 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
             sgp_vid_t v = vcmap[g.destination_indices[j]];
             mapped_edges[j] = v;
             if (u != v) {
-                edges_per_source[u]++;
+                edges_per_source_atomic[u]++;
                 ec++;
             }
         }
@@ -1300,7 +1300,7 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
             sgp_vid_t v = mapped_edges[j];
             if (u != v) {
                 //edges_per_source[u]++ is atomic_fetch_add
-                sgp_eid_t offset = source_bucket_offset[u] + edges_per_source[u]++;
+                sgp_eid_t offset = source_bucket_offset[u] + edges_per_source_atomic[u]++;
 
                 dest_by_source[offset] = v;
                 if (coarsening_level != 1) {
