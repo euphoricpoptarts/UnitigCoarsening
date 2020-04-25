@@ -802,7 +802,7 @@ Kokkos::finalize();
 }
 #elif defined(_OPENMP)
 
-void parallel_prefix_sum(sgp_eid_t* gc_source_offsets, sgp_vid_t nc, int t_id, int total_threads) {
+void parallel_prefix_sum_tree(sgp_eid_t* gc_source_offsets, sgp_vid_t nc, int t_id, int total_threads) {
 
 	//tree-reduction upwards first (largest index contains sum of whole array)
 	sgp_vid_t multiplier = 1, prev_multiplier = 1;
@@ -853,6 +853,43 @@ void parallel_prefix_sum(sgp_eid_t* gc_source_offsets, sgp_vid_t nc, int t_id, i
 		multiplier = next_multiplier;
 		next_multiplier >>= 1;
 	}
+#pragma omp barrier
+}
+
+void parallel_prefix_sum(sgp_eid_t* gc_source_offsets, sgp_vid_t nc, int t_id, int total_threads) {
+
+    sgp_vid_t idx_per_thread = (nc / total_threads) + 1;
+
+    sgp_vid_t start = t_id * idx_per_thread;
+
+    sgp_vid_t end = start + idx_per_thread;
+
+    if (end > nc) {
+        end = nc;
+    }
+
+    for (sgp_vid_t i = start + 1; i < end; i++) {
+        gc_source_offsets[i + 1] += gc_source_offsets[i];
+    }
+
+#pragma omp barrier
+
+#pragma omp single
+{
+    for (sgp_vid_t i = 2 * idx_per_thread; i <= nc; i += idx_per_thread) {
+        gc_source_offsets[i] += gc_source_offsets[i - idx_per_thread];
+    }
+}
+
+    if (end < start) {
+        start = end;
+    }
+    sgp_eid_t add = gc_source_offsets[start];
+
+    for (sgp_vid_t i = start; i < (end - 1); i++) {
+        gc_source_offsets[i + 1] += add;
+    }
+
 #pragma omp barrier
 }
 
