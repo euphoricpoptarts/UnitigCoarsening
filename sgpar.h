@@ -2267,8 +2267,13 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
                 }
             }
             sgp_real_t matvec_i = 0;
-            for (sgp_eid_t j=g.source_offsets[i]; 
-                           j<g.source_offsets[i+1]; j++) {
+
+            sgp_eid_t end_offset = g.source_offsets[i + 1];
+            if (!final) {
+                end_offset = g.source_offsets[i] + g.edges_per_source[i];
+            }
+
+            for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
                 if (final) {
                     matvec_i += u[g.destination_indices[j]];
                 }
