@@ -1028,6 +1028,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 
     sgp_eid_t* source_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
     SGPAR_ASSERT(source_bucket_offset != NULL);
+    source_bucket_offset[0] = 0;
 
     sgp_vid_t* dest_by_source;
     sgp_wgt_t* wgt_by_source;
