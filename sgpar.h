@@ -857,238 +857,466 @@ void parallel_prefix_sum(sgp_eid_t* gc_source_offsets, sgp_vid_t nc, int t_id, i
 #pragma omp barrier
 }
 
-SGPAR_API int sgp_build_coarse_graph(sgp_graph_t *gc, 
-                                     sgp_vid_t *vcmap, 
-                                     const sgp_graph_t g, 
-                                     const int coarsening_level, 
-                                     double *sort_time) {
-    sgp_vid_t n  = g.nvertices;
-    sgp_eid_t nEdges = g.source_offsets[n];
+SGPAR_API int sgp_build_coarse_graph_lsd(sgp_graph_t* gc,
+    sgp_vid_t* vcmap,
+    const sgp_graph_t g,
+    const int coarsening_level,
+    double* sort_time) {
+    sgp_vid_t n = g.nvertices;
+    sgp_vid_t nc = gc->nvertices;
 
-    sgp_vid_t *edges_uvw;
-    edges_uvw = (sgp_vid_t *) malloc(3*nEdges*sizeof(sgp_vid_t));
-    SGPAR_ASSERT(edges_uvw != NULL);
+    sgp_eid_t ec = 0;
 
-#pragma omp parallel
-{
+    double elt = sgp_timer();
 
-    int thread_initialized = 0;
-    sgp_vid_t u;
-    int source_index = 0;
+    //radix lsd sort
 
-#pragma omp for
-	//map fine edges to coarse edges
-    for (sgp_eid_t i=0; i<nEdges; i++) {
-        if(!thread_initialized){
-            source_index = binary_search_find_source_index(g.source_offsets, 0, n, i);
-            u = vcmap[source_index];
-            thread_initialized = 1;
-        } else if(g.source_offsets[source_index + 1] == i) {
-            source_index++;
-            u = vcmap[source_index];
-        }
-        sgp_vid_t v = vcmap[g.destination_indices[i]];
-        
-        if(u==v){
-            //do this to filter self-loops to end of array after sorting    
-            edges_uvw[3*i] = SGP_INFTY;
-            edges_uvw[3*i+1] = SGP_INFTY;
-        } else {
-            edges_uvw[3*i] = u;
-            edges_uvw[3*i+1] = v;
-        }
+    //count edges per vertex
+    sgp_vid_t* edges_per_source = (sgp_vid_t*)calloc(nc, sizeof(sgp_vid_t));
+    sgp_vid_t* edges_per_dest = (sgp_vid_t*)calloc(nc, sizeof(sgp_vid_t));
+    SGPAR_ASSERT(edges_per_source != NULL);
+    SGPAR_ASSERT(edges_per_dest != NULL);
+    sgp_vid_t* mapped_edges = (sgp_vid_t*)malloc(g.source_offsets[n] * sizeof(sgp_vid_t));
+
+    for (sgp_vid_t i = 0; i < n; i++) {
+        sgp_vid_t u = vcmap[i];
+        sgp_eid_t end_offset = g.source_offsets[i + 1];
         if (coarsening_level != 1) {
-            edges_uvw[3*i+2] = g.eweights[i];
-        } else {
-            edges_uvw[3*i+2] = 1;
+            end_offset = g.source_offsets[i] + g.edges_per_source[i];
+        }
+        for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
+            sgp_vid_t v = vcmap[g.destination_indices[j]];
+            mapped_edges[j] = v;
+            if (u != v) {
+                edges_per_source[u]++;
+                edges_per_dest[v]++;
+                ec++;
+            }
         }
     }
 
+    //prefix sums to compute bucket offsets
+    sgp_eid_t* source_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
+    sgp_eid_t* dest_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
+    SGPAR_ASSERT(source_bucket_offset != NULL);
+    SGPAR_ASSERT(dest_bucket_offset != NULL);
+    for (sgp_vid_t i = 0; i < nc; i++) {
+        source_bucket_offset[i + 1] = source_bucket_offset[i] + edges_per_source[i];
+        dest_bucket_offset[i + 1] = dest_bucket_offset[i] + edges_per_dest[i];
+        edges_per_source[i] = 0;//reset to be used as a counter
+        edges_per_dest[i] = 0;//reset to be used as a counter
+    }
+
+    //sort by dest first
+    sgp_vid_t* source_by_dest = (sgp_vid_t*)malloc(ec * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(source_by_dest != NULL);
+    sgp_wgt_t* wgt_by_dest = (sgp_wgt_t*)malloc(ec * sizeof(sgp_wgt_t));
+    SGPAR_ASSERT(wgt_by_dest != NULL);
+    for (sgp_vid_t i = 0; i < n; i++) {
+        sgp_vid_t u = vcmap[i];
+        sgp_eid_t end_offset = g.source_offsets[i + 1];
+        if (coarsening_level != 1) {
+            end_offset = g.source_offsets[i] + g.edges_per_source[i];
+        }
+        for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
+            sgp_vid_t v = mapped_edges[j];
+            if (u != v) {
+                sgp_eid_t offset = dest_bucket_offset[v] + edges_per_dest[v];
+                edges_per_dest[v]++;
+
+                source_by_dest[offset] = u;
+                if (coarsening_level != 1) {
+                    wgt_by_dest[offset] = g.eweights[j];
+                }
+                else {
+                    wgt_by_dest[offset] = 1;
+                }
+            }
+        }
+    }
+    free(mapped_edges);
+
+    //sort by source and deduplicate
+    sgp_vid_t* dest_by_source = (sgp_vid_t*)malloc(ec * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(dest_by_source != NULL);
+    sgp_wgt_t* wgt_by_source = (sgp_wgt_t*)malloc(ec * sizeof(sgp_wgt_t));
+    SGPAR_ASSERT(wgt_by_source != NULL);
+    sgp_eid_t gc_nedges = 0;
+    for (sgp_vid_t v = 0; v < nc; v++) {
+
+        for (sgp_eid_t j = dest_bucket_offset[v]; j < dest_bucket_offset[v + 1]; j++) {
+            sgp_vid_t u = source_by_dest[j];
+            sgp_wgt_t wgt = wgt_by_dest[j];
+            sgp_eid_t offset = source_bucket_offset[u] + edges_per_source[u];
+
+            if (edges_per_source[u] == 0) {
+                dest_by_source[offset] = v;
+                wgt_by_source[offset] = wgt;
+                edges_per_source[u]++;
+                gc_nedges++;
+            }
+            else {
+                if (dest_by_source[offset - 1] == v) {
+                    wgt_by_source[offset - 1] += wgt;
+                }
+                else {
+                    dest_by_source[offset] = v;
+                    wgt_by_source[offset] = wgt;
+                    edges_per_source[u]++;
+                    gc_nedges++;
+                }
+            }
+        }
+    }
+    free(source_by_dest);
+    free(wgt_by_dest);
+    free(dest_bucket_offset);
+    free(edges_per_dest);
+
+    *sort_time += (sgp_timer() - elt);
+
+    gc_nedges /= 2;
+
+    gc->nedges = gc_nedges;
+    gc->destination_indices = dest_by_source;
+    gc->source_offsets = source_bucket_offset;
+    gc->eweights = wgt_by_source;
+    gc->edges_per_source = edges_per_source;
+
+    gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
+    assert(gc->weighted_degree != NULL);
+
+    for (sgp_vid_t i = 0; i < nc; i++) {
+        sgp_wgt_t degree_wt_i = 0;
+        sgp_eid_t end_offset = gc->source_offsets[i] + gc->edges_per_source[i];
+        for (sgp_eid_t j = gc->source_offsets[i]; j < end_offset; j++) {
+            degree_wt_i += gc->eweights[j];
+        }
+        gc->weighted_degree[i] = degree_wt_i;
+    }
+
+    return EXIT_SUCCESS;
 }
 
-    double elt = sgp_timer();
-#ifdef __cplusplus
-#ifdef USE_GNU_PARALLELMODE
-    printf("GNU parallel sort\n");
-    __gnu_parallel::sort(((edge_triple_t *) edges_uvw), 
-                         ((edge_triple_t *) edges_uvw)+nEdges, uvw_cmpfn_inc,
-                        __gnu_parallel::quicksort_tag());
-#else
-    printf("std sort\n");
-    std::sort(((edge_triple_t *) edges_uvw), 
-              ((edge_triple_t *) edges_uvw)+nEdges,
-              uvw_cmpfn_inc);
-#endif
-#else
-    qsort(edges_uvw, nEdges, 3*sizeof(sgp_vid_t), uvw_cmpfn_inc);
-#endif
-    *sort_time += (sgp_timer() - elt);
-    nEdges = binary_search_find_first_self_loop(((edge_triple_t *) edges_uvw), 0, nEdges);
+SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
+    sgp_vid_t* vcmap,
+    const sgp_graph_t g,
+    const int coarsening_level,
+    double* sort_time) {
+    sgp_vid_t n = g.nvertices;
     sgp_vid_t nc = gc->nvertices;
 
 #ifdef __cplusplus
-	//std::atomic<sgp_vid_t> gc_degree[nc] = {};
-    atom_vid_t * gc_degree = (atom_vid_t *) malloc(nc * sizeof(atom_vid_t));
+    std::atomic<sgp_eid_t> ec(0);
 #else
-	_Atomic sgp_vid_t* gc_degree = (_Atomic sgp_vid_t*) malloc(nc * sizeof(_Atomic sgp_vid_t));
+    _Atomic sgp_eid_t ec = 0;
 #endif
-    SGPAR_ASSERT(gc_degree != NULL);
-    for (sgp_vid_t i=0; i<nc; i++) {
-        gc_degree[i] = 0;
-    }
 
-    gc_degree[0]++;
+    double elt = sgp_timer();
 
-    //have to ensure these are shared variables, so declare them outside parallel region
-    //see malloc initialization of these arrays for explanation
-    sgp_vid_t* gc_destination_indices;
-    sgp_wgt_t * gc_eweights;
+    //radix sort source vertices, then sort edges
 
-    //I guess because of the (nc + 1), the size of the array is not a shared variable
-    //so it won't be a shared array if declared in the parallel region
-    sgp_eid_t* gc_source_offsets = (sgp_eid_t*)	malloc((nc + 1) * sizeof(sgp_eid_t));
-    SGPAR_ASSERT(gc_source_offsets != NULL);
-    gc_source_offsets[0] = 0;
+#ifdef __cplusplus
+    std::atomic<sgp_vid_t> * edges_per_source_atomic = new std::atomic<sgp_vid_t>[nc];
+    SGPAR_ASSERT(edges_per_source_atomic != NULL);
+#else
+    _Atomic sgp_vid_t * edges_per_source_atomic = (_Atomic sgp_vid_t *) calloc(nc, sizeof(_Atomic sgp_vid_t));
+    SGPAR_ASSERT(edges_per_source_atomic != NULL);
+#endif
+
+    sgp_vid_t* mapped_edges = (sgp_vid_t*)malloc(g.source_offsets[n] * sizeof(sgp_vid_t));
+
+    sgp_eid_t* source_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
+    SGPAR_ASSERT(source_bucket_offset != NULL);
+
+    sgp_vid_t* dest_by_source;
+    sgp_wgt_t* wgt_by_source;
+
+#ifdef __cplusplus
+    std::atomic<sgp_eid_t> gc_nedges(0);
+#else
+    _Atomic sgp_eid_t gc_nedges = 0;
+#endif
+
+    sgp_vid_t * edges_per_source = (sgp_vid_t *) malloc(nc * sizeof(sgp_vid_t));
 
 #pragma omp parallel
 {
+    sgp_vid_t total_threads = omp_get_num_threads();
+    sgp_vid_t t_id = omp_get_thread_num();
 
-	sgp_vid_t total_threads = omp_get_num_threads();
-	sgp_vid_t t_id = omp_get_thread_num();
-
-    //adding total_threads + 1 has the effect of ceil((nEdges - 1) / total_threads)
-	sgp_eid_t width = (nEdges - 1 + total_threads - 1) / total_threads;
-	sgp_eid_t start_e = 1 + width * t_id;
-	sgp_eid_t end_e = start_e + width;
-	if (end_e > nEdges) {
-		end_e = nEdges;
-	}
-
-	//count unique coarse edges
+    //count edges per vertex
 #pragma omp for
-	for (sgp_vid_t i = 1; i < nEdges; i++) {
-		sgp_vid_t prev_u = edges_uvw[3 * (i - 1)];
-		sgp_vid_t prev_v = edges_uvw[3 * (i - 1) + 1];
-		sgp_vid_t curr_u = edges_uvw[3 * i];
-		sgp_vid_t curr_v = edges_uvw[3 * i + 1];
-		if ((curr_u != prev_u) || (curr_v != prev_v)) {
-			gc_degree[curr_u]++;
-		}
-	}
+    for (sgp_vid_t i = 0; i < n; i++) {
+        sgp_vid_t u = vcmap[i];
+        sgp_eid_t end_offset = g.source_offsets[i + 1];
+        if (coarsening_level != 1) {
+            end_offset = g.source_offsets[i] + g.edges_per_source[i];
+        }
+        for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
+            sgp_vid_t v = vcmap[g.destination_indices[j]];
+            mapped_edges[j] = v;
+            if (u != v) {
+                edges_per_source_atomic[u]++;
+                ec++;
+            }
+        }
+    }
 
-#pragma omp barrier
-
-	//copy into source offsets
-	gc_source_offsets[0] = 0;
 #pragma omp for
-	for (sgp_vid_t i = 0; i < nc; i++) {
-		gc_source_offsets[i + 1] = gc_degree[i];
-	}
+    for (sgp_vid_t i = 0; i < nc; i++) {
+        source_bucket_offset[i + 1] = edges_per_source_atomic[i];
+        edges_per_source_atomic[i] = 0; // will use as counter again
+    }
 
-	//prefix sum for source_offsets
-	parallel_prefix_sum(gc_source_offsets, nc, t_id, total_threads);
+    //prefix sums to compute bucket offsets
+    parallel_prefix_sum(source_bucket_offset, nc, t_id, total_threads);
 
-	sgp_eid_t gc_nedges = gc_source_offsets[nc] / 2;
-    
 #pragma omp single
 {
-    //gc_nedges is not a shared variable so this must be done by one thread
-    //therefore they are not automatically shared, which is why they are declared outside the parallel region
-    gc_destination_indices = (sgp_vid_t*)
-        malloc(2 * gc_nedges * sizeof(sgp_eid_t));
-    gc_eweights = (sgp_wgt_t*)
-        malloc(2 * gc_nedges * sizeof(sgp_wgt_t));
+    dest_by_source = (sgp_vid_t*)malloc(ec * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(dest_by_source != NULL);
+    wgt_by_source = (sgp_wgt_t*)malloc(ec * sizeof(sgp_wgt_t));
+    SGPAR_ASSERT(wgt_by_source != NULL);
 }
 
-    SGPAR_ASSERT(gc_destination_indices != NULL);
-    SGPAR_ASSERT(gc_eweights != NULL);
-
-#pragma omp barrier
-
+    //sort by source first
 #pragma omp for
-	for (sgp_vid_t i = 0; i < nc; i++) {
-		gc_degree[i] = 0;
-	}
+    for (sgp_vid_t i = 0; i < n; i++) {
+        sgp_vid_t u = vcmap[i];
+        sgp_eid_t end_offset = g.source_offsets[i + 1];
+        if (coarsening_level != 1) {
+            end_offset = g.source_offsets[i] + g.edges_per_source[i];
+        }
+        for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
+            sgp_vid_t v = mapped_edges[j];
+            if (u != v) {
+                //edges_per_source[u]++ is atomic_fetch_add
+                sgp_eid_t offset = source_bucket_offset[u] + edges_per_source_atomic[u]++;
 
+                dest_by_source[offset] = v;
+                if (coarsening_level != 1) {
+                    wgt_by_source[offset] = g.eweights[j];
+                }
+                else {
+                    wgt_by_source[offset] = 1;
+                }
+            }
+        }
+    }
 #pragma omp single
-	{
-		gc_degree[0] = 1;
-		gc_destination_indices[0] = edges_uvw[1];
-		gc_eweights[0] = edges_uvw[2];
-	}
-
-	//don't adjust the start edge for thread 0
-	if (t_id > 0) {
-		sgp_vid_t curr_u = edges_uvw[3 * start_e];
-		sgp_vid_t prev_u = edges_uvw[3 * (start_e - 1)];
-		while (curr_u == prev_u && start_e < end_e) {
-			start_e++;
-			curr_u = edges_uvw[3 * start_e];
-			prev_u = edges_uvw[3 * (start_e - 1)];
-		}
-	}
-
-	if (start_e < end_e && end_e < nEdges) {
-		sgp_vid_t curr_u = edges_uvw[3 * end_e];
-		sgp_vid_t prev_u = edges_uvw[3 * (end_e - 1)];
-		while (curr_u == prev_u && end_e < nEdges) {
-			end_e++;
-			if (end_e < nEdges) {
-				curr_u = edges_uvw[3 * end_e];
-				prev_u = edges_uvw[3 * (end_e - 1)];
-			}
-		}
-	}
-
-	//combine weights of like coarse edges and write to destination_indices
-	for (sgp_eid_t i = start_e; i < end_e; i++) {
-		sgp_vid_t curr_u = edges_uvw[3 * i];
-		sgp_vid_t curr_v = edges_uvw[3 * i + 1];
-
-		sgp_vid_t prev_u = edges_uvw[3 * (i - 1)];
-		sgp_vid_t prev_v = edges_uvw[3 * (i - 1) + 1];
-		sgp_eid_t eloc = gc_source_offsets[curr_u] + gc_degree[curr_u];
-		if ((curr_u != prev_u) || (curr_v != prev_v)) {
-			gc_destination_indices[eloc] = curr_v;
-			gc_eweights[eloc] = edges_uvw[3 * i + 2];
-			//only one thread should ever be working with a given curr_u, so there should be no race condition
-			gc_degree[curr_u]++;
-		}
-		else {
-			gc_eweights[eloc - 1] += edges_uvw[3 * i + 2];
-		}
-	}
-
-#pragma omp single
-	{
-		gc->nedges = gc_nedges;
-		gc->destination_indices = gc_destination_indices;
-		gc->source_offsets = gc_source_offsets;
-		gc->eweights = gc_eweights;
-        gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
-        SGPAR_ASSERT(gc->weighted_degree != NULL);
-	}
-
-	sgp_vid_t gcn = gc->nvertices;
-#pragma omp for
-	for (sgp_vid_t i = 0; i < gcn; i++) {
-		sgp_wgt_t degree_wt_i = 0;
-		for (sgp_eid_t j = gc->source_offsets[i]; j < gc->source_offsets[i + 1]; j++) {
-			degree_wt_i += gc->eweights[j];
-		}
-		gc->weighted_degree[i] = degree_wt_i;
-	}
-}
-
-
-    free(edges_uvw);
+{
+    free(mapped_edges);
 #ifdef __cplusplus
-    //gc_degree is on the stack (I think) if using c++
-    free(gc_degree);
+    delete[] edges_per_source_atomic;
 #else
-    free(gc_degree);
+    free(edges_per_source_atomic);
 #endif
- 
+}
+
+    //sort by dest and deduplicate
+#pragma omp for
+    for (sgp_vid_t u = 0; u < nc; u++) {
+
+        sgp_eid_t offset = source_bucket_offset[u];
+        sgp_eid_t last_offset = offset;
+
+        //insertion sort
+        for (sgp_eid_t i = source_bucket_offset[u]; i < source_bucket_offset[u + 1]; i++) {
+
+            sgp_vid_t min = dest_by_source[i];
+            sgp_eid_t argmin = i;
+
+            for (sgp_eid_t j = i + 1; j < source_bucket_offset[u + 1]; j++) {
+                if (min > dest_by_source[j]) {
+                    min = dest_by_source[j];
+                    argmin = j;
+                }
+            }
+
+            if (argmin != i) {
+                dest_by_source[argmin] = dest_by_source[i];
+                dest_by_source[i] = min;
+
+                sgp_wgt_t wgt = wgt_by_source[argmin];
+                wgt_by_source[argmin] = wgt_by_source[i];
+                wgt_by_source[i] = wgt;
+            }
+
+            if (last_offset < offset) {
+                if (dest_by_source[last_offset] == dest_by_source[i]) {
+                    wgt_by_source[last_offset] += wgt_by_source[i];
+                }
+                else {
+                    dest_by_source[offset] = dest_by_source[i];
+                    wgt_by_source[offset] = wgt_by_source[i];
+                    last_offset = offset;
+                    offset++;
+                    gc_nedges++;
+                }
+            }
+            else {
+                offset++;
+                gc_nedges++;
+            }
+        }
+
+        edges_per_source[u] = offset - source_bucket_offset[u];
+    }
+
+#pragma omp single
+{
+    *sort_time += (sgp_timer() - elt);
+
+    gc_nedges = gc_nedges / 2;
+
+    gc->nedges = gc_nedges;
+    gc->destination_indices = dest_by_source;
+    gc->source_offsets = source_bucket_offset;
+    gc->eweights = wgt_by_source;
+    gc->edges_per_source = edges_per_source;
+
+    gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
+    assert(gc->weighted_degree != NULL);
+}
+
+#pragma omp for
+    for (sgp_vid_t i = 0; i < nc; i++) {
+        sgp_wgt_t degree_wt_i = 0;
+        sgp_eid_t end_offset = gc->source_offsets[i] + gc->edges_per_source[i];
+        for (sgp_eid_t j = gc->source_offsets[i]; j < end_offset; j++) {
+            degree_wt_i += gc->eweights[j];
+        }
+        gc->weighted_degree[i] = degree_wt_i;
+    }
+}
+
+    return EXIT_SUCCESS;
+}
+
+SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
+    sgp_vid_t* vcmap,
+    const sgp_graph_t g,
+    const int coarsening_level,
+    double* sort_time) {
+    sgp_vid_t n = g.nvertices;
+    sgp_vid_t nc = gc->nvertices;
+
+    sgp_eid_t ec = 0;
+
+    double elt = sgp_timer();
+
+    //radix sort source vertices, then sort edges
+
+    //count edges per vertex
+    sgp_vid_t* edges_per_source = (sgp_vid_t*)calloc(nc, sizeof(sgp_vid_t));
+    SGPAR_ASSERT(edges_per_source != NULL);
+    sgp_vid_t* mapped_edges = (sgp_vid_t*)malloc(g.source_offsets[n] * sizeof(sgp_vid_t));
+
+    for (sgp_vid_t i = 0; i < n; i++) {
+        sgp_vid_t u = vcmap[i];
+        sgp_eid_t end_offset = g.source_offsets[i + 1];
+        if (coarsening_level != 1) {
+            end_offset = g.source_offsets[i] + g.edges_per_source[i];
+        }
+        for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
+            sgp_vid_t v = vcmap[g.destination_indices[j]];
+            mapped_edges[j] = v;
+            if (u != v) {
+                edges_per_source[u]++;
+                ec++;
+            }
+        }
+    }
+
+    //prefix sums to compute bucket offsets
+    sgp_eid_t* source_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
+    SGPAR_ASSERT(source_bucket_offset != NULL);
+    for (sgp_vid_t i = 0; i < nc; i++) {
+        source_bucket_offset[i + 1] = source_bucket_offset[i] + edges_per_source[i];
+        edges_per_source[i] = 0;//reset to be used as a counter
+    }
+
+    //sort by source first
+    sgp_vid_t* dest_by_source = (sgp_vid_t*)malloc(ec * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(dest_by_source != NULL);
+    sgp_wgt_t* wgt_by_source = (sgp_wgt_t*)malloc(ec * sizeof(sgp_wgt_t));
+    SGPAR_ASSERT(wgt_by_source != NULL);
+    for (sgp_vid_t i = 0; i < n; i++) {
+        sgp_vid_t u = vcmap[i];
+        sgp_eid_t end_offset = g.source_offsets[i + 1];
+        if (coarsening_level != 1) {
+            end_offset = g.source_offsets[i] + g.edges_per_source[i];
+        }
+        for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
+            sgp_vid_t v = mapped_edges[j];
+            if (u != v) {
+                sgp_eid_t offset = source_bucket_offset[u] + edges_per_source[u];
+                edges_per_source[u]++;
+
+                dest_by_source[offset] = v;
+                if (coarsening_level != 1) {
+                    wgt_by_source[offset] = g.eweights[j];
+                }
+                else {
+                    wgt_by_source[offset] = 1;
+                }
+            }
+        }
+    }
+    free(mapped_edges);
+
+    //sort by dest and deduplicate
+    sgp_eid_t gc_nedges = 0;
+    for (sgp_vid_t u = 0; u < nc; u++) {
+
+        sgp_eid_t next_offset = source_bucket_offset[u];
+
+        std::unordered_map<sgp_vid_t, sgp_eid_t> map;
+        //insertion sort
+        for (sgp_eid_t i = source_bucket_offset[u]; i < source_bucket_offset[u + 1]; i++) {
+
+            sgp_vid_t v = dest_by_source[i];
+
+            if (map.count(v) > 0) {
+                sgp_eid_t idx = map.at(v);
+
+                wgt_by_source[idx] += wgt_by_source[i];
+            }
+            else {
+                map.insert({ v, next_offset });
+                dest_by_source[next_offset] = dest_by_source[i];
+                wgt_by_source[next_offset] = wgt_by_source[i];
+                next_offset++;
+                gc_nedges++;
+            }
+        }
+
+        edges_per_source[u] = next_offset - source_bucket_offset[u];
+    }
+
+    *sort_time += (sgp_timer() - elt);
+
+    gc_nedges /= 2;
+
+    gc->nedges = gc_nedges;
+    gc->destination_indices = dest_by_source;
+    gc->source_offsets = source_bucket_offset;
+    gc->eweights = wgt_by_source;
+    gc->edges_per_source = edges_per_source;
+
+    gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
+    assert(gc->weighted_degree != NULL);
+
+    for (sgp_vid_t i = 0; i < nc; i++) {
+        sgp_wgt_t degree_wt_i = 0;
+        sgp_eid_t end_offset = gc->source_offsets[i] + gc->edges_per_source[i];
+        for (sgp_eid_t j = gc->source_offsets[i]; j < end_offset; j++) {
+            degree_wt_i += gc->eweights[j];
+        }
+        gc->weighted_degree[i] = degree_wt_i;
+    }
+
     return EXIT_SUCCESS;
 }
 #else
