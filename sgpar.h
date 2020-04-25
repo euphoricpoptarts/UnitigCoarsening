@@ -335,8 +335,7 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
 			sgp_vid_t hn_i = g.destination_indices[g.source_offsets[i]];
 			sgp_wgt_t max_ewt = g.eweights[g.source_offsets[i]];
 
-			for (sgp_eid_t j = g.source_offsets[i] + 1;
-				j < g.source_offsets[i + 1]; j++) {
+			for (sgp_eid_t j = g.source_offsets[i] + 1; j < g.source_offsets[i] + g.edges_per_source[i]; j++) {
 				if (max_ewt < g.eweights[j]) {
 					max_ewt = g.eweights[j];
 					hn_i = g.destination_indices[j];
@@ -1299,7 +1298,7 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
         for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
             sgp_vid_t v = mapped_edges[j];
             if (u != v) {
-                //edges_per_source[u]++ is atomic_fetch_add
+                //edges_per_source_atomic[u]++ is atomic_fetch_add
                 sgp_eid_t offset = source_bucket_offset[u] + edges_per_source_atomic[u]++;
 
                 dest_by_source[offset] = v;
