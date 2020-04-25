@@ -881,12 +881,16 @@ void parallel_prefix_sum(sgp_eid_t* gc_source_offsets, sgp_vid_t nc, int t_id, i
     }
 }
 
+    end = start + idx_per_thread - 1;
+    if (end > nc) {
+        end = nc;
+    }
     if (end < start) {
         start = end;
     }
     sgp_eid_t add = gc_source_offsets[start];
 
-    for (sgp_vid_t i = start; i < (end - 1); i++) {
+    for (sgp_vid_t i = start; i < end; i++) {
         gc_source_offsets[i + 1] += add;
     }
 
