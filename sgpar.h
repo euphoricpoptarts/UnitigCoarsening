@@ -1045,6 +1045,11 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     sgp_vid_t total_threads = omp_get_num_threads();
     sgp_vid_t t_id = omp_get_thread_num();
 
+#pragma omp for
+    for (sgp_vid_t i = 0; i < nc; i++) {
+        edges_per_source_atomic[i] = 0;
+    }
+
     //count edges per vertex
 #pragma omp for
     for (sgp_vid_t i = 0; i < n; i++) {
