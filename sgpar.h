@@ -1208,17 +1208,53 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
     sgp_vid_t n = g.nvertices;
     sgp_vid_t nc = gc->nvertices;
 
-    sgp_eid_t ec = 0;
+#ifdef __cplusplus
+    std::atomic<sgp_eid_t> ec(0);
+#else
+    _Atomic sgp_eid_t ec = 0;
+#endif
 
     double elt = sgp_timer();
 
     //radix sort source vertices, then sort edges
 
-    //count edges per vertex
-    sgp_vid_t* edges_per_source = (sgp_vid_t*)calloc(nc, sizeof(sgp_vid_t));
-    SGPAR_ASSERT(edges_per_source != NULL);
+#ifdef __cplusplus
+    std::atomic<sgp_vid_t>* edges_per_source_atomic = new std::atomic<sgp_vid_t>[nc];
+    SGPAR_ASSERT(edges_per_source_atomic != NULL);
+#else
+    _Atomic sgp_vid_t* edges_per_source_atomic = (_Atomic sgp_vid_t*) calloc(nc, sizeof(_Atomic sgp_vid_t));
+    SGPAR_ASSERT(edges_per_source_atomic != NULL);
+#endif
+
     sgp_vid_t* mapped_edges = (sgp_vid_t*)malloc(g.source_offsets[n] * sizeof(sgp_vid_t));
 
+    sgp_eid_t* source_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
+    SGPAR_ASSERT(source_bucket_offset != NULL);
+    source_bucket_offset[0] = 0;
+
+    sgp_vid_t* dest_by_source;
+    sgp_wgt_t* wgt_by_source;
+
+#ifdef __cplusplus
+    std::atomic<sgp_eid_t> gc_nedges(0);
+#else
+    _Atomic sgp_eid_t gc_nedges = 0;
+#endif
+
+    sgp_vid_t* edges_per_source = (sgp_vid_t*)malloc(nc * sizeof(sgp_vid_t));
+
+#pragma omp parallel
+{
+    sgp_vid_t total_threads = omp_get_num_threads();
+    sgp_vid_t t_id = omp_get_thread_num();
+
+#pragma omp for
+    for (sgp_vid_t i = 0; i < nc; i++) {
+        edges_per_source_atomic[i] = 0;
+    }
+
+    //count edges per vertex
+#pragma omp for
     for (sgp_vid_t i = 0; i < n; i++) {
         sgp_vid_t u = vcmap[i];
         sgp_eid_t end_offset = g.source_offsets[i + 1];
@@ -1235,19 +1271,25 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
         }
     }
 
-    //prefix sums to compute bucket offsets
-    sgp_eid_t* source_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
-    SGPAR_ASSERT(source_bucket_offset != NULL);
+#pragma omp for
     for (sgp_vid_t i = 0; i < nc; i++) {
-        source_bucket_offset[i + 1] = source_bucket_offset[i] + edges_per_source[i];
-        edges_per_source[i] = 0;//reset to be used as a counter
+        source_bucket_offset[i + 1] = edges_per_source_atomic[i];
+        edges_per_source_atomic[i] = 0; // will use as counter again
     }
 
-    //sort by source first
-    sgp_vid_t* dest_by_source = (sgp_vid_t*)malloc(ec * sizeof(sgp_vid_t));
+    //prefix sums to compute bucket offsets
+    parallel_prefix_sum(source_bucket_offset, nc, t_id, total_threads);
+
+#pragma omp single
+{
+    dest_by_source = (sgp_vid_t*)malloc(ec * sizeof(sgp_vid_t));
     SGPAR_ASSERT(dest_by_source != NULL);
-    sgp_wgt_t* wgt_by_source = (sgp_wgt_t*)malloc(ec * sizeof(sgp_wgt_t));
+    wgt_by_source = (sgp_wgt_t*)malloc(ec * sizeof(sgp_wgt_t));
     SGPAR_ASSERT(wgt_by_source != NULL);
+}
+
+    //sort by source first
+#pragma omp for
     for (sgp_vid_t i = 0; i < n; i++) {
         sgp_vid_t u = vcmap[i];
         sgp_eid_t end_offset = g.source_offsets[i + 1];
@@ -1257,8 +1299,8 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
         for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
             sgp_vid_t v = mapped_edges[j];
             if (u != v) {
-                sgp_eid_t offset = source_bucket_offset[u] + edges_per_source[u];
-                edges_per_source[u]++;
+                //edges_per_source[u]++ is atomic_fetch_add
+                sgp_eid_t offset = source_bucket_offset[u] + edges_per_source[u]++;
 
                 dest_by_source[offset] = v;
                 if (coarsening_level != 1) {
@@ -1270,10 +1312,18 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
             }
         }
     }
+#pragma omp single
+{
     free(mapped_edges);
+#ifdef __cplusplus
+    delete[] edges_per_source_atomic;
+#else
+    free(edges_per_source_atomic);
+#endif
+}
 
     //sort by dest and deduplicate
-    sgp_eid_t gc_nedges = 0;
+#pragma omp for
     for (sgp_vid_t u = 0; u < nc; u++) {
 
         sgp_eid_t next_offset = source_bucket_offset[u];
@@ -1301,9 +1351,11 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
         edges_per_source[u] = next_offset - source_bucket_offset[u];
     }
 
+#pragma omp single
+{
     *sort_time += (sgp_timer() - elt);
 
-    gc_nedges /= 2;
+    gc_nedges = gc_nedges / 2;
 
     gc->nedges = gc_nedges;
     gc->destination_indices = dest_by_source;
@@ -1313,7 +1365,9 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
 
     gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
     assert(gc->weighted_degree != NULL);
+}
 
+#pragma omp for
     for (sgp_vid_t i = 0; i < nc; i++) {
         sgp_wgt_t degree_wt_i = 0;
         sgp_eid_t end_offset = gc->source_offsets[i] + gc->edges_per_source[i];
@@ -1322,6 +1376,7 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
         }
         gc->weighted_degree[i] = degree_wt_i;
     }
+}
 
     return EXIT_SUCCESS;
 }
