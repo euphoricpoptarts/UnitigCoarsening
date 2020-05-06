@@ -716,11 +716,6 @@ Kokkos::initialize();
         }
     });
 
-    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
-        source_bucket_offset[i + 1] = edges_per_source[i];
-        edges_per_source[i] = 0; // will use as counter again
-    });
-
     Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const int i,
         float& update, const bool final) {
         // Load old value in case we update it before accumulating
@@ -731,6 +726,10 @@ Kokkos::initialize();
         if (final) {
             source_bucket_offset[i + 1] = update; // only update array on final pass
         }
+    });
+
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
+        edges_per_source[i] = 0; // will use as counter again
     });
 
     dest_by_source = (sgp_vid_t*)malloc(ec * sizeof(sgp_vid_t));
