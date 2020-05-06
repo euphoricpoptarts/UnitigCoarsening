@@ -723,7 +723,7 @@ Kokkos::initialize();
     Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const int i,
         float& update, const bool final) {
         // Load old value in case we update it before accumulating
-        const float val_i = coarse_edge_counter[i];
+        const float val_i = edges_per_source[i];
         // For inclusive scan,
         // change the update value before updating array.
         update += val_i;
@@ -782,7 +782,7 @@ Kokkos::initialize();
                 dest_by_source[next_offset] = dest_by_source[i];
                 wgt_by_source[next_offset] = wgt_by_source[i];
                 next_offset++;
-                Kokkkos::atomic_increment(gc_nedges);
+                Kokkos::atomic_increment(gc_nedges);
             }
         }
 
