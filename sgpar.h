@@ -439,8 +439,10 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
             sgp_vid_t hn_i = g.destination_indices[g.source_offsets[i]];
             sgp_wgt_t max_ewt = g.eweights[g.source_offsets[i]];
 
+            sgp_eid_t end_offset = g.source_offsets[i] + g.edges_per_source[i];
+
             for (sgp_eid_t j=g.source_offsets[i]+1; 
-                           j<g.source_offsets[i+1]; j++) {
+                           j< end_offset; j++) {
                 if (max_ewt < g.eweights[j]) {
                     max_ewt = g.eweights[j];
                     hn_i = g.destination_indices[j];
@@ -2147,8 +2149,14 @@ Kokkos::initialize();
                 v_i = 0.5*u[i];
             }
             sgp_real_t matvec_i = 0;
+
+            sgp_eid_t end_offset = g.source_offsets[i + 1];
+            if (!final) {
+                end_offset = g.source_offsets[i] + g.edges_per_source[i];
+            }
+
             for (sgp_eid_t j=g.source_offsets[i]; 
-                           j<g.source_offsets[i+1]; j++) {
+                           j<end_offset; j++) {
                 if(!final){
                     matvec_i += u[g.destination_indices[j]]*g.eweights[j];
                 } else {
