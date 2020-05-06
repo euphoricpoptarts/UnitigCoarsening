@@ -672,6 +672,11 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
     sgp_vid_t n = g.nvertices;
     sgp_vid_t nc = gc->nvertices;
 
+
+
+Kokkos::initialize();
+{
+
     sgp_eid_t ec = 0;
 
     double elt = sgp_timer();
@@ -690,10 +695,6 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
     sgp_eid_t gc_nedges = 0;
 
     sgp_vid_t* edges_per_source = (sgp_vid_t*)malloc(nc * sizeof(sgp_vid_t));
-
-Kokkos::initialize();
-{
-
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
             edges_per_source[i] = 0;
     });
