@@ -782,7 +782,7 @@ Kokkos::initialize();
                 dest_by_source[next_offset] = dest_by_source[i];
                 wgt_by_source[next_offset] = wgt_by_source[i];
                 next_offset++;
-                Kokkos::atomic_increment(gc_nedges);
+                Kokkos::atomic_increment(&gc_nedges);
             }
         }
 
