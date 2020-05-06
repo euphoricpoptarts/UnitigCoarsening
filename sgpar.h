@@ -449,7 +449,7 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
                 }
 
             }
-            hn[i] = hn_i;         
+            hn[i] = hn_i;
         });
     }
 
@@ -722,7 +722,7 @@ Kokkos::initialize();
     Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
         sgp_eid_t& update, const bool final) {
         // Load old value in case we update it before accumulating
-        const float val_i = edges_per_source[i];
+        const sgp_eid_t val_i = edges_per_source[i];
         // For inclusive scan,
         // change the update value before updating array.
         update += val_i;
