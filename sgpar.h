@@ -695,7 +695,7 @@ Kokkos::initialize();
 {
 
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
-            edges_per_source_atomic[i] = 0;
+            edges_per_source[i] = 0;
     });
 
         //count edges per vertex
@@ -718,7 +718,7 @@ Kokkos::initialize();
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
         source_bucket_offset[i + 1] = edges_per_source[i];
         edges_per_source[i] = 0; // will use as counter again
-    }
+    });
 
     Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const int i,
         float& update, const bool final) {
@@ -746,7 +746,7 @@ Kokkos::initialize();
         for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
             sgp_vid_t v = mapped_edges[j];
             if (u != v) {
-                sgp_eid_t offset = Kokkos::atomic_fetch_increment(edges_per_source + u);
+                sgp_eid_t offset = Kokkos::atomic_fetch_add(edges_per_source + u, 1);
 
                 offset += source_bucket_offset[u];
 
@@ -782,7 +782,7 @@ Kokkos::initialize();
                 dest_by_source[next_offset] = dest_by_source[i];
                 wgt_by_source[next_offset] = wgt_by_source[i];
                 next_offset++;
-                gc_nedges++;
+                Kokkkos::atomic_increment(gc_nedges);
             }
         }
 
@@ -1920,6 +1920,9 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
         gc->nvertices = nvertices_coarse;
     }
 
+#ifdef _KOKKOS
+    sgp_build_coarse_graph_msd_hashmap(gc, vcmap, g, coarsening_level, sort_time_ptr);
+#else
     if ((coarsening_alg & 6) == 2) {
         sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, sort_time_ptr);
     }
@@ -1929,6 +1932,7 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
     else {
         sgp_build_coarse_graph_lsd(gc, vcmap, g, coarsening_level, sort_time_ptr);
     }
+#endif
 
     return EXIT_SUCCESS;
 }
