@@ -916,147 +916,6 @@ void parallel_prefix_sum(sgp_eid_t* gc_source_offsets, sgp_vid_t nc, int t_id, i
 #pragma omp barrier
 }
 
-SGPAR_API int sgp_build_coarse_graph_lsd(sgp_graph_t* gc,
-    sgp_vid_t* vcmap,
-    const sgp_graph_t g,
-    const int coarsening_level,
-    double* sort_time) {
-    sgp_vid_t n = g.nvertices;
-    sgp_vid_t nc = gc->nvertices;
-
-    sgp_eid_t ec = 0;
-
-    double elt = sgp_timer();
-
-    //radix lsd sort
-
-    //count edges per vertex
-    sgp_vid_t* edges_per_source = (sgp_vid_t*)calloc(nc, sizeof(sgp_vid_t));
-    sgp_vid_t* edges_per_dest = (sgp_vid_t*)calloc(nc, sizeof(sgp_vid_t));
-    SGPAR_ASSERT(edges_per_source != NULL);
-    SGPAR_ASSERT(edges_per_dest != NULL);
-    sgp_vid_t* mapped_edges = (sgp_vid_t*)malloc(g.source_offsets[n] * sizeof(sgp_vid_t));
-
-    for (sgp_vid_t i = 0; i < n; i++) {
-        sgp_vid_t u = vcmap[i];
-        sgp_eid_t end_offset = g.source_offsets[i + 1];
-        if (coarsening_level != 1) {
-            end_offset = g.source_offsets[i] + g.edges_per_source[i];
-        }
-        for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
-            sgp_vid_t v = vcmap[g.destination_indices[j]];
-            mapped_edges[j] = v;
-            if (u != v) {
-                edges_per_source[u]++;
-                edges_per_dest[v]++;
-                ec++;
-            }
-        }
-    }
-
-    //prefix sums to compute bucket offsets
-    sgp_eid_t* source_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
-    sgp_eid_t* dest_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
-    SGPAR_ASSERT(source_bucket_offset != NULL);
-    SGPAR_ASSERT(dest_bucket_offset != NULL);
-    for (sgp_vid_t i = 0; i < nc; i++) {
-        source_bucket_offset[i + 1] = source_bucket_offset[i] + edges_per_source[i];
-        dest_bucket_offset[i + 1] = dest_bucket_offset[i] + edges_per_dest[i];
-        edges_per_source[i] = 0;//reset to be used as a counter
-        edges_per_dest[i] = 0;//reset to be used as a counter
-    }
-
-    //sort by dest first
-    sgp_vid_t* source_by_dest = (sgp_vid_t*)malloc(ec * sizeof(sgp_vid_t));
-    SGPAR_ASSERT(source_by_dest != NULL);
-    sgp_wgt_t* wgt_by_dest = (sgp_wgt_t*)malloc(ec * sizeof(sgp_wgt_t));
-    SGPAR_ASSERT(wgt_by_dest != NULL);
-    for (sgp_vid_t i = 0; i < n; i++) {
-        sgp_vid_t u = vcmap[i];
-        sgp_eid_t end_offset = g.source_offsets[i + 1];
-        if (coarsening_level != 1) {
-            end_offset = g.source_offsets[i] + g.edges_per_source[i];
-        }
-        for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
-            sgp_vid_t v = mapped_edges[j];
-            if (u != v) {
-                sgp_eid_t offset = dest_bucket_offset[v] + edges_per_dest[v];
-                edges_per_dest[v]++;
-
-                source_by_dest[offset] = u;
-                if (coarsening_level != 1) {
-                    wgt_by_dest[offset] = g.eweights[j];
-                }
-                else {
-                    wgt_by_dest[offset] = 1;
-                }
-            }
-        }
-    }
-    free(mapped_edges);
-
-    //sort by source and deduplicate
-    sgp_vid_t* dest_by_source = (sgp_vid_t*)malloc(ec * sizeof(sgp_vid_t));
-    SGPAR_ASSERT(dest_by_source != NULL);
-    sgp_wgt_t* wgt_by_source = (sgp_wgt_t*)malloc(ec * sizeof(sgp_wgt_t));
-    SGPAR_ASSERT(wgt_by_source != NULL);
-    sgp_eid_t gc_nedges = 0;
-    for (sgp_vid_t v = 0; v < nc; v++) {
-
-        for (sgp_eid_t j = dest_bucket_offset[v]; j < dest_bucket_offset[v + 1]; j++) {
-            sgp_vid_t u = source_by_dest[j];
-            sgp_wgt_t wgt = wgt_by_dest[j];
-            sgp_eid_t offset = source_bucket_offset[u] + edges_per_source[u];
-
-            if (edges_per_source[u] == 0) {
-                dest_by_source[offset] = v;
-                wgt_by_source[offset] = wgt;
-                edges_per_source[u]++;
-                gc_nedges++;
-            }
-            else {
-                if (dest_by_source[offset - 1] == v) {
-                    wgt_by_source[offset - 1] += wgt;
-                }
-                else {
-                    dest_by_source[offset] = v;
-                    wgt_by_source[offset] = wgt;
-                    edges_per_source[u]++;
-                    gc_nedges++;
-                }
-            }
-        }
-    }
-    free(source_by_dest);
-    free(wgt_by_dest);
-    free(dest_bucket_offset);
-    free(edges_per_dest);
-
-    *sort_time += (sgp_timer() - elt);
-
-    gc_nedges /= 2;
-
-    gc->nedges = gc_nedges;
-    gc->destination_indices = dest_by_source;
-    gc->source_offsets = source_bucket_offset;
-    gc->eweights = wgt_by_source;
-    gc->edges_per_source = edges_per_source;
-
-    gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
-    assert(gc->weighted_degree != NULL);
-
-    for (sgp_vid_t i = 0; i < nc; i++) {
-        sgp_wgt_t degree_wt_i = 0;
-        sgp_eid_t end_offset = gc->source_offsets[i] + gc->edges_per_source[i];
-        for (sgp_eid_t j = gc->source_offsets[i]; j < end_offset; j++) {
-            degree_wt_i += gc->eweights[j];
-        }
-        gc->weighted_degree[i] = degree_wt_i;
-    }
-
-    return EXIT_SUCCESS;
-}
-
 SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     sgp_vid_t* vcmap,
     const sgp_graph_t g,
@@ -1389,7 +1248,7 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
     }
 
     //count edges per vertex
-#pragma omp for
+#pragma omp for schedule(dynamic, 16)
     for (sgp_vid_t i = 0; i < n; i++) {
         sgp_vid_t u = vcmap[i];
         sgp_eid_t end_offset = g.source_offsets[i + 1];
@@ -1424,7 +1283,7 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
 }
 
     //sort by source first
-#pragma omp for
+#pragma omp for schedule(dynamic, 16)
     for (sgp_vid_t i = 0; i < n; i++) {
         sgp_vid_t u = vcmap[i];
         sgp_eid_t end_offset = g.source_offsets[i + 1];
@@ -1458,7 +1317,7 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
 }
 
     //sort by dest and deduplicate
-#pragma omp for
+#pragma omp for schedule(dynamic, 16)
     for (sgp_vid_t u = 0; u < nc; u++) {
 
         sgp_eid_t next_offset = source_bucket_offset[u];
@@ -1516,147 +1375,6 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
     return EXIT_SUCCESS;
 }
 #else
-SGPAR_API int sgp_build_coarse_graph_lsd(sgp_graph_t *gc, 
-                                     sgp_vid_t *vcmap, 
-                                     const sgp_graph_t g, 
-                                     const int coarsening_level, 
-                                     double *sort_time) {
-    sgp_vid_t n  = g.nvertices;
-    sgp_vid_t nc = gc->nvertices;
-
-    sgp_eid_t ec = 0;
-
-    double elt = sgp_timer();
-
-    //radix lsd sort
-
-    //count edges per vertex
-    sgp_vid_t * edges_per_source = (sgp_vid_t*)calloc(nc, sizeof(sgp_vid_t));
-    sgp_vid_t * edges_per_dest = (sgp_vid_t*)calloc(nc, sizeof(sgp_vid_t));
-    SGPAR_ASSERT(edges_per_source != NULL);
-    SGPAR_ASSERT(edges_per_dest != NULL);
-    sgp_vid_t* mapped_edges = (sgp_vid_t*) malloc(g.source_offsets[n] * sizeof(sgp_vid_t));
-
-    for (sgp_vid_t i = 0; i < n; i++) {
-        sgp_vid_t u = vcmap[i];
-        sgp_eid_t end_offset = g.source_offsets[i + 1];
-        if (coarsening_level != 1) {
-            end_offset = g.source_offsets[i] + g.edges_per_source[i];
-        }
-        for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
-            sgp_vid_t v = vcmap[g.destination_indices[j]];
-            mapped_edges[j] = v;
-            if (u != v) {
-                edges_per_source[u]++;
-                edges_per_dest[v]++;
-                ec++;
-            }
-        }
-    }
-
-    //prefix sums to compute bucket offsets
-    sgp_eid_t * source_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
-    sgp_eid_t * dest_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
-    SGPAR_ASSERT(source_bucket_offset != NULL);
-    SGPAR_ASSERT(dest_bucket_offset != NULL);
-    for (sgp_vid_t i = 0; i < nc; i++) {
-        source_bucket_offset[i + 1] = source_bucket_offset[i] + edges_per_source[i];
-        dest_bucket_offset[i + 1] = dest_bucket_offset[i] + edges_per_dest[i];
-        edges_per_source[i] = 0;//reset to be used as a counter
-        edges_per_dest[i] = 0;//reset to be used as a counter
-    }
-
-    //sort by dest first
-    sgp_vid_t * source_by_dest = (sgp_vid_t*) malloc(ec * sizeof(sgp_vid_t));
-    SGPAR_ASSERT(source_by_dest != NULL);
-    sgp_wgt_t* wgt_by_dest = (sgp_wgt_t*) malloc(ec * sizeof(sgp_wgt_t));
-    SGPAR_ASSERT(wgt_by_dest != NULL);
-    for (sgp_vid_t i = 0; i < n; i++) {
-        sgp_vid_t u = vcmap[i];
-        sgp_eid_t end_offset = g.source_offsets[i + 1];
-        if (coarsening_level != 1) {
-            end_offset = g.source_offsets[i] + g.edges_per_source[i];
-        }
-        for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
-            sgp_vid_t v = mapped_edges[j];
-            if (u != v) {
-                sgp_eid_t offset = dest_bucket_offset[v] + edges_per_dest[v];
-                edges_per_dest[v]++;
-
-                source_by_dest[offset] = u;
-                if (coarsening_level != 1) {
-                    wgt_by_dest[offset] = g.eweights[j];
-                }
-                else {
-                    wgt_by_dest[offset] = 1;
-                }
-            }
-        }
-    }
-    free(mapped_edges);
-
-    //sort by source and deduplicate
-    sgp_vid_t* dest_by_source = (sgp_vid_t*)malloc(ec * sizeof(sgp_vid_t));
-    SGPAR_ASSERT(dest_by_source != NULL);
-    sgp_wgt_t* wgt_by_source = (sgp_wgt_t*)malloc(ec * sizeof(sgp_wgt_t));
-    SGPAR_ASSERT(wgt_by_source != NULL);
-    sgp_eid_t gc_nedges = 0;
-    for (sgp_vid_t v = 0; v < nc; v++) {
-        
-        for (sgp_eid_t j = dest_bucket_offset[v]; j < dest_bucket_offset[v + 1]; j++) {
-            sgp_vid_t u = source_by_dest[j];
-            sgp_wgt_t wgt = wgt_by_dest[j];
-            sgp_eid_t offset = source_bucket_offset[u] + edges_per_source[u];
-
-            if (edges_per_source[u] == 0) {
-                dest_by_source[offset] = v;
-                wgt_by_source[offset] = wgt;
-                edges_per_source[u]++;
-                gc_nedges++;
-            }
-            else {
-                if (dest_by_source[offset - 1] == v) {
-                    wgt_by_source[offset - 1] += wgt;
-                }
-                else {
-                    dest_by_source[offset] = v;
-                    wgt_by_source[offset] = wgt;
-                    edges_per_source[u]++;
-                    gc_nedges++;
-                }
-            }
-        }
-    }
-    free(source_by_dest);
-    free(wgt_by_dest);
-    free(dest_bucket_offset);
-    free(edges_per_dest);
-
-    *sort_time += (sgp_timer() - elt);
-
-    gc_nedges /= 2;
-
-    gc->nedges = gc_nedges;
-    gc->destination_indices = dest_by_source;
-    gc->source_offsets = source_bucket_offset;
-    gc->eweights = wgt_by_source;
-    gc->edges_per_source = edges_per_source;
-    
-    gc->weighted_degree = (sgp_wgt_t *) malloc(nc * sizeof(sgp_wgt_t));
-    assert(gc->weighted_degree != NULL);
-
-    for (sgp_vid_t i=0; i < nc; i++) {
-        sgp_wgt_t degree_wt_i = 0;
-        sgp_eid_t end_offset = gc->source_offsets[i] + gc->edges_per_source[i];
-        for (sgp_eid_t j = gc->source_offsets[i]; j < end_offset; j++) {
-            degree_wt_i += gc->eweights[j];
-        }
-        gc->weighted_degree[i] = degree_wt_i;
-    }
- 
-    return EXIT_SUCCESS;
-}
-
 SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     sgp_vid_t* vcmap,
     const sgp_graph_t g,
@@ -2030,7 +1748,12 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
 #ifdef _KOKKOS
     sgp_build_coarse_graph_msd_hashmap(gc, vcmap, g, coarsening_level, sort_time_ptr);
 #else
-    sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, sort_time_ptr);
+    if ((coarsening_alg & 6) == 2) {
+        sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, sort_time_ptr);
+    }
+    else {
+        sgp_build_coarse_graph_msd_hashmap(gc, vcmap, g, coarsening_level, sort_time_ptr);
+    }
 #endif
 
     return EXIT_SUCCESS;
