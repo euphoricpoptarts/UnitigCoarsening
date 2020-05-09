@@ -1492,9 +1492,14 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
             for (sgp_eid_t i = bottom; i < top; i++) {
 
 
-                sgp_vid_t swap = dest_by_source[top - 1];
+                sgp_vid_t top_swap = dest_by_source[top - 1];
                 dest_by_source[top - 1] = dest_by_source[i];
-                dest_by_source[i] = swap;
+                dest_by_source[i] = top_swap;
+
+                sgp_wgt_t top_w_swap = wgt_by_source[top - 1];
+                wgt_by_source[top - 1] = wgt_by_source[i];
+                wgt_by_source[i] = top_w_swap;
+
                 size--;
 
                 sgp_vid_t j = 1;
