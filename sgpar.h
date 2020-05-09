@@ -118,8 +118,17 @@ typedef double sgp_real_t;
 #define SGPAR_COARSENING_MAXLEVELS 100
 #endif
 
+#ifdef _OPENMP
 #ifdef __cplusplus
 typedef std::atomic<sgp_vid_t> atom_vid_t;
+typedef std::atomic<sgp_eid_t> atom_eid_t;
+#else
+typedef _Atomic sgp_vid_t atom_vid_t;
+typedef _Atomic sgp_eid_t atom_eid_t;
+#endif
+#else
+typedef sgp_vid_t atom_vid_t;
+typedef sgp_eid_t atom_eid_t;
 #endif
 
 static sgp_real_t SGPAR_POWERITER_TOL = 1e-10;
@@ -509,6 +518,9 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t* vcmap,
 
     sgp_vid_t* hn = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
     SGPAR_ASSERT(hn != NULL);
+
+    sgp_vid_t* total_coarse = (sgp_vid_t*)calloc(n, sizeof(sgp_vid_t));
+    SGPAR_ASSERT(total_coarse != NULL);
 
     for (sgp_vid_t i = 0; i < n; i++) {
         hn[i] = SGP_INFTY;
@@ -1379,6 +1391,134 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
     return EXIT_SUCCESS;
 }
 #else
+
+void heap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sgp_wgt_t* wgt_by_source, sgp_vid_t* edges_per_source, atom_eid_t* gc_nedges) {
+    
+    sgp_eid_t bottom = *offset_bottom;
+    sgp_eid_t top = *(offset_bottom + 1);
+    sgp_vid_t size = top - bottom;
+    sgp_eid_t offset = bottom;
+    sgp_eid_t last_offset = offset;
+    //max heapify (root at source_bucket_offset[u+1] - 1)
+    for (sgp_vid_t i = size / 2; i > 0; i--) {
+        sgp_eid_t heap_node = top - i, leftC = top - 2 * i, rightC = top - 1 - 2 * i;
+        sgp_vid_t j = i;
+        //heapify heap_node
+        while ((2 * j <= size && dest_by_source[heap_node] < dest_by_source[leftC]) || (2 * j + 1 <= size && dest_by_source[heap_node] < dest_by_source[rightC])) {
+            if (2 * j + 1 > size || dest_by_source[leftC] > dest_by_source[rightC]) {
+                sgp_vid_t swap = dest_by_source[leftC];
+                dest_by_source[leftC] = dest_by_source[heap_node];
+                dest_by_source[heap_node] = swap;
+
+                sgp_wgt_t w_swap = wgt_by_source[leftC];
+                wgt_by_source[leftC] = wgt_by_source[heap_node];
+                wgt_by_source[heap_node] = w_swap;
+                j = 2 * j;
+            }
+            else {
+                sgp_vid_t swap = dest_by_source[rightC];
+                dest_by_source[rightC] = dest_by_source[heap_node];
+                dest_by_source[heap_node] = swap;
+
+                sgp_wgt_t w_swap = wgt_by_source[rightC];
+                wgt_by_source[rightC] = wgt_by_source[heap_node];
+                wgt_by_source[heap_node] = w_swap;
+                j = 2 * j + 1;
+            }
+            heap_node = top - j, leftC = top - 2 * j, rightC = top - 1 - 2 * j;
+        }
+    }
+
+    //heap sort
+    for (sgp_eid_t i = bottom; i < top; i++) {
+
+        sgp_vid_t top_swap = dest_by_source[top - 1];
+        dest_by_source[top - 1] = dest_by_source[i];
+        dest_by_source[i] = top_swap;
+
+        sgp_wgt_t top_w_swap = wgt_by_source[top - 1];
+        wgt_by_source[top - 1] = wgt_by_source[i];
+        wgt_by_source[i] = top_w_swap;
+
+        size--;
+
+        sgp_vid_t j = 1;
+        sgp_eid_t heap_node = top - j, leftC = top - 2 * j, rightC = top - 1 - 2 * j;
+        //re-heapify root node
+        while ((2 * j <= size && dest_by_source[heap_node] < dest_by_source[leftC]) || (2 * j + 1 <= size && dest_by_source[heap_node] < dest_by_source[rightC])) {
+            if (2 * j + 1 > size || dest_by_source[leftC] > dest_by_source[rightC]) {
+                sgp_vid_t swap = dest_by_source[leftC];
+                dest_by_source[leftC] = dest_by_source[heap_node];
+                dest_by_source[heap_node] = swap;
+
+                sgp_wgt_t w_swap = wgt_by_source[leftC];
+                wgt_by_source[leftC] = wgt_by_source[heap_node];
+                wgt_by_source[heap_node] = w_swap;
+                j = 2 * j;
+            }
+            else {
+                sgp_vid_t swap = dest_by_source[rightC];
+                dest_by_source[rightC] = dest_by_source[heap_node];
+                dest_by_source[heap_node] = swap;
+
+                sgp_wgt_t w_swap = wgt_by_source[rightC];
+                wgt_by_source[rightC] = wgt_by_source[heap_node];
+                wgt_by_source[heap_node] = w_swap;
+                j = 2 * j + 1;
+            }
+            heap_node = top - j, leftC = top - 2 * j, rightC = top - 1 - 2 * j;
+        }
+
+        //sub-array is now sorted from bottom to i
+
+        if (last_offset < offset) {
+            if (dest_by_source[last_offset] == dest_by_source[i]) {
+                wgt_by_source[last_offset] += wgt_by_source[i];
+            }
+            else {
+                dest_by_source[offset] = dest_by_source[i];
+                wgt_by_source[offset] = wgt_by_source[i];
+                last_offset = offset;
+                offset++;
+                (*gc_nedges)++;
+            }
+        }
+        else {
+            offset++;
+            (*gc_nedges)++;
+        }
+    }
+    *edges_per_source = offset - *offset_bottom;
+}
+
+void hashmap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sgp_wgt_t* wgt_by_source, sgp_vid_t* edges_per_source, atom_eid_t* gc_nedges) {
+
+    sgp_eid_t bottom = *offset_bottom;
+    sgp_eid_t top = *(offset_bottom + 1);
+    sgp_eid_t next_offset = bottom;
+    std::unordered_map<sgp_vid_t, sgp_eid_t> map;
+    //hashing sort
+    for (sgp_eid_t i = bottom; i < top; i++) {
+
+        sgp_vid_t v = dest_by_source[i];
+
+        if (map.count(v) > 0) {
+            sgp_eid_t idx = map.at(v);
+
+            wgt_by_source[idx] += wgt_by_source[i];
+        }
+        else {
+            map.insert({ v, next_offset });
+            dest_by_source[next_offset] = dest_by_source[i];
+            wgt_by_source[next_offset] = wgt_by_source[i];
+            next_offset++;
+            gc_nedges++;
+        }
+    }
+
+    *edges_per_source = next_offset - *offset_bottom;
+}
+
 SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     sgp_vid_t* vcmap,
     const sgp_graph_t g,
@@ -1455,129 +1595,14 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     sgp_eid_t gc_nedges = 0;
     for (sgp_vid_t u = 0; u < nc; u++) {
 
-        sgp_eid_t top = source_bucket_offset[u + 1];
-        sgp_eid_t bottom = source_bucket_offset[u];
-        sgp_vid_t size = top - bottom;
+        sgp_vid_t size = source_bucket_offset[u + 1] - source_bucket_offset[u];
         //heapsort
         if (size < 10) {
-            sgp_eid_t offset = bottom;
-            sgp_eid_t last_offset = offset;
-            //max heapify (root at source_bucket_offset[u+1] - 1)
-            for (sgp_vid_t i = size / 2; i > 0; i--) {
-                sgp_eid_t heap_node = top - i, leftC = top - 2 * i, rightC = top - 1 - 2 * i;
-                sgp_vid_t j = i;
-                //heapify heap_node
-                while ((2 * j <= size && dest_by_source[heap_node] < dest_by_source[leftC]) || (2 * j + 1 <= size && dest_by_source[heap_node] < dest_by_source[rightC])) {
-                    if (2 * j + 1 > size || dest_by_source[leftC] > dest_by_source[rightC]) {
-                        sgp_vid_t swap = dest_by_source[leftC];
-                        dest_by_source[leftC] = dest_by_source[heap_node];
-                        dest_by_source[heap_node] = swap;
-
-                        sgp_wgt_t w_swap = wgt_by_source[leftC];
-                        wgt_by_source[leftC] = wgt_by_source[heap_node];
-                        wgt_by_source[heap_node] = w_swap;
-                        j = 2 * j;
-                    }
-                    else {
-                        sgp_vid_t swap = dest_by_source[rightC];
-                        dest_by_source[rightC] = dest_by_source[heap_node];
-                        dest_by_source[heap_node] = swap;
-
-                        sgp_wgt_t w_swap = wgt_by_source[rightC];
-                        wgt_by_source[rightC] = wgt_by_source[heap_node];
-                        wgt_by_source[heap_node] = w_swap;
-                        j = 2 * j + 1;
-                    }
-                    heap_node = top - j, leftC = top - 2 * j, rightC = top - 1 - 2 * j;
-                }
-            }
-
-            //heap sort
-            for (sgp_eid_t i = bottom; i < top; i++) {
-
-                sgp_vid_t top_swap = dest_by_source[top - 1];
-                dest_by_source[top - 1] = dest_by_source[i];
-                dest_by_source[i] = top_swap;
-
-                sgp_wgt_t top_w_swap = wgt_by_source[top - 1];
-                wgt_by_source[top - 1] = wgt_by_source[i];
-                wgt_by_source[i] = top_w_swap;
-
-                size--;
-
-                sgp_vid_t j = 1;
-                sgp_eid_t heap_node = top - j, leftC = top - 2 * j, rightC = top - 1 - 2 * j;
-                //re-heapify root node
-                while ((2 * j <= size && dest_by_source[heap_node] < dest_by_source[leftC]) || (2 * j + 1 <= size && dest_by_source[heap_node] < dest_by_source[rightC])) {
-                    if (2 * j + 1 > size || dest_by_source[leftC] > dest_by_source[rightC]) {
-                        sgp_vid_t swap = dest_by_source[leftC];
-                        dest_by_source[leftC] = dest_by_source[heap_node];
-                        dest_by_source[heap_node] = swap;
-
-                        sgp_wgt_t w_swap = wgt_by_source[leftC];
-                        wgt_by_source[leftC] = wgt_by_source[heap_node];
-                        wgt_by_source[heap_node] = w_swap;
-                        j = 2 * j;
-                    }
-                    else {
-                        sgp_vid_t swap = dest_by_source[rightC];
-                        dest_by_source[rightC] = dest_by_source[heap_node];
-                        dest_by_source[heap_node] = swap;
-
-                        sgp_wgt_t w_swap = wgt_by_source[rightC];
-                        wgt_by_source[rightC] = wgt_by_source[heap_node];
-                        wgt_by_source[heap_node] = w_swap;
-                        j = 2 * j + 1;
-                    }
-                    heap_node = top - j, leftC = top - 2 * j, rightC = top - 1 - 2 * j;
-                }
-
-                //sub-array is now sorted from bottom to i
-
-                if (last_offset < offset) {
-                    if (dest_by_source[last_offset] == dest_by_source[i]) {
-                        wgt_by_source[last_offset] += wgt_by_source[i];
-                    }
-                    else {
-                        dest_by_source[offset] = dest_by_source[i];
-                        wgt_by_source[offset] = wgt_by_source[i];
-                        last_offset = offset;
-                        offset++;
-                        gc_nedges++;
-                    }
-                }
-                else {
-                    offset++;
-                    gc_nedges++;
-                }
-            }
-            edges_per_source[u] = offset - source_bucket_offset[u];
+            heap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, &gc_nedges);
         }
         //hashmap sort
         else {
-            sgp_eid_t next_offset = source_bucket_offset[u];
-
-            std::unordered_map<sgp_vid_t, sgp_eid_t> map;
-            //hashing sort
-            for (sgp_eid_t i = source_bucket_offset[u]; i < source_bucket_offset[u + 1]; i++) {
-
-                sgp_vid_t v = dest_by_source[i];
-
-                if (map.count(v) > 0) {
-                    sgp_eid_t idx = map.at(v);
-
-                    wgt_by_source[idx] += wgt_by_source[i];
-                }
-                else {
-                    map.insert({ v, next_offset });
-                    dest_by_source[next_offset] = dest_by_source[i];
-                    wgt_by_source[next_offset] = wgt_by_source[i];
-                    next_offset++;
-                    gc_nedges++;
-                }
-            }
-
-            edges_per_source[u] = next_offset - source_bucket_offset[u];
+            hashmap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, &gc_nedges);
         }
 
     }
@@ -1682,30 +1707,7 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
     //sort by dest and deduplicate
     sgp_eid_t gc_nedges = 0;
     for (sgp_vid_t u = 0; u < nc; u++) {
-
-        sgp_eid_t next_offset = source_bucket_offset[u];
-
-        std::unordered_map<sgp_vid_t, sgp_eid_t> map;
-        //hashing sort
-        for (sgp_eid_t i = source_bucket_offset[u]; i < source_bucket_offset[u + 1]; i++) {
-
-            sgp_vid_t v = dest_by_source[i];
-
-            if (map.count(v) > 0) {
-                sgp_eid_t idx = map.at(v);
-
-                wgt_by_source[idx] += wgt_by_source[i];
-            }
-            else {
-                map.insert({ v, next_offset });
-                dest_by_source[next_offset] = dest_by_source[i];
-                wgt_by_source[next_offset] = wgt_by_source[i];
-                next_offset++;
-                gc_nedges++;
-            }
-        }
-
-        edges_per_source[u] = next_offset - source_bucket_offset[u];
+        hashmap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, &gc_nedges);
     }
 
     *sort_time += (sgp_timer() - elt);
