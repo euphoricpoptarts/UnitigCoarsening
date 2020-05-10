@@ -1185,7 +1185,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 
         sgp_vid_t size = source_bucket_offset[u + 1] - source_bucket_offset[u];
         //heapsort
-        if ((coarsening_alg & 4) == 2 && size < 10) {
+        if ((coarsening_alg & 6) == 2 && size < 10) {
             heap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, &gc_nedges);
         }
         //hashmap sort
@@ -1304,7 +1304,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 
         sgp_vid_t size = source_bucket_offset[u + 1] - source_bucket_offset[u];
         //heapsort
-        if ((coarsening_alg & 4) == 2 && size < 10) {
+        if ((coarsening_alg & 6) == 2 && size < 10) {
             heap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, &gc_nedges);
         }
         //hashmap sort
