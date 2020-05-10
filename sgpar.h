@@ -1842,8 +1842,8 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
             u[i] = v[i];
         }
 
-        // v = Lu
-#pragma omp for
+        // sparse matrix multiplication
+#pragma omp for schedule(dynamic, 16)
         for (sgp_vid_t i=0; i<n; i++) {
             // sgp_real_t v_i = g.weighted_degree[i]*u[i];
             sgp_real_t weighted_degree_inv, v_i;
