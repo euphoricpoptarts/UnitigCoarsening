@@ -782,6 +782,7 @@ void hashmap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sg
     sgp_eid_t top = *(offset_bottom + 1);
     sgp_eid_t next_offset = bottom;
     std::unordered_map<sgp_vid_t, sgp_eid_t> map;
+    map.reserve(top - bottom);
     //hashing sort
     for (sgp_eid_t i = bottom; i < top; i++) {
 
