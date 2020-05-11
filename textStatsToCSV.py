@@ -51,7 +51,7 @@ def main():
 
     with open(outFile,"w") as f:
         for datum in data:
-            print(datum,outfile=f)
+            print(datum, file=f)
 
 
 if __name__ == "__main__":
