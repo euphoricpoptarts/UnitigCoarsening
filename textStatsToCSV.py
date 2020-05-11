@@ -22,9 +22,9 @@ def textStatsToCSV(stem, filepath):
     with open(filepath,"r") as f:
         lcount = 0
         for line in f:
+            lcount += 1
             if lcount > 6:
                 break
-            lcount += 1
             parsed = parse(lineParse,line)
             if parsed is not None:
                 parsed = list(parsed)
@@ -50,6 +50,7 @@ def main():
         data.append(textStatsToCSV(stem, filepath))
 
     with open(outFile,"w") as f:
+        print(fieldHeaders, file=f)
         for datum in data:
             print(datum, file=f)
 
