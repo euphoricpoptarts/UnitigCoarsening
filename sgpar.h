@@ -1180,7 +1180,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 }
 
     //sort by dest and deduplicate
-#pragma omp for
+#pragma omp for schedule(dynamic, 16)
     for (sgp_vid_t u = 0; u < nc; u++) {
 
         sgp_vid_t size = source_bucket_offset[u + 1] - source_bucket_offset[u];
