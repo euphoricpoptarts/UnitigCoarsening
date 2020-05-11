@@ -27,6 +27,7 @@ def textStatsToCSV(stem, filepath):
             lcount += 1
             parsed = parse(lineParse,line)
             if parsed is not None:
+                parsed = list(parsed)
                 for stat in parsed[1:6]:
                     graphStats.append(stat)
             else:
@@ -38,12 +39,19 @@ def textStatsToCSV(stem, filepath):
 def main():
 
     logDir = sys.argv[1]
+    outFile = sys.argv[2]
+
     globMatch = "{}/*.txt".format(logDir)
 
+    data = []
     for file in glob(globMatch):
         filepath = file
         stem = Path(filepath).stem
-        print(textStatsToCSV(stem, filepath))
+        data.append(textStatsToCSV(stem, filepath))
+
+    with open(outFile,"w") as f:
+        for datum in data:
+            print(datum,outfile=f)
 
 
 if __name__ == "__main__":
