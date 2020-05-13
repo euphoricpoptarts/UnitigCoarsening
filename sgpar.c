@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
     rng.inc   = 1;
     
     for (int i=0; i < config.num_iter; i++) {
-        long edgecut = 0;
+        sgp_eid_t edgecut = 0;
 #ifdef EXPERIMENT
         ExperimentLoggerUtil experiment;
 #endif
@@ -58,6 +58,43 @@ int main(int argc, char **argv) {
         unsigned int part_diff = 0;
         if (compare_part) {
             CHECK_SGPAR(compute_partition_edit_distance(part, best_part, g.nvertices, &part_diff));
+        }
+
+        if (config.num_partitions == 4) {
+            sgp_graph_t g1, g2;
+            CHECK_SGPAR(sgp_use_partition(part, g, &g1, &g2));
+
+            sgp_vid_t* part1;
+            part1 = (sgp_vid_t*)malloc(g1.nvertices * sizeof(sgp_vid_t));
+            SGPAR_ASSERT(part1 != NULL);
+
+            sgp_vid_t* part2;
+            part2 = (sgp_vid_t*)malloc(g2.nvertices * sizeof(sgp_vid_t));
+            SGPAR_ASSERT(part2 != NULL);
+
+            sgp_eid_t ec1 = 0, ec2 = 0;
+
+#ifdef EXPERIMENT
+            ExperimentLoggerUtil experiment1;
+#endif
+            CHECK_SGPAR(sgp_partition_graph(part1, &ec1, &config, 0, g1,
+#ifdef EXPERIMENT
+                experiment1,
+#endif
+                &rng));
+
+#ifdef EXPERIMENT
+            ExperimentLoggerUtil experiment2;
+#endif
+            CHECK_SGPAR(sgp_partition_graph(part2, &ec2, &config, 0, g2,
+#ifdef EXPERIMENT
+                experiment2,
+#endif
+                &rng));
+
+#ifdef EXPERIMENT
+            experiment.setEdgeCut4Way(edgecut + ec1 + ec2);
+#endif
         }
 
 #ifdef EXPERIMENT

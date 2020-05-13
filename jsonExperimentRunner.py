@@ -9,8 +9,8 @@ from pathlib import Path
 from threading import Thread
 from itertools import zip_longest
 
-parCall = "./sgpar_hg_exp {} {} 0 0 0 10 > /dev/null"
-serialCall = "./sgpar_hg_serial {} {} {} 0 0 10 > /dev/null"
+parCall = "./sgpar_hg_exp {} {} {} > /dev/null"
+serialCall = "./sgpar_hg_serial {} {} {} > /dev/null"
 set_threads = "export OMP_NUM_THREADS={}"
 
 def printStat(fieldTitle, statList, outfile):
@@ -66,11 +66,12 @@ def processGraph(filepath, metricDir, logFileTemplate):
     #parallel HEC
     metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
     print("running parallel HEC sgpar on {}, data logged in {}".format(filepath, metricsPath), flush=True)
-    err = os.system(parCall.format(filepath, metricsPath))
+    call = parCall.format(filepath, metricsPath, "base_config.txt")
+    err = os.system(call)
     if(err != 0):
         print("error code: {}".format(err))
         print("error produced by:")
-        print(parCall.format(filepath, metricsPath), flush=True)
+        print(call, flush=True)
     else:
         logFile = logFileTemplate.format("parHEC")
         analyzeMetrics(metricsPath, logFile)
@@ -78,11 +79,12 @@ def processGraph(filepath, metricDir, logFileTemplate):
     #serial HEC
     metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
     print("running serial HEC sgpar on {}, data logged in {}".format(filepath, metricsPath), flush=True)
-    err = os.system(serialCall.format(filepath, metricsPath, 0))
+    call = serialCall.format(filepath, metricsPath, "base_config.txt")
+    err = os.system(call)
     if(err != 0):
         print("error code: {}".format(err))
         print("error produced by:")
-        print(serialCall.format(filepath, metricsPath, 0), flush=True)
+        print(call, flush=True)
     else:
         logFile = logFileTemplate.format("serialHEC")
         analyzeMetrics(metricsPath, logFile)
@@ -90,11 +92,12 @@ def processGraph(filepath, metricDir, logFileTemplate):
     #serial matching
     metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
     print("running serial match sgpar on {}, data logged in {}".format(filepath, metricsPath), flush=True)
-    err = os.system(serialCall.format(filepath, metricsPath, 1))
+    call = serialCall.format(filepath, metricsPath, "matching_config.txt")
+    err = os.system(call)
     if(err != 0):
         print("error code: {}".format(err))
         print("error produced by:")
-        print(serialCall.format(filepath, metricsPath, 1), flush=True)
+        print(call, flush=True)
     else:
         logFile = logFileTemplate.format("serialMatch")
         analyzeMetrics(metricsPath, logFile)

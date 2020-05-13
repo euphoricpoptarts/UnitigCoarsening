@@ -31,6 +31,7 @@ private:
 	int numCoarseLevels = 0;
 	std::vector<CoarseLevel> coarseLevels;
 	uint64_t finestEdgeCut = 0;
+	uint64_t edgeCut4Way = 0;
 	uint64_t partitionDiff = 0;
 	double totalDurationSeconds = 0;
 	double coarsenDurationSeconds = 0;
@@ -50,6 +51,10 @@ public:
 
 	void setFinestEdgeCut(uint64_t finestEdgeCut) {
 		this->finestEdgeCut = finestEdgeCut;
+	}
+
+	void setEdgeCut4Way(uint64_t edgeCut4Way) {
+		this->edgeCut4Way = edgeCut4Way;
 	}
 
 	void setPartitionDiff(uint64_t partitionDiff) {
@@ -82,6 +87,7 @@ public:
 			}
 			f << "{";
 			f << "\"edge-cut\":" << finestEdgeCut << ',';
+			f << "\"edge-cut-four-way\":" << edgeCut4Way << ",";
 			f << "\"partition-diff\":" << partitionDiff << ',';
 			f << "\"total-duration-seconds\":" << totalDurationSeconds << ',';
 			f << "\"coarsen-duration-seconds\":" << coarsenDurationSeconds << ',';

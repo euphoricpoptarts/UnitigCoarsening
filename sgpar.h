@@ -2229,8 +2229,12 @@ SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
     qsort(vu_pair, n, sizeof(sgp_vv_pair_t), vu_cmpfn_inc);
 #endif
 
-    // Currently support only bipartitioning
-    assert(num_partitions == 2);
+    // I'll just leave this here for now
+    assert((num_partitions == 2) || (num_partitions == 4));
+
+    if (num_partitions == 4) {
+        num_partitions = 2;
+    }
 
     long max_part_size = ceil(n/((double) num_partitions));
 
