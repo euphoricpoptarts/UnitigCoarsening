@@ -2802,6 +2802,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
 
 #ifdef EXPERIMENT
         experiment.setFinestEdgeCut(*edge_cut);
+        experiment.modifyCoarseLevelEC(0, *edge_cut);
 #endif
 
     sgp_improve_partition(part, config->num_partitions, edge_cut,
