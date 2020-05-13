@@ -2774,18 +2774,18 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                 free(prev_prolonged);
                 eigenvec[l] = prolonged_eigenvec;
             }
-            sgp_compute_partition(part, num_partitions, edge_cut,
+            sgp_compute_partition(part, config->num_partitions, edge_cut,
                 perc_imbalance_allowed,
-                local_search_alg,
+                config->local_search_alg,
                 eigenvec[l], g);
 
             free(vcmap[l - 1]);
             free(eigenvec[l]);
 
-            unsigned int part_diff = 0;
-            if (compare_part) {
-                CHECK_SGPAR(compute_partition_edit_distance(part, best_part, g.nvertices, &part_diff));
-            }
+            //unsigned int part_diff = 0;
+            //if (config->compare_part) {
+                //CHECK_SGPAR(compute_partition_edit_distance(part, best_part, g.nvertices, &part_diff));
+            //}
 
 #ifdef EXPERIMENT
             experiment.modifyCoarseLevelEC(l, *edge_cut);
