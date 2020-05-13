@@ -109,7 +109,7 @@ int main(int argc, char **argv) {
         if (i > 0) {
             first = false;
         }
-        if (i + 1 < num_iter) {
+        if (i + 1 < config.num_iter) {
             last = false;
         }
         experiment.log(metrics, first, last);
