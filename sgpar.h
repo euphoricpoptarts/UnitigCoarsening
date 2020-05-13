@@ -2433,7 +2433,7 @@ SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
 }    
 
 SGPAR_API int sgp_improve_partition(sgp_vid_t *part, sgp_vid_t num_partitions, 
-                                    long *edgecut, int perc_imbalance_allowed, 
+                                    sgp_eid_t *edgecut, int perc_imbalance_allowed, 
                                     sgp_real_t *evec,
                                     sgp_graph_t g) {
 
