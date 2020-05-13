@@ -2892,6 +2892,7 @@ SGPAR_API int sgp_use_partition(sgp_vid_t* part, const sgp_graph_t g, sgp_graph_
     g2->nedges = g2_ec;
     g2->nvertices = g2_count;
 
+    return EXIT_SUCCESS;
 }
 
 SGPAR_API int sgp_load_config(const char* config_f, config_t* c) {
