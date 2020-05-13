@@ -32,6 +32,7 @@ def analyzeMetrics(metricsPath, logFile):
     coarsenSortTimes = [d['coarsen-sort-duration-seconds'] for d in data]
     refineTimes = [d['refine-duration-seconds'] for d in data]
     edgeCuts = [d['edge-cut'] for d in data]
+    edgeCuts4way = [d['edge-cut-four-way'] for d in data]
     coarseLevels = list(zip_longest(*[reversed(d['coarse-levels']) for d in data]))
     numCoarseLevels = [d['number-coarse-levels'] for d in data]
     numCoarseLevels = list(map(lambda x: x - 1, numCoarseLevels))
@@ -44,6 +45,7 @@ def analyzeMetrics(metricsPath, logFile):
         printStat("Coarsening other duration", coarsenNonSortTimes, output)
         printStat("Refine duration", refineTimes, output)
         printStat("Edge cut", edgeCuts, output)
+        printStat("Four partition edge cut", edgeCuts4way, output)
         printStat("Coarse levels", numCoarseLevels, output)
         
         for levelIdx in range(0,len(coarseLevels)):
