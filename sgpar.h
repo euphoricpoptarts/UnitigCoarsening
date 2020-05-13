@@ -2453,7 +2453,7 @@ SGPAR_API int sgp_use_partition(sgp_vid_t* part, const sgp_graph_t g, sgp_graph_
 SGPAR_API int sgp_load_config(const char* config_f, config_t * config);
 SGPAR_API int compute_partition_edit_distance(const sgp_vid_t* part1, const sgp_vid_t* part2, int size, unsigned int *diff);
 SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
-                                  long *edge_cut,
+                                  sgp_eid_t *edge_cut,
                                   config_t *config,
                                   const int perc_imbalance_allowed,
                                   const sgp_graph_t g,
@@ -2570,7 +2570,7 @@ SGPAR_API int compute_partition_edit_distance(const sgp_vid_t* part1, const sgp_
 }
 
 SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
-                                  long *edge_cut,
+                                  sgp_eid_t *edge_cut,
                                   config_t * config,
                                   const int perc_imbalance_allowed,
                                   const sgp_graph_t g,
