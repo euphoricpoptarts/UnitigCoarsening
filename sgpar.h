@@ -2863,8 +2863,8 @@ SGPAR_API int sgp_use_partition(sgp_vid_t* part, const sgp_graph_t g, sgp_graph_
         }
     }
 
-    sgp_vid_t* g1_dest_indices = (sgp_vid_t*)malloc(g1_source_offsets[g1_count + 1] * sizeof(sgp_vid_t));
-    sgp_vid_t* g2_dest_indices = (sgp_vid_t*)malloc(g2_source_offsets[g2_count + 1] * sizeof(sgp_vid_t));
+    sgp_vid_t* g1_dest_indices = (sgp_vid_t*)malloc(g1_source_offsets[g1_count] * sizeof(sgp_vid_t));
+    sgp_vid_t* g2_dest_indices = (sgp_vid_t*)malloc(g2_source_offsets[g2_count] * sizeof(sgp_vid_t));
     sgp_eid_t g1_ec = 0;
     sgp_eid_t g2_ec = 0;
     //write re-labelled edges
