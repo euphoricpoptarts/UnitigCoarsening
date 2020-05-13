@@ -2446,7 +2446,7 @@ SGPAR_API int sgp_load_graph(sgp_graph_t *g, char *csr_filename);
 SGPAR_API int sgp_free_graph(sgp_graph_t *g);
 SGPAR_API int sgp_load_partition(sgp_vid_t *part, int size, char *part_filename);
 SGPAR_API int sgp_use_partition(sgp_vid_t* part, const sgp_graph_t g, sgp_graph_t* g1, sgp_graph_t* g2);
-SGPAR_API int sgp_load_partition(const char* config_f, config_t * config);
+SGPAR_API int sgp_load_config(const char* config_f, config_t * config);
 SGPAR_API int compute_partition_edit_distance(const sgp_vid_t* part1, const sgp_vid_t* part2, int size, unsigned int *diff);
 SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                   long *edge_cut,
@@ -2890,7 +2890,7 @@ SGPAR_API int sgp_use_partition(sgp_vid_t* part, const sgp_graph_t g, sgp_graph_
 
 }
 
-SGPAR_API int sgp_load_partition(const char* config_f, config_t* c) {
+SGPAR_API int sgp_load_config(const char* config_f, config_t* c) {
 
     FILE* infp = fopen(config_f, "r");
     if (infp == NULL) {

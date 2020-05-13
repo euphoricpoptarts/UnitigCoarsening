@@ -10,15 +10,16 @@ using namespace sgpar;
 
 int main(int argc, char **argv) {
 
-    if (argc < 3) {
+    if (argc < 4) {
         printf("You input %d args\n", argc);
-        fprintf(stderr, "Usage: %s filename.csr metricsfilename.txt\n", argv[0]);
+        fprintf(stderr, "Usage: %s csr_filename metrics_filename config_file\n", argv[0]);
         return EXIT_FAILURE;
     }
     char *filename = argv[1];
     char *metrics = argv[2];
 
     config_t config;
+    CHECK_SGPAR(sgp_load_config(argv[3], &config));
 
     sgp_graph_t g;
     CHECK_SGPAR( sgp_load_graph(&g, filename) );
