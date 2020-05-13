@@ -2200,7 +2200,7 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int fina
 #endif
 
 SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions, 
-                                    long *edgecut, int perc_imbalance_allowed, 
+                                    sgp_eid_t *edgecut, int perc_imbalance_allowed, 
                                     int local_search_alg,
                                     sgp_real_t *evec,
                                     sgp_graph_t g) {
