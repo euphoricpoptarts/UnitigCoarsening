@@ -17,50 +17,24 @@ int main(int argc, char **argv) {
     }
     char *filename = argv[1];
     char *metrics = argv[2];
-    
-    int coarsening_alg = 0;
-    if (argc >= 4) {
-        coarsening_alg = atoi(argv[3]);
-    }
 
-    int refine_alg = 0;
-    if (argc >= 5) {
-        refine_alg = atoi(argv[4]);
-    }
-
-    int local_search_alg = 0;
-    if (argc >= 6) {
-        local_search_alg = atoi(argv[5]);
-    }
-
-    int num_iter = 100;
-    if (argc >= 7) {
-        num_iter = atoi(argv[6]);
-    }
-
-    if(argc >= 9) {
-        double new_tol = atof(argv[8]);
-
-        CHECK_SGPAR( change_tol(new_tol) );
-    }
+    config_t config;
 
     sgp_graph_t g;
     CHECK_SGPAR( sgp_load_graph(&g, filename) );
     printf("n: %ld, m: %ld\n", g.nvertices, g.nedges);
     printf("coarsening_alg: %d, refine_alg: %d, local_alg %d, num_iter %d\n", 
-                    coarsening_alg, refine_alg, local_search_alg, num_iter);
+                    config.coarsening_alg, config.refine_alg, config.local_search_alg, config.num_iter);
 
     sgp_vid_t *part;
     part = (sgp_vid_t *) malloc(g.nvertices * sizeof(sgp_vid_t));
     SGPAR_ASSERT(part != NULL);
 
-
-
     sgp_vid_t *best_part = (sgp_vid_t *) malloc(g.nvertices * sizeof(sgp_vid_t));
     SGPAR_ASSERT(best_part != NULL);
     int compare_part = 0;
-    if(argc >= 8){
-        CHECK_SGPAR( sgp_load_partition(best_part, g.nvertices, argv[7]));
+    if(argc > 4){
+        CHECK_SGPAR( sgp_load_partition(best_part, g.nvertices, argv[4]));
         compare_part = 1;
     }
 
@@ -69,18 +43,25 @@ int main(int argc, char **argv) {
     rng.state = time(NULL);
     rng.inc   = 1;
     
-    for (int i=0; i<num_iter; i++) {
+    for (int i=0; i < config.num_iter; i++) {
         long edgecut = 0;
 #ifdef EXPERIMENT
         ExperimentLoggerUtil experiment;
 #endif
-        CHECK_SGPAR( sgp_partition_graph(part, 2, &edgecut, coarsening_alg, 
-                                        refine_alg, local_search_alg, 0, g,
+        CHECK_SGPAR( sgp_partition_graph(part, &edgecut, &config, 0, g,
 #ifdef EXPERIMENT
             experiment,
 #endif
-                                        best_part, compare_part, &rng) );
+                                        &rng) );
 
+        unsigned int part_diff = 0;
+        if (compare_part) {
+            CHECK_SGPAR(compute_partition_edit_distance(part, best_part, g.nvertices, &part_diff));
+        }
+
+#ifdef EXPERIMENT
+        experiment.setPartitionDiff(part_diff);
+#endif
         
         if (edgecut < edgecut_min) {
             edgecut_min = edgecut;

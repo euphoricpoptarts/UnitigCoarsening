@@ -70,6 +70,15 @@ namespace sgpar {
 
 //typedef struct { uint64_t niters; int max_iter_reached; long edge_cut; long swaps; } sgp_refine_stats;
 
+typedef struct configuration {
+    int coarsening_alg;
+    int refine_alg;
+    int local_search_alg;
+    int num_iter;
+    double tol;
+    int num_partitions;
+} config_t;
+
 /**********************************************************
  *  PCG Random Number Generator
  **********************************************************
@@ -2436,20 +2445,17 @@ SGPAR_API int sgp_improve_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
 SGPAR_API int sgp_load_graph(sgp_graph_t *g, char *csr_filename);
 SGPAR_API int sgp_free_graph(sgp_graph_t *g);
 SGPAR_API int sgp_load_partition(sgp_vid_t *part, int size, char *part_filename);
+SGPAR_API int sgp_use_partition(sgp_vid_t* part, const sgp_graph_t g, sgp_graph_t* g1, sgp_graph_t* g2);
+SGPAR_API int sgp_load_partition(const char* config_f, config_t * config);
 SGPAR_API int compute_partition_edit_distance(const sgp_vid_t* part1, const sgp_vid_t* part2, int size, unsigned int *diff);
-SGPAR_API int sgp_partition_graph(sgp_vid_t *part, 
-                                  const sgp_vid_t num_partitions,
+SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                   long *edge_cut,
-                                  const int coarsening_alg, 
-                                  const int refine_alg,
-                                  const int local_search_alg, 
+                                  config_t *config,
                                   const int perc_imbalance_allowed,
                                   const sgp_graph_t g,
 #ifdef EXPERIMENT
     ExperimentLoggerUtil& experiment,
 #endif
-                                  const sgp_vid_t * best_part,
-                                  const int compare_part,
                                   sgp_pcg32_random_t* rng);
 
 
@@ -2522,7 +2528,7 @@ SGPAR_API int sgp_free_graph(sgp_graph_t *g) {
 }
 
 SGPAR_API int sgp_load_partition(sgp_vid_t *part, int size, char *part_filename){
-    FILE *infp = fopen(part_filename, "rb");
+    FILE *infp = fopen(part_filename, "r");
     if (infp == NULL) {
         printf("Error: Could not open partition file %s. Exiting ...\n", part_filename);
         return EXIT_FAILURE;
@@ -2533,6 +2539,7 @@ SGPAR_API int sgp_load_partition(sgp_vid_t *part, int size, char *part_filename)
             return EXIT_FAILURE;
         }
     }
+    CHECK_RETSTAT(fclose(infp));
 
     return EXIT_SUCCESS;
 }
@@ -2558,19 +2565,14 @@ SGPAR_API int compute_partition_edit_distance(const sgp_vid_t* part1, const sgp_
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int sgp_partition_graph(sgp_vid_t *part, 
-                                  const sgp_vid_t num_partitions,
+SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                   long *edge_cut,
-                                  const int coarsening_alg, 
-                                  const int refine_alg,
-                                  const int local_search_alg, 
+                                  config_t * config,
                                   const int perc_imbalance_allowed,
                                   const sgp_graph_t g,
 #ifdef EXPERIMENT
                                   ExperimentLoggerUtil& experiment,
 #endif
-                                  const sgp_vid_t * best_part,
-                                  const int compare_part,
                                   sgp_pcg32_random_t* rng) {
 
     printf("sgpar settings: %d %lu %.16f\n", 
@@ -2604,7 +2606,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     while ((coarsening_level < (SGPAR_COARSENING_MAXLEVELS-1)) && 
            (coarsen_ratio_exceeded == 0) && 
            (g_all[coarsening_level].nvertices > SGPAR_COARSENING_VTX_CUTOFF) &&
-           ((coarsening_alg & 16) == 0)) {
+           ((config->coarsening_alg & 16) == 0)) {
         coarsening_level++;
         printf("Calculating coarse graph %d\n", coarsening_level);
         vcmap[coarsening_level-1] = (sgp_vid_t *) 
@@ -2614,10 +2616,10 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         CHECK_SGPAR( sgp_coarsen_one_level(&g_all[coarsening_level],
                                             vcmap[coarsening_level-1],
                                             g_all[coarsening_level-1], 
-                                            coarsening_level, coarsening_alg, 
+                                            coarsening_level, config->coarsening_alg, 
                                             rng, &coarsening_sort_time) );
 
-        if (coarsening_alg & 1) {
+        if (config->coarsening_alg & 1) {
             sgp_real_t coarsen_ratio = (sgp_real_t)g_all[coarsening_level].nvertices / (sgp_real_t)g_all[coarsening_level - 1].nvertices;
             if (coarsen_ratio > MAX_COARSEN_RATIO) {
                 coarsen_ratio_exceeded = 1;
@@ -2649,9 +2651,9 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     }
 
     sgp_vec_normalize(eigenvec[num_coarsening_levels-1], gc_nvertices);
-    if ((coarsening_alg & 16) == 0) { /* bit 4 (0-indexed) of coarsening_alg indicates no coarsening if set */
+    if ((config->coarsening_alg & 16) == 0) { /* bit 4 (0-indexed) of coarsening_alg indicates no coarsening if set */
         printf("Coarsening level %d, ", num_coarsening_levels-1);        
-        if (refine_alg == 0) {
+        if (config->refine_alg == 0) {
             CHECK_SGPAR( sgp_power_iter(eigenvec[num_coarsening_levels-1], 
                 g_all[num_coarsening_levels-1], 0, 0
 #ifdef EXPERIMENT
@@ -2690,7 +2692,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         //don't do refinement for finest level here
         if (l > 0) {
             printf("Coarsening level %d, ", l);
-            if (refine_alg == 0) {
+            if (config->refine_alg == 0) {
                 sgp_power_iter(eigenvec[l], g_all[l], 0, 0
 #ifdef EXPERIMENT
                     , experiment
@@ -2710,7 +2712,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     double fin_refine_time = sgp_timer();
 
     printf("Coarsening level %d, ", 0);
-    if (refine_alg == 0) {
+    if (config->refine_alg == 0) {
         CHECK_SGPAR( sgp_power_iter(eigenvec[0], g_all[0], 0, 1
 #ifdef EXPERIMENT
             , experiment
@@ -2789,25 +2791,136 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
 
     
 
-    sgp_compute_partition(part, num_partitions, edge_cut,
+    sgp_compute_partition(part, config->num_partitions, edge_cut,
         perc_imbalance_allowed,
-        local_search_alg,
+        config->local_search_alg,
         eigenvec[0], g);
-
-    unsigned int part_diff = 0;
-    if (compare_part) {
-        CHECK_SGPAR(compute_partition_edit_distance(part, best_part, g.nvertices, &part_diff));
-    }
 
 #ifdef EXPERIMENT
         experiment.setFinestEdgeCut(*edge_cut);
-        experiment.setPartitionDiff(part_diff);
 #endif
 
-    sgp_improve_partition(part, num_partitions, edge_cut,
+    sgp_improve_partition(part, config->num_partitions, edge_cut,
                            perc_imbalance_allowed,
                            eigenvec[0], g);
     free(eigenvec[0]);
+
+    return EXIT_SUCCESS;
+}
+
+SGPAR_API int sgp_use_partition(sgp_vid_t* part, const sgp_graph_t g, sgp_graph_t* g1, sgp_graph_t* g2) {
+    sgp_vid_t n = g.nvertices;
+    sgp_eid_t e = g.nedges;
+
+    sgp_vid_t* mapping = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
+    sgp_vid_t g1_count = 0;
+    sgp_vid_t g2_count = 0;
+    //compute vertex mappings
+    for (sgp_vid_t i = 0; i < n; i++) {
+        if (part[i] == 0) {
+            mapping[i] = g1_count++;
+        }
+        else {
+            mapping[i] = g2_count++;
+        }
+    }
+
+    sgp_eid_t* g1_source_offsets = (sgp_eid_t*)malloc((g1_count + 1) * sizeof(sgp_eid_t));
+    sgp_eid_t* g2_source_offsets = (sgp_eid_t*)malloc((g2_count + 1) * sizeof(sgp_eid_t));
+    g1_source_offsets[0] = 0;
+    g2_source_offsets[0] = 0;
+    g1_count = 0;
+    g2_count = 0;
+
+    //compute source offsets
+    for (sgp_vid_t i = 0; i < n; i++) {
+        if (part[i] == 0) {
+            g1_source_offsets[g1_count + 1] = g1_source_offsets[g1_count];
+        }
+        else {
+            g2_source_offsets[g2_count + 1] = g2_source_offsets[g2_count];
+        }
+        for (sgp_eid_t j = g.source_offsets[i]; j < g.source_offsets[i + 1]; j++) {
+            sgp_vid_t dest = g.destination_indices[j];
+            if (part[i] == part[dest]) {
+                if (part[i] == 0) {
+                    g1_source_offsets[g1_count + 1]++;
+                }
+                else {
+                    g2_source_offsets[g2_count + 1]++;
+                }
+            }
+        }
+        if (part[i] == 0) {
+            g1_count++;
+        }
+        else {
+            g2_count++;
+        }
+    }
+
+    sgp_vid_t* g1_dest_indices = (sgp_vid_t*)malloc(g1_source_offsets[g1_count + 1] * sizeof(sgp_vid_t));
+    sgp_vid_t* g2_dest_indices = (sgp_vid_t*)malloc(g2_source_offsets[g2_count + 1] * sizeof(sgp_vid_t));
+    sgp_eid_t g1_ec = 0;
+    sgp_eid_t g2_ec = 0;
+    //write re-labelled edges
+    for (sgp_vid_t i = 0; i < n; i++) {
+        for (sgp_eid_t j = g.source_offsets[i]; j < g.source_offsets[i + 1]; j++) {
+            sgp_vid_t dest = g.destination_indices[j];
+            if (part[i] == part[dest]) {
+                if (part[i] == 0) {
+                    g1_dest_indices[g1_ec++] = mapping[dest];
+                }
+                else {
+                    g2_dest_indices[g2_ec++] = mapping[dest];
+                }
+            }
+        }
+    }
+
+    g1->destination_indices = g1_dest_indices;
+    g1->source_offsets = g1_source_offsets;
+    g1->nedges = g1_ec;
+    g1->nvertices = g1_count;
+
+    g2->destination_indices = g2_dest_indices;
+    g2->source_offsets = g2_source_offsets;
+    g2->nedges = g2_ec;
+    g2->nvertices = g2_count;
+
+}
+
+SGPAR_API int sgp_load_partition(const char* config_f, config_t* c) {
+
+    FILE* infp = fopen(config_f, "r");
+    if (infp == NULL) {
+        printf("Error: Could not open config file %s. Exiting ...\n", config_f);
+        return EXIT_FAILURE;
+    }
+    if (fscanf(infp, "%i", &c->coarsening_alg) == 0) {
+        return EXIT_FAILURE;
+    }
+    if (fscanf(infp, "%i", &c->refine_alg) == 0) {
+        return EXIT_FAILURE;
+    }
+    if (fscanf(infp, "%i", &c->local_search_alg) == 0) {
+        return EXIT_FAILURE;
+    }
+    if (fscanf(infp, "%i", &c->num_partitions) == 0) {
+        return EXIT_FAILURE;
+    }
+    if (fscanf(infp, "%i", &c->num_iter) == 0) {
+        return EXIT_FAILURE;
+    }
+    if (fscanf(infp, "%lf", &c->tol) == 0) {
+        return EXIT_FAILURE;
+    }
+    CHECK_RETSTAT(fclose(infp));
+
+    if (SGPAR_POWERITER_TOL != c->tol) {
+        printf("Using non-default tolerance: %lf\n", c->tol);
+        CHECK_SGPAR(change_tol(c->tol));
+    }
 
     return EXIT_SUCCESS;
 }
