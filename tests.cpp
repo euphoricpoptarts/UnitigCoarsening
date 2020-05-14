@@ -9,7 +9,7 @@ bool hashmap_deduplication_test() {
 	sgp_vid_t edges_per_source[5] = { 0, 0, 0, 0, 0 };
 	sgp_vid_t dests[31];
 	sgp_wgt_t wgts[31];
-	for (sgp_vid_t i = 0; i < 5; i++) {
+	for (sgp_vid_t i = 0; i < 4; i++) {
 		for (sgp_eid_t j = offsets[i]; j < offsets[i + 1]; j++) {
 			dests[j] = j - offsets[i];
 			wgts[j] = j;
@@ -60,7 +60,7 @@ bool heap_deduplication_test() {
 	sgp_vid_t edges_per_source[5] = { 0, 0, 0, 0, 0 };
 	sgp_vid_t dests[31];
 	sgp_wgt_t wgts[31];
-	for (sgp_vid_t i = 0; i < 5; i++) {
+	for (sgp_vid_t i = 0; i < 4; i++) {
 		for (sgp_eid_t j = offsets[i]; j < offsets[i + 1]; j++) {
 			dests[j] = j - offsets[i];
 			wgts[j] = j;
