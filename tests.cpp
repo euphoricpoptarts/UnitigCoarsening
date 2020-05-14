@@ -22,10 +22,11 @@ bool hashmap_deduplication_test() {
 	dests[19] = 2;
 	dests[20] = 4;
 	dests[21] = 2;
+	dests[22] = 0;
 	dests[23] = 3;
 	dests[24] = 1;
 
-	sgp_wgt_t expected_wgts[5] = { 15, 24, 16 + 19 + 21, 18 + 23, 17 + 20 };
+	sgp_wgt_t expected_wgts[5] = { 15 + 22, 24, 16 + 19 + 21, 18 + 23, 17 + 20 };
 
 	atom_eid_t total_edges(0);
 
@@ -39,6 +40,7 @@ bool hashmap_deduplication_test() {
 	std::unordered_map<sgp_vid_t, sgp_wgt_t> actual_weights;
 	for (sgp_eid_t i = offsets[2]; i < offsets[2] + edges_per_source[2]; i++) {
 		actual_weights.insert({ dests[i], wgts[i] });
+		std::cout << "Dest: " << dests[i] << "; Weight: " << wgts[i] << std::endl;
 	}
 
 	success = success && (actual_weights.size() == 5);
@@ -64,9 +66,6 @@ bool heap_deduplication_test() {
 			wgts[j] = j;
 		}
 	}
-	for (sgp_eid_t i = offsets[2]; i < offsets[3]; i++) {
-		std::cout << "Dest: " << dests[i] << "; Weight: " << wgts[i] << std::endl;
-	}
 
 	dests[16] = 2;
 	dests[17] = 4;
@@ -74,10 +73,11 @@ bool heap_deduplication_test() {
 	dests[19] = 2;
 	dests[20] = 4;
 	dests[21] = 2;
+	dests[22] = 0;
 	dests[23] = 3;
 	dests[24] = 1;
 
-	sgp_wgt_t expected_wgts[5] = { 15, 24, 16 + 19 + 21, 18 + 23, 17 + 20 };
+	sgp_wgt_t expected_wgts[5] = { 15 + 22, 24, 16 + 19 + 21, 18 + 23, 17 + 20 };
 
 	atom_eid_t total_edges(0);
 
