@@ -2528,6 +2528,11 @@ SGPAR_API int sgp_free_graph(sgp_graph_t *g) {
         g->weighted_degree = NULL;
     }
 
+    if (g->edges_per_source != NULL) {
+        free(g->edges_per_source);
+        g->edges_per_source = NULL;
+    }
+
     return EXIT_SUCCESS;
 }
 
@@ -2593,6 +2598,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         g_all[i].source_offsets = NULL;
         g_all[i].destination_indices = NULL;
         g_all[i].eweights = NULL;
+        g_all[i].weighted_degree = NULL;
+        g_all[i].edges_per_source = NULL;
     }
     g_all[0].nvertices = g.nvertices; g_all[0].nedges = g.nedges;
     g_all[0].source_offsets = g.source_offsets;
