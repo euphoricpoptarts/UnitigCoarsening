@@ -63,6 +63,9 @@ sgpar_hg_serial: sgpar.c sgpar.h
 sgpar_c: sgpar.c sgpar.h
 	$(CC) $(CFLAGS) $(OMPFLAGS) -o sgpar_c  sgpar.c   -lm $(LDLIBS)
 
+tests: tests.cpp sgpar.h
+	$(CXX) $(CXXFLAGS) $(OMPFLAGS) -o tests tests.cpp $(LDLIBS)
+
 clean:
 	rm -f mtx2csr sgpar_c sgpar sgpar_coarse_ec sgpar_lg sgpar_hg sgpar_hg_coarse_ec sgpar.kokkos sgpar_hg_serial sgpar_serial sgpar_exp sgpar_hg_exp *.o KokkosCore_config.h KokkosCore_config.tmp
 
