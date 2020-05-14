@@ -807,7 +807,7 @@ void hashmap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sg
             dest_by_source[next_offset] = dest_by_source[i];
             wgt_by_source[next_offset] = wgt_by_source[i];
             next_offset++;
-            gc_nedges++;
+            (*gc_nedges)++;
         }
     }
 
