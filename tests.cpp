@@ -1,4 +1,6 @@
 #include "sgpar.h"
+#include <stdio.h>
+#include <iostream>
 
 using namespace sgpar;
 
@@ -86,6 +88,7 @@ bool heap_deduplication_test() {
 	std::unordered_map<sgp_vid_t, sgp_wgt_t> actual_weights;
 	for (sgp_eid_t i = offsets[2]; i < offsets[2] + edges_per_source[2]; i++) {
 		actual_weights.insert({ dests[i], wgts[i] });
+		std::cout << "Dest: " << dests[i] << "; Weight: " << wgts[i] << std::endl;
 	}
 
 	success = success && (actual_weights.size() == 5);
