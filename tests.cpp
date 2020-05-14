@@ -64,6 +64,9 @@ bool heap_deduplication_test() {
 			wgts[j] = j;
 		}
 	}
+	for (sgp_eid_t i = offsets[2]; i < offsets[2] + edges_per_source[2]; i++) {
+		std::cout << "Dest: " << dests[i] << "; Weight: " << wgts[i] << std::endl;
+	}
 
 	dests[16] = 2;
 	dests[17] = 4;
