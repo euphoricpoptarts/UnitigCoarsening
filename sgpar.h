@@ -343,25 +343,37 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
 #pragma omp for
 		for (sgp_vid_t i = 0; i < n; i++) {
 			sgp_vid_t adj_size = g.source_offsets[i + 1] - g.source_offsets[i];
-			sgp_vid_t offset = (sgp_pcg32_random_r(&t_rng)) % adj_size;
-			// sgp_vid_t offset = 0;
-			hn[i] = g.destination_indices[g.source_offsets[i] + offset];
+            if (adj_size == 0) {
+                //no edges, so pair this vertex to a random vertex
+                hn[i] = (sgp_pcg32_random_r(&t_rng)) % n;
+            }
+            else {
+                sgp_vid_t offset = (sgp_pcg32_random_r(&t_rng)) % adj_size;
+                // sgp_vid_t offset = 0;
+                hn[i] = g.destination_indices[g.source_offsets[i] + offset];
+            }
 		}
 	}
 	else {
 #pragma omp for
 		for (sgp_vid_t i = 0; i < n; i++) {
-			sgp_vid_t hn_i = g.destination_indices[g.source_offsets[i]];
-			sgp_wgt_t max_ewt = g.eweights[g.source_offsets[i]];
+            if (g.edges_per_source[i] == 0) {
+                //no edges, so pair this vertex to a random vertex
+                hn[i] = (sgp_pcg32_random_r(&t_rng)) % n;
+            }
+            else {
+                sgp_vid_t hn_i = g.destination_indices[g.source_offsets[i]];
+                sgp_wgt_t max_ewt = g.eweights[g.source_offsets[i]];
 
-			for (sgp_eid_t j = g.source_offsets[i] + 1; j < g.source_offsets[i] + g.edges_per_source[i]; j++) {
-				if (max_ewt < g.eweights[j]) {
-					max_ewt = g.eweights[j];
-					hn_i = g.destination_indices[j];
-				}
+                for (sgp_eid_t j = g.source_offsets[i] + 1; j < g.source_offsets[i] + g.edges_per_source[i]; j++) {
+                    if (max_ewt < g.eweights[j]) {
+                        max_ewt = g.eweights[j];
+                        hn_i = g.destination_indices[j];
+                    }
 
-			}
-			hn[i] = hn_i;
+                }
+                hn[i] = hn_i;
+            }
 		}
 	}
 
