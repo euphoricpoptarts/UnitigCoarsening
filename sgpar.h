@@ -2199,6 +2199,24 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int fina
 }
 #endif
 
+SGPAR_API int write_sorted_eigenvec(sgp_vv_pair_t* vu_pair, sgp_vid_t n) {
+    FILE* infp = fopen("eigenvec_debug.txt", "w");
+    if (infp == NULL) {
+        printf("Error: Could not open config file %s. Exiting ...\n", "eigenvec_debug.txt");
+        return EXIT_FAILURE;
+    }
+    for (sgp_vid_t i = 0; i < n, i++) {
+#ifdef SGPAR_HUGEGRAPHS
+        fprintf(infp, "%llu %.20f\n", vu_pair[i].u, vu_pair[i].ev);
+#else
+        fprintf(infp, "%u %.20f\n", vu_pair[i].u, vu_pair[i].ev);
+#endif
+    }
+    CHECK_RETSTAT(fclose(infp));
+
+    return EXIT_SUCCESS;
+}
+
 SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions, 
                                     sgp_eid_t *edgecut, int perc_imbalance_allowed, 
                                     int local_search_alg,
@@ -2210,6 +2228,7 @@ SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
     vu_pair = (sgp_vv_pair_t *) malloc(n * sizeof(sgp_vv_pair_t));
     assert(vu_pair != NULL);
 
+    //sort based on value of eigenvector corresponding to vertex
     for (sgp_vid_t i = 0; i<n; i++) {
         vu_pair[i].ev = evec[i];
         vu_pair[i].u  = i;
@@ -2227,6 +2246,10 @@ SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
 #endif
 #else
     qsort(vu_pair, n, sizeof(sgp_vv_pair_t), vu_cmpfn_inc);
+#endif
+
+#ifdef EIGENVEC_DEBUG
+    write_sorted_eigenvec(vu_pair, n);
 #endif
 
     // I'll just leave this here for now
@@ -2248,6 +2271,7 @@ SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
         part[vu_pair[i].u] = 1;
     }
 
+    //compute edgecut based on current partition
     long edgecut_curr = 0;
     for (sgp_vid_t i=0; i<n; i++) {
         sgp_vid_t part_i = part[i];
@@ -2262,6 +2286,8 @@ SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
     long edgecut_min = edgecut_curr;
     long curr_split = imbl;
 
+    //checks each vertex between imbl and imbr (which are in partition 1)
+    //adds them to partition 0 if doing so would reduce the edge cut
     for (sgp_vid_t i=imbl; i<imbr; i++) {
         /* add vert at position i to comm 0 */
         sgp_vid_t u = vu_pair[i].u;
