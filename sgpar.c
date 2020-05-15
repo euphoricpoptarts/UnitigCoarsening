@@ -31,10 +31,11 @@ int main(int argc, char **argv) {
     part = (sgp_vid_t *) malloc(g.nvertices * sizeof(sgp_vid_t));
     SGPAR_ASSERT(part != NULL);
 
-    sgp_vid_t *best_part = (sgp_vid_t *) malloc(g.nvertices * sizeof(sgp_vid_t));
-    SGPAR_ASSERT(best_part != NULL);
+    sgp_vid_t* best_part;
     int compare_part = 0;
     if(argc > 4){
+        best_part = (sgp_vid_t*)malloc(g.nvertices * sizeof(sgp_vid_t));
+        SGPAR_ASSERT(best_part != NULL);
         CHECK_SGPAR( sgp_load_partition(best_part, g.nvertices, argv[4]));
         compare_part = 1;
     }
@@ -128,6 +129,9 @@ int main(int argc, char **argv) {
 
     CHECK_SGPAR( sgp_free_graph(&g) );
     free(part);
+    if (compare_part) {
+        free(best_part);
+    }
 
     return EXIT_SUCCESS;
 }

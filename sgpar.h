@@ -2713,12 +2713,9 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         eigenvec[l] = (sgp_real_t*)malloc(gcl_n * sizeof(sgp_real_t));
         SGPAR_ASSERT(eigenvec[l] != NULL);
 
-        sgp_real_t * prolonged_eigenvec = (sgp_real_t*)malloc(gcl_n * sizeof(sgp_real_t));
-        SGPAR_ASSERT(prolonged_eigenvec != NULL);
         //prolong eigenvector from coarser level to finer level
         for (sgp_vid_t i = 0; i < gcl_n; i++) {
             eigenvec[l][i] = eigenvec[l + 1][vcmap[l][i]];
-            prolonged_eigenvec[i] = eigenvec[l][i];
         }
 #ifndef COARSE_EIGEN_EC
         free(eigenvec[l + 1]);
