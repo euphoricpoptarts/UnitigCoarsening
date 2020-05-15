@@ -2529,6 +2529,7 @@ SGPAR_API int sgp_load_graph(sgp_graph_t *g, char *csr_filename) {
     CHECK_RETSTAT( fclose(infp) );
     g->eweights = NULL;
     g->weighted_degree = NULL;
+    g->edges_per_source = NULL;
     return EXIT_SUCCESS;
 }
 
