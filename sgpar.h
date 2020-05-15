@@ -2205,7 +2205,7 @@ SGPAR_API int write_sorted_eigenvec(sgp_vv_pair_t* vu_pair, sgp_vid_t n) {
         printf("Error: Could not open config file %s. Exiting ...\n", "eigenvec_debug.txt");
         return EXIT_FAILURE;
     }
-    for (sgp_vid_t i = 0; i < n, i++) {
+    for (sgp_vid_t i = 0; i < n; i++) {
 #ifdef SGPAR_HUGEGRAPHS
         fprintf(infp, "%llu %.20f\n", vu_pair[i].u, vu_pair[i].ev);
 #else
