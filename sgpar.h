@@ -528,9 +528,6 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t* vcmap,
     sgp_vid_t* hn = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
     SGPAR_ASSERT(hn != NULL);
 
-    sgp_vid_t* total_coarse = (sgp_vid_t*)calloc(n, sizeof(sgp_vid_t));
-    SGPAR_ASSERT(total_coarse != NULL);
-
     for (sgp_vid_t i = 0; i < n; i++) {
         hn[i] = SGP_INFTY;
     }
