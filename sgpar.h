@@ -2644,10 +2644,6 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     double start_time = sgp_timer();
     double coarsening_sort_time = 0;
 
-    sgp_pcg32_random_t coarsen_rng;
-    coarsen_rng.state = 0xfedcba9876543210;
-    coarsen_rng.inc = 1;
-
     int coarsen_ratio_exceeded = 0;
     //generate all coarse graphs
     while ((coarsening_level < (SGPAR_COARSENING_MAXLEVELS-1)) && 
