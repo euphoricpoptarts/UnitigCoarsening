@@ -2721,8 +2721,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         //prolong eigenvector from coarser level to finer level
         for (sgp_vid_t i = 0; i < gcl_n; i++) {
             sgp_real_t random_perturb = ((double)sgp_pcg32_random_r(rng)) / UINT32_MAX;
-            //convert to range 0.8 to 1.2
-            random_perturb = 0.4 * random_perturb + 0.8;
+            //convert to range 0.998 to 1.002
+            random_perturb = 0.004 * random_perturb + 0.998;
             eigenvec[l][i] = random_perturb*eigenvec[l + 1][vcmap[l][i]];
         }
 #ifndef COARSE_EIGEN_EC
