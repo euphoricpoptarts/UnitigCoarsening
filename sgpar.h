@@ -540,8 +540,12 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t* vcmap,
     sgp_vid_t* hn = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
     SGPAR_ASSERT(hn != NULL);
 
+    sgp_vid_t* coarse_count = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(coarse_count != NULL);
+
     for (sgp_vid_t i = 0; i < n; i++) {
         hn[i] = SGP_INFTY;
+        coarse_count[i] = 0;
     }
 
     if (coarsening_level == 1) {
@@ -574,8 +578,29 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t* vcmap,
         sgp_vid_t u = vperm[i];
         sgp_vid_t v = hn[u];
         if (vcmap[u] == SGP_INFTY) {
+            //randomly reselect mapping if current mapping is too dense
+            if(vcmap[v] != SGP_INFTY) {
+                if (coarse_count[vcmap[v]] > 4) {
+                    sgp_vid_t size = 0;
+                    if (coarsening_level == 1) {
+                        size = g.source_offsets[u + 1] - g.source_offsets[u];
+                    }
+                    else {
+                        size = g.edges_per_source[u];
+                    }
+                    if (size > 0) {
+                        sgp_vid_t offset = (sgp_pcg32_random_r(rng)) % size;
+                        v = g.destination_indices[g.source_offsets[u] + offset];
+                    }
+                }
+            }
+
             if (vcmap[v] == SGP_INFTY) {
+                coarse_count[nvertices_coarse]++;
                 vcmap[v] = nvertices_coarse++;
+            }
+            if (u != v) {
+                coarse_count[vcmap[v]]++;
             }
             vcmap[u] = vcmap[v];
         }
