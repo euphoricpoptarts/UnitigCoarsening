@@ -345,7 +345,12 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
 			sgp_vid_t adj_size = g.source_offsets[i + 1] - g.source_offsets[i];
             if (adj_size == 0) {
                 //no edges, so pair this vertex to a random vertex
-                hn[i] = (sgp_pcg32_random_r(&t_rng)) % n;
+                sgp_vid_t hn_i = (sgp_pcg32_random_r(&t_rng)) % (n - 1);
+                //ensure that this vertex is not paired to itself
+                if (hn_i == i) {
+                    hn_i++;
+                }
+                hn[i] = hn_i;
             }
             else {
                 sgp_vid_t offset = (sgp_pcg32_random_r(&t_rng)) % adj_size;
@@ -359,7 +364,12 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
 		for (sgp_vid_t i = 0; i < n; i++) {
             if (g.edges_per_source[i] == 0) {
                 //no edges, so pair this vertex to a random vertex
-                hn[i] = (sgp_pcg32_random_r(&t_rng)) % n;
+                sgp_vid_t hn_i = (sgp_pcg32_random_r(&t_rng)) % (n - 1);
+                //ensure that this vertex is not paired to itself
+                if (hn_i == i) {
+                    hn_i++;
+                }
+                hn[i] = hn_i;
             }
             else {
                 sgp_vid_t hn_i = g.destination_indices[g.source_offsets[i]];
