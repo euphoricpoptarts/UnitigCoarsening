@@ -2933,11 +2933,17 @@ SGPAR_API int sgp_use_partition(sgp_vid_t* part, const sgp_graph_t g, sgp_graph_
     g1->source_offsets = g1_source_offsets;
     g1->nedges = g1_ec;
     g1->nvertices = g1_count;
+    g1->eweights = NULL;
+    g1->edges_per_source = NULL;
+    g1->weighted_degree = NULL;
 
     g2->destination_indices = g2_dest_indices;
     g2->source_offsets = g2_source_offsets;
     g2->nedges = g2_ec;
     g2->nvertices = g2_count;
+    g2->eweights = NULL;
+    g2->edges_per_source = NULL;
+    g2->weighted_degree = NULL;
 
     return EXIT_SUCCESS;
 }
