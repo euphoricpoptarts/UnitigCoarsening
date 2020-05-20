@@ -96,6 +96,8 @@ int main(int argc, char **argv) {
 #ifdef EXPERIMENT
             experiment.setEdgeCut4Way(edgecut + ec1 + ec2);
 #endif
+            sgp_free_graph(&g1);
+            sgp_free_graph(&g2);
         }
 
 #ifdef EXPERIMENT
