@@ -29,20 +29,22 @@ def analyzeMetrics(metricsPath, logFile):
 
     times = [d['total-duration-seconds'] for d in data]
     coarsenTimes = [d['coarsen-duration-seconds'] for d in data]
-    coarsenSortTimes = [d['coarsen-sort-duration-seconds'] for d in data]
+    coarsenDedupeTimes = [d['coarsen-dedupe-duration-seconds'] for d in data]
+    coarsenMapTimes = [d['coarsen-map-duration-seconds'] for d in data]
+    coarsenBuildTimes = [d['coarsen-build-duration-seconds'] for d in data]
     refineTimes = [d['refine-duration-seconds'] for d in data]
     edgeCuts = [d['edge-cut'] for d in data]
     edgeCuts4way = [d['edge-cut-four-way'] for d in data]
     coarseLevels = list(zip_longest(*[reversed(d['coarse-levels']) for d in data]))
     numCoarseLevels = [d['number-coarse-levels'] for d in data]
     numCoarseLevels = list(map(lambda x: x - 1, numCoarseLevels))
-    coarsenNonSortTimes = [i - j for i, j in zip(coarsenTimes, coarsenSortTimes)]
 
     with open(logFile, "w") as output:
         printStat("Total duration", times, output)
         printStat("Coarsening duration", coarsenTimes, output)
-        printStat("Coarsening sort duration", coarsenSortTimes, output)
-        printStat("Coarsening other duration", coarsenNonSortTimes, output)
+        printStat("Coarsening mapping duration", coarsenMapTimes, output)
+        printStat("Coarsening building duration", coarsenBuildTimes, output)
+        printStat("Coarsening deduping duration", coarsenDedupeTimes, output)
         printStat("Refine duration", refineTimes, output)
         printStat("Edge cut", edgeCuts, output)
         printStat("Four partition edge cut", edgeCuts4way, output)
@@ -78,6 +80,7 @@ def processGraph(filepath, metricDir, logFileTemplate):
         logFile = logFileTemplate.format("parHEC")
         analyzeMetrics(metricsPath, logFile)
 
+    """
     #serial HEC
     metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
     print("running serial HEC sgpar on {}, data logged in {}".format(filepath, metricsPath), flush=True)
@@ -103,6 +106,7 @@ def processGraph(filepath, metricDir, logFileTemplate):
     else:
         logFile = logFileTemplate.format("serialMatch")
         analyzeMetrics(metricsPath, logFile)
+    """
 
     print("end {} processing".format(filepath), flush=True)
 
