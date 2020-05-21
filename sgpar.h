@@ -1431,15 +1431,15 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
         sgp_coarsen_heavy_edge_matching(vcmap, &nvertices_coarse, g, coarsening_level, rng);
         gc->nvertices = nvertices_coarse;
     }
-    *(time_ptrs[0]) += (sgp_timer() - start_map);
+    time_ptrs[0] += (sgp_timer() - start_map);
 
     double start_build = sgp_timer();
 #ifdef _KOKKOS
     sgp_build_coarse_graph_msd_hashmap(gc, vcmap, g, coarsening_level, sort_time_ptr);
 #else
-    sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, sort_time_ptrs, coarsening_alg);
+    sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, time_ptrs, coarsening_alg);
 #endif
-    *(time_ptrs[1]) += (sgp_timer() - start_build);
+    time_ptrs[1] += (sgp_timer() - start_build);
 
     return EXIT_SUCCESS;
 }
