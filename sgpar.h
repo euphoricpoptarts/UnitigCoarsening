@@ -1182,8 +1182,9 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
         }
     }
 
-#pragma omp single{
-    *(time_ptrs[2]) += (sgp_timer() - start_count);
+#pragma omp single
+{
+    time_ptrs[2] += (sgp_timer() - start_count);
     start_prefix = sgp_timer();
 }
 
@@ -1198,7 +1199,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 
 #pragma omp single
 {
-    *(time_ptrs[3]) += (sgp_timer() - start_prefix);
+    time_ptrs[3] += (sgp_timer() - start_prefix);
     start_bucket = sgp_timer();
     dest_by_source = (sgp_vid_t*)malloc(ec * sizeof(sgp_vid_t));
     SGPAR_ASSERT(dest_by_source != NULL);
@@ -1238,7 +1239,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 #else
     free(edges_per_source_atomic);
 #endif
-    *(time_ptrs[4]) += (sgp_timer() - start_bucket);
+    time_ptrs[4] += (sgp_timer() - start_bucket);
     start_dedupe = sgp_timer();
 }
 
@@ -1259,7 +1260,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 
 #pragma omp single
 {
-    *(time_ptrs[5]) += (sgp_timer() - start_dedupe);
+    time_ptrs[5] += (sgp_timer() - start_dedupe);
 
     gc_nedges = gc_nedges / 2;
 
@@ -1324,7 +1325,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
         }
     }
 
-    *(time_ptrs[2]) += (sgp_timer() - start_count);
+    time_ptrs[2] += (sgp_timer() - start_count);
     double start_prefix = sgp_timer();
 
     //prefix sums to compute bucket offsets
@@ -1335,7 +1336,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
         edges_per_source[i] = 0;//reset to be used as a counter
     }
 
-    *(time_ptrs[3]) += (sgp_timer() - start_prefix);
+    time_ptrs[3] += (sgp_timer() - start_prefix);
     double start_bucket = sgp_timer();
 
     //sort by source first
@@ -1367,7 +1368,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     }
     free(mapped_edges);
 
-    *(time_ptrs[4]) += (sgp_timer() - start_bucket);
+    time_ptrs[4] += (sgp_timer() - start_bucket);
     double start_dedupe = sgp_timer();
 
     //sort by dest and deduplicate
@@ -1386,7 +1387,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 
     }
 
-    *(time_ptrs[5]) += (sgp_timer() - start_dedupe);
+    time_ptrs[5] += (sgp_timer() - start_dedupe);
 
     gc_nedges /= 2;
 
