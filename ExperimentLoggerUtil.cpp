@@ -36,7 +36,9 @@ private:
 	double totalDurationSeconds = 0;
 	double coarsenDurationSeconds = 0;
 	double refineDurationSeconds = 0;
-	double coarsenSortDurationSeconds = 0;
+	double coarsenDedupeDurationSeconds = 0;
+	double coarsenMapDurationSeconds = 0;
+	double coarsenBuildDurationSeconds = 0;
 
 public:
 	void addCoarseLevel(int refineIterations, bool iterationMaxReached, uint64_t unrefinedEdgeCut) {
@@ -74,8 +76,16 @@ public:
 		this->refineDurationSeconds = refineDurationSeconds;
 	}
 
-	void setCoarsenSortDurationSeconds(double coarsenSortDurationSeconds) {
-		this->coarsenSortDurationSeconds = coarsenSortDurationSeconds;
+	void setCoarsenDedupeDurationSeconds(double coarsenDedupeDurationSeconds) {
+		this->coarsenDedupeDurationSeconds = coarsenDedupeDurationSeconds;
+	}
+
+	void setCoarsenMapDurationSeconds(double coarsenMapDurationSeconds) {
+		this->coarsenMapDurationSeconds = coarsenMapDurationSeconds;
+	}
+
+	void setCoarsenBuildDurationSeconds(double coarsenBuildDurationSeconds) {
+		this->coarsenBuildDurationSeconds = coarsenBuildDurationSeconds;
 	}
 
 	void log(char* filename, bool first, bool last) {
@@ -93,7 +103,9 @@ public:
 			f << "\"total-duration-seconds\":" << totalDurationSeconds << ',';
 			f << "\"coarsen-duration-seconds\":" << coarsenDurationSeconds << ',';
 			f << "\"refine-duration-seconds\":" << refineDurationSeconds << ',';
-			f << "\"coarsen-sort-duration-seconds\":" << coarsenSortDurationSeconds << ',';
+			f << "\"coarsen-dedupe-duration-seconds\":" << coarsenDedupeDurationSeconds << ',';
+			f << "\"coarsen-map-duration-seconds\":" << coarsenMapDurationSeconds << ',';
+			f << "\"coarsen-build-duration-seconds\":" << coarsenBuildDurationSeconds << ',';
 			f << "\"number-coarse-levels\":" << numCoarseLevels << ',';
 			f << "\"coarse-levels\":[";
 
