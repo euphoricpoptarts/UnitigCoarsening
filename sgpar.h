@@ -557,24 +557,46 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t* vcmap,
     if (coarsening_level == 1) {
         for (sgp_vid_t i = 0; i < n; i++) {
             sgp_vid_t adj_size = g.source_offsets[i + 1] - g.source_offsets[i];
-            sgp_vid_t offset = (sgp_pcg32_random_r(rng)) % adj_size;
-            // sgp_vid_t offset = 0;
-            hn[i] = g.destination_indices[g.source_offsets[i] + offset];
+            if (adj_size == 0) {
+                //no edges, so pair this vertex to a random vertex
+                sgp_vid_t hn_i = (sgp_pcg32_random_r(rng)) % (n - 1);
+                //ensure that this vertex is not paired to itself
+                if (hn_i == i) {
+                    hn_i++;
+                }
+                hn[i] = hn_i;
+            }
+            else {
+                sgp_vid_t offset = (sgp_pcg32_random_r(rng)) % adj_size;
+                // sgp_vid_t offset = 0;
+                hn[i] = g.destination_indices[g.source_offsets[i] + offset];
+            }
         }
     }
     else {
         for (sgp_vid_t i = 0; i < n; i++) {
-            sgp_vid_t hn_i = g.destination_indices[g.source_offsets[i]];
-            sgp_wgt_t max_ewt = g.eweights[g.source_offsets[i]];
-
-            for (sgp_eid_t j = g.source_offsets[i] + 1; j < g.source_offsets[i] + g.edges_per_source[i]; j++) {
-                if (max_ewt < g.eweights[j]) {
-                    max_ewt = g.eweights[j];
-                    hn_i = g.destination_indices[j];
+            if (g.edges_per_source[i] == 0) {
+                //no edges, so pair this vertex to a random vertex
+                sgp_vid_t hn_i = (sgp_pcg32_random_r(rng)) % (n - 1);
+                //ensure that this vertex is not paired to itself
+                if (hn_i == i) {
+                    hn_i++;
                 }
-
+                hn[i] = hn_i;
             }
-            hn[i] = hn_i;
+            else {
+                sgp_vid_t hn_i = g.destination_indices[g.source_offsets[i]];
+                sgp_wgt_t max_ewt = g.eweights[g.source_offsets[i]];
+
+                for (sgp_eid_t j = g.source_offsets[i] + 1; j < g.source_offsets[i] + g.edges_per_source[i]; j++) {
+                    if (max_ewt < g.eweights[j]) {
+                        max_ewt = g.eweights[j];
+                        hn_i = g.destination_indices[j];
+                    }
+
+                }
+                hn[i] = hn_i;
+            }
         }
     }
 
