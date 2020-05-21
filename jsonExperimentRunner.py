@@ -29,6 +29,9 @@ def analyzeMetrics(metricsPath, logFile):
 
     times = [d['total-duration-seconds'] for d in data]
     coarsenTimes = [d['coarsen-duration-seconds'] for d in data]
+    coarsenCountTimes = [d['coarsen-count-duration-seconds'] for d in data]
+    coarsenPrefixSumTimes = [d['coarsen-prefix-sum-duration-seconds'] for d in data]
+    coarsenBucketTimes = [d['coarsen-bucket-duration-seconds'] for d in data]
     coarsenDedupeTimes = [d['coarsen-dedupe-duration-seconds'] for d in data]
     coarsenMapTimes = [d['coarsen-map-duration-seconds'] for d in data]
     coarsenBuildTimes = [d['coarsen-build-duration-seconds'] for d in data]
@@ -44,6 +47,9 @@ def analyzeMetrics(metricsPath, logFile):
         printStat("Coarsening duration", coarsenTimes, output)
         printStat("Coarsening mapping duration", coarsenMapTimes, output)
         printStat("Coarsening building duration", coarsenBuildTimes, output)
+        printStat("Coarsening counting duration", coarsenCountTimes, output)
+        printStat("Coarsening prefix sum duration", coarsenPrefixSumTimes, output)
+        printStat("Coarsening bucketing duration", coarsenBucketTimes, output)
         printStat("Coarsening deduping duration", coarsenDedupeTimes, output)
         printStat("Refine duration", refineTimes, output)
         printStat("Edge cut", edgeCuts, output)

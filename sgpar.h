@@ -1110,12 +1110,15 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     sgp_vid_t* vcmap,
     const sgp_graph_t g,
     const int coarsening_level,
-    double* sort_time,
+    double* time_ptrs,
     const int coarsening_alg) {
     sgp_vid_t n = g.nvertices;
     sgp_vid_t nc = gc->nvertices;
 
-    double elt = 0;
+    double start_dedupe = 0;
+    double start_count = 0;
+    double start_prefix = 0;
+    double start_bucket = 0;
 
 #ifdef __cplusplus
     atom_eid_t ec(0);
@@ -1149,6 +1152,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 #endif
 
     sgp_vid_t * edges_per_source = (sgp_vid_t *) malloc(nc * sizeof(sgp_vid_t));
+    start_count = sgp_timer();
 
 #pragma omp parallel
 {
@@ -1178,6 +1182,11 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
         }
     }
 
+#pragma omp single{
+    *(time_ptrs[2]) += (sgp_timer() - start_count);
+    start_prefix = sgp_timer();
+}
+
 #pragma omp for
     for (sgp_vid_t i = 0; i < nc; i++) {
         source_bucket_offset[i + 1] = edges_per_source_atomic[i];
@@ -1189,6 +1198,8 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 
 #pragma omp single
 {
+    *(time_ptrs[3]) += (sgp_timer() - start_prefix);
+    start_bucket = sgp_timer();
     dest_by_source = (sgp_vid_t*)malloc(ec * sizeof(sgp_vid_t));
     SGPAR_ASSERT(dest_by_source != NULL);
     wgt_by_source = (sgp_wgt_t*)malloc(ec * sizeof(sgp_wgt_t));
@@ -1227,7 +1238,8 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 #else
     free(edges_per_source_atomic);
 #endif
-    elt = sgp_timer();
+    *(time_ptrs[4]) += (sgp_timer() - start_bucket);
+    start_dedupe = sgp_timer();
 }
 
     //sort by dest and deduplicate
@@ -1247,7 +1259,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 
 #pragma omp single
 {
-    *sort_time += (sgp_timer() - elt);
+    *(time_ptrs[5]) += (sgp_timer() - start_dedupe);
 
     gc_nedges = gc_nedges / 2;
 
@@ -1280,7 +1292,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     sgp_vid_t* vcmap,
     const sgp_graph_t g,
     const int coarsening_level,
-    double* sort_time,
+    double* time_ptrs,
     const int coarsening_alg) {
     sgp_vid_t n = g.nvertices;
     sgp_vid_t nc = gc->nvertices;
@@ -1288,6 +1300,8 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     sgp_eid_t ec = 0;
 
     //radix sort source vertices, then sort edges
+
+    double start_count = sgp_timer();
 
     //count edges per vertex
     sgp_vid_t* edges_per_source = (sgp_vid_t*)calloc(nc, sizeof(sgp_vid_t));
@@ -1310,6 +1324,9 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
         }
     }
 
+    *(time_ptrs[2]) += (sgp_timer() - start_count);
+    double start_prefix = sgp_timer();
+
     //prefix sums to compute bucket offsets
     sgp_eid_t* source_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
     SGPAR_ASSERT(source_bucket_offset != NULL);
@@ -1317,6 +1334,9 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
         source_bucket_offset[i + 1] = source_bucket_offset[i] + edges_per_source[i];
         edges_per_source[i] = 0;//reset to be used as a counter
     }
+
+    *(time_ptrs[3]) += (sgp_timer() - start_prefix);
+    double start_bucket = sgp_timer();
 
     //sort by source first
     sgp_vid_t* dest_by_source = (sgp_vid_t*)malloc(ec * sizeof(sgp_vid_t));
@@ -1347,7 +1367,8 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     }
     free(mapped_edges);
 
-    double elt = sgp_timer();
+    *(time_ptrs[4]) += (sgp_timer() - start_bucket);
+    double start_dedupe = sgp_timer();
 
     //sort by dest and deduplicate
     sgp_eid_t gc_nedges = 0;
@@ -1365,7 +1386,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 
     }
 
-    *sort_time += (sgp_timer() - elt);
+    *(time_ptrs[5]) += (sgp_timer() - start_dedupe);
 
     gc_nedges /= 2;
 
@@ -1396,9 +1417,7 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
     const int coarsening_level,
     const int coarsening_alg,
     sgp_pcg32_random_t* rng,
-    double* sort_time_ptr,
-    double* map_time,
-    double* build_time) {
+    double* time_ptrs) {
 
     double start_map = sgp_timer();
     if ((coarsening_alg & 1) == 0) {
@@ -1411,15 +1430,15 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
         sgp_coarsen_heavy_edge_matching(vcmap, &nvertices_coarse, g, coarsening_level, rng);
         gc->nvertices = nvertices_coarse;
     }
-    *map_time += (sgp_timer() - start_map);
+    *(time_ptrs[0]) += (sgp_timer() - start_map);
 
     double start_build = sgp_timer();
 #ifdef _KOKKOS
     sgp_build_coarse_graph_msd_hashmap(gc, vcmap, g, coarsening_level, sort_time_ptr);
 #else
-    sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, sort_time_ptr, coarsening_alg);
+    sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, sort_time_ptrs, coarsening_alg);
 #endif
-    *build_time += (sgp_timer() - start_build);
+    *(time_ptrs[1]) += (sgp_timer() - start_build);
 
     return EXIT_SUCCESS;
 }
@@ -2680,9 +2699,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     g_all[0].destination_indices = g.destination_indices;
 
     double start_time = sgp_timer();
-    double coarsening_sort_time = 0;
-    double coarsening_map_time = 0;
-    double coarsening_build_time = 0;
+    double time_counters[6] = { 0, 0, 0, 0, 0, 0 };
 
     int coarsen_ratio_exceeded = 0;
     //generate all coarse graphs
@@ -2700,7 +2717,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                             vcmap[coarsening_level-1],
                                             g_all[coarsening_level-1], 
                                             coarsening_level, config->coarsening_alg, 
-                                            rng, &coarsening_sort_time, &coarsening_map_time, &coarsening_build_time) );
+                                            rng, time_counters) );
 
         if (config->coarsening_alg & 1) {
             sgp_real_t coarsen_ratio = (sgp_real_t)g_all[coarsening_level].nvertices / (sgp_real_t)g_all[coarsening_level - 1].nvertices;
@@ -2826,9 +2843,12 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     experiment.setTotalDurationSeconds(fin_final_level_time - start_time);
     experiment.setCoarsenDurationSeconds(fin_coarsening_time - start_time);
     experiment.setRefineDurationSeconds(fin_final_level_time - fin_coarsening_time);
-    experiment.setCoarsenDedupeDurationSeconds(coarsening_sort_time);
-    experiment.setCoarsenMapDurationSeconds(coarsening_map_time);
-    experiment.setCoarsenBuildDurationSeconds(coarsening_build_time);
+    experiment.setCoarsenMapDurationSeconds(time_counters[0]);
+    experiment.setCoarsenBuildDurationSeconds(time_counters[1]);
+    experiment.setCoarsenCountDurationSeconds(time_counters[2]);
+    experiment.setCoarsenPrefixSumDurationSeconds(time_counters[3]);
+    experiment.setCoarsenBucketDurationSeconds(time_counters[4]);
+    experiment.setCoarsenDedupeDurationSeconds(time_counters[5]);
 #endif
 
 

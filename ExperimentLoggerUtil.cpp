@@ -37,6 +37,9 @@ private:
 	double coarsenDurationSeconds = 0;
 	double refineDurationSeconds = 0;
 	double coarsenDedupeDurationSeconds = 0;
+	double coarsenCountDurationSeconds = 0;
+	double coarsenBucketDurationSeconds = 0;
+	double coarsenPrefixSumDurationSeconds = 0;
 	double coarsenMapDurationSeconds = 0;
 	double coarsenBuildDurationSeconds = 0;
 
@@ -80,6 +83,18 @@ public:
 		this->coarsenDedupeDurationSeconds = coarsenDedupeDurationSeconds;
 	}
 
+	void setCoarsenCountDurationSeconds(double coarsenCountDurationSeconds) {
+		this->coarsenCountDurationSeconds = coarsenCountDurationSeconds;
+	}
+
+	void setCoarsenPrefixSumDurationSeconds(double coarsenPrefixSumDurationSeconds) {
+		this->coarsenPrefixSumDurationSeconds = coarsenPrefixSumDurationSeconds;
+	}
+
+	void setCoarsenBucketDurationSeconds(double coarsenBucketDurationSeconds) {
+		this->coarsenBucketDurationSeconds = coarsenBucketDurationSeconds;
+	}
+
 	void setCoarsenMapDurationSeconds(double coarsenMapDurationSeconds) {
 		this->coarsenMapDurationSeconds = coarsenMapDurationSeconds;
 	}
@@ -104,6 +119,9 @@ public:
 			f << "\"coarsen-duration-seconds\":" << coarsenDurationSeconds << ',';
 			f << "\"refine-duration-seconds\":" << refineDurationSeconds << ',';
 			f << "\"coarsen-dedupe-duration-seconds\":" << coarsenDedupeDurationSeconds << ',';
+			f << "\"coarsen-count-duration-seconds\":" << coarsenCountDurationSeconds << ',';
+			f << "\"coarsen-prefix-sum-duration-seconds\":" << coarsenPrefixSumDurationSeconds << ',';
+			f << "\"coarsen-bucket-duration-seconds\":" << coarsenCountDurationSeconds << ',';
 			f << "\"coarsen-map-duration-seconds\":" << coarsenMapDurationSeconds << ',';
 			f << "\"coarsen-build-duration-seconds\":" << coarsenBuildDurationSeconds << ',';
 			f << "\"number-coarse-levels\":" << numCoarseLevels << ',';
