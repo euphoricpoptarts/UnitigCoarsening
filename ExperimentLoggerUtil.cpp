@@ -121,7 +121,7 @@ public:
 			f << "\"coarsen-dedupe-duration-seconds\":" << coarsenDedupeDurationSeconds << ',';
 			f << "\"coarsen-count-duration-seconds\":" << coarsenCountDurationSeconds << ',';
 			f << "\"coarsen-prefix-sum-duration-seconds\":" << coarsenPrefixSumDurationSeconds << ',';
-			f << "\"coarsen-bucket-duration-seconds\":" << coarsenCountDurationSeconds << ',';
+			f << "\"coarsen-bucket-duration-seconds\":" << coarsenBucketDurationSeconds << ',';
 			f << "\"coarsen-map-duration-seconds\":" << coarsenMapDurationSeconds << ',';
 			f << "\"coarsen-build-duration-seconds\":" << coarsenBuildDurationSeconds << ',';
 			f << "\"number-coarse-levels\":" << numCoarseLevels << ',';
