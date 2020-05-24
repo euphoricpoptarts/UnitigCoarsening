@@ -1120,12 +1120,6 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     double start_prefix = 0;
     double start_bucket = 0;
 
-#ifdef __cplusplus
-    atom_eid_t ec(0);
-#else
-    atom_eid_t ec = 0;
-#endif
-
     //radix sort source vertices, then sort edges
 
 #ifdef __cplusplus
@@ -1137,6 +1131,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 #endif
 
     sgp_vid_t* mapped_edges = (sgp_vid_t*)malloc(g.source_offsets[n] * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(mapped_edges != NULL);
 
     sgp_eid_t* source_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
     SGPAR_ASSERT(source_bucket_offset != NULL);
@@ -1152,6 +1147,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 #endif
 
     sgp_vid_t * edges_per_source = (sgp_vid_t *) malloc(nc * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(edges_per_source != NULL);
     start_count = sgp_timer();
 
 #pragma omp parallel
@@ -1177,7 +1173,6 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
             mapped_edges[j] = v;
             if (u != v) {
                 edges_per_source_atomic[u]++;
-                ec++;
             }
         }
     }
@@ -1201,9 +1196,9 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 {
     time_ptrs[3] += (sgp_timer() - start_prefix);
     start_bucket = sgp_timer();
-    dest_by_source = (sgp_vid_t*)malloc(ec * sizeof(sgp_vid_t));
+    dest_by_source = (sgp_vid_t*)malloc(source_bucket_offset[nc] * sizeof(sgp_vid_t));
     SGPAR_ASSERT(dest_by_source != NULL);
-    wgt_by_source = (sgp_wgt_t*)malloc(ec * sizeof(sgp_wgt_t));
+    wgt_by_source = (sgp_wgt_t*)malloc(source_bucket_offset[nc] * sizeof(sgp_wgt_t));
     SGPAR_ASSERT(wgt_by_source != NULL);
 }
 
@@ -1308,6 +1303,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     sgp_vid_t* edges_per_source = (sgp_vid_t*)calloc(nc, sizeof(sgp_vid_t));
     SGPAR_ASSERT(edges_per_source != NULL);
     sgp_vid_t* mapped_edges = (sgp_vid_t*)malloc(g.source_offsets[n] * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(mapped_edges != NULL);
 
     for (sgp_vid_t i = 0; i < n; i++) {
         sgp_vid_t u = vcmap[i];
