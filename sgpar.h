@@ -1698,7 +1698,7 @@ Kokkos::initialize();
     printf("number of iterations: %lu\n", niter);
 
 #ifdef EXPERIMENT
-    experiment.addCoarseLevel(g_niter, max_iter_reached, n);
+    experiment.addCoarseLevel(niter, max_iter_reached, n);
 #endif
 
     if(!normLap && final){
