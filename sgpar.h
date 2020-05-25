@@ -859,11 +859,11 @@ void hashmap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sg
 }
 
 #ifdef _KOKKOS
-SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
+SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     sgp_vid_t* vcmap,
     const sgp_graph_t g,
     const int coarsening_level,
-    double* sort_time) {
+    double* time_ptrs) {
     sgp_vid_t n = g.nvertices;
     sgp_vid_t nc = gc->nvertices;
 
@@ -871,9 +871,6 @@ SGPAR_API int sgp_build_coarse_graph_msd_hashmap(sgp_graph_t* gc,
 
 Kokkos::initialize();
 {
-
-    double elt = sgp_timer();
-
     //radix sort source vertices, then sort edges
 
 
@@ -889,6 +886,9 @@ Kokkos::initialize();
     sgp_eid_t* gcnp = &gc_nedges;
 
     sgp_vid_t* edges_per_source = (sgp_vid_t*)malloc(nc * sizeof(sgp_vid_t));
+
+    double start_count = sgp_timer();
+
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
             edges_per_source[i] = 0;
     });
@@ -909,6 +909,9 @@ Kokkos::initialize();
         }
     });
 
+    time_ptrs[2] = sgp_timer() - start_count;
+    double start_prefix = sgp_timer();
+
     Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
         sgp_eid_t& update, const bool final) {
         // Load old value in case we update it before accumulating
@@ -924,6 +927,9 @@ Kokkos::initialize();
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
         edges_per_source[i] = 0; // will use as counter again
     });
+
+    time_ptrs[3] = sgp_timer() - start_prefix;
+    double start_bucket = sgp_timer();
 
     dest_by_source = (sgp_vid_t*) malloc(source_bucket_offset[nc] * sizeof(sgp_vid_t));
     SGPAR_ASSERT(dest_by_source != NULL);
@@ -955,6 +961,9 @@ Kokkos::initialize();
     });
     free(mapped_edges);
 
+    time_ptrs[4] = sgp_timer() - start_bucket;
+    double start_dedupe = sgp_timer();
+
         //sort by dest and deduplicate
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
 
@@ -983,7 +992,7 @@ Kokkos::initialize();
         edges_per_source[u] = next_offset - source_bucket_offset[u];
     });
 
-    *sort_time += (sgp_timer() - elt);
+    time_ptrs[5] = sgp_timer() - start_dedupe;
 
     gc_nedges = gc_nedges / 2;
 
@@ -1432,7 +1441,7 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
 
     double start_build = sgp_timer();
 #ifdef _KOKKOS
-    sgp_build_coarse_graph_msd_hashmap(gc, vcmap, g, coarsening_level, sort_time_ptr);
+    sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, time_ptrs);
 #else
     sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, time_ptrs, coarsening_alg);
 #endif
