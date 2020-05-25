@@ -815,11 +815,13 @@ void heap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sgp_w
                 wgt_by_source[offset] = wgt_by_source[i];
                 last_offset = offset;
                 offset++;
+                //an instance of atomic counting that we should monitor for scaling issues
                 (*gc_nedges)++;
             }
         }
         else {
             offset++;
+            //an instance of atomic counting that we should monitor for scaling issues
             (*gc_nedges)++;
         }
     }
@@ -848,6 +850,7 @@ void hashmap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sg
             dest_by_source[next_offset] = dest_by_source[i];
             wgt_by_source[next_offset] = wgt_by_source[i];
             next_offset++;
+            //an instance of atomic counting that we should monitor for scaling issues
             (*gc_nedges)++;
         }
     }
@@ -972,6 +975,7 @@ Kokkos::initialize();
                 dest_by_source[next_offset] = dest_by_source[i];
                 wgt_by_source[next_offset] = wgt_by_source[i];
                 next_offset++;
+                //an instance of atomic counting that we should monitor for scaling issues
                 Kokkos::atomic_increment(gcnp);
             }
         }
