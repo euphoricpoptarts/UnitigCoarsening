@@ -1636,7 +1636,7 @@ Kokkos::initialize();
     uint64_t niter = 0;
     uint64_t iter_max = (uint64_t) SGPAR_POWERITER_ITER / (uint64_t) n;
     sgp_real_t dotprod = 0, lastDotprod = 1;
-    while ((fabs(dotprod) < (1-tol)) && (niter < iter_max)) {
+    while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
 
         // u = v
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
