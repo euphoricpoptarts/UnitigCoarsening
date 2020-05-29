@@ -727,7 +727,7 @@ static sgp_eid_t binary_search_find_first_self_loop(edge_triple_t *edges, sgp_ei
     }
 }
 
-void heap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sgp_wgt_t* wgt_by_source, sgp_vid_t* edges_per_source, atom_eid_t* gc_nedges) {
+void heap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sgp_wgt_t* wgt_by_source, sgp_vid_t* edges_per_source, sgp_eid_t* gc_nedges) {
 
     sgp_eid_t bottom = *offset_bottom;
     sgp_eid_t top = *(offset_bottom + 1);
@@ -815,20 +815,18 @@ void heap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sgp_w
                 wgt_by_source[offset] = wgt_by_source[i];
                 last_offset = offset;
                 offset++;
-                //an instance of atomic counting that we should monitor for scaling issues
                 (*gc_nedges)++;
             }
         }
         else {
             offset++;
-            //an instance of atomic counting that we should monitor for scaling issues
             (*gc_nedges)++;
         }
     }
     *edges_per_source = offset - *offset_bottom;
 }
 
-void hashmap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sgp_wgt_t* wgt_by_source, sgp_vid_t* edges_per_source, atom_eid_t* gc_nedges) {
+void hashmap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sgp_wgt_t* wgt_by_source, sgp_vid_t* edges_per_source, sgp_eid_t* gc_nedges) {
 
     sgp_eid_t bottom = *offset_bottom;
     sgp_eid_t top = *(offset_bottom + 1);
@@ -850,7 +848,6 @@ void hashmap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sg
             dest_by_source[next_offset] = dest_by_source[i];
             wgt_by_source[next_offset] = wgt_by_source[i];
             next_offset++;
-            //an instance of atomic counting that we should monitor for scaling issues
             (*gc_nedges)++;
         }
     }
@@ -1150,11 +1147,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     sgp_vid_t* dest_by_source;
     sgp_wgt_t* wgt_by_source;
 
-#ifdef __cplusplus
-    atom_eid_t gc_nedges(0);
-#else
-    atom_eid_t gc_nedges = 0;
-#endif
+    sgp_eid_t gc_count[256];
 
     sgp_vid_t * edges_per_source = (sgp_vid_t *) malloc(nc * sizeof(sgp_vid_t));
     SGPAR_ASSERT(edges_per_source != NULL);
@@ -1164,6 +1157,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 {
     sgp_vid_t total_threads = omp_get_num_threads();
     sgp_vid_t t_id = omp_get_thread_num();
+    gc_count[t_id] = 0;
 
 #pragma omp for
     for (sgp_vid_t i = 0; i < nc; i++) {
@@ -1255,17 +1249,22 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
         sgp_vid_t size = source_bucket_offset[u + 1] - source_bucket_offset[u];
         //heapsort
         if ((coarsening_alg & 6) == 2 && size < 10) {
-            heap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, &gc_nedges);
+            heap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, gc_count + t_id);
         }
         //hashmap sort
         else {
-            hashmap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, &gc_nedges);
+            hashmap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, gc_count + t_id);
         }
     }
 
 #pragma omp single
 {
     time_ptrs[5] += (sgp_timer() - start_dedupe);
+
+    sgp_eid_t gc_nedges = 0;
+    for (sgp_vid_t i = 0; i < total_threads; i++) {
+        gc_nedges += gc_count[i];
+    }
 
     gc_nedges = gc_nedges / 2;
 
