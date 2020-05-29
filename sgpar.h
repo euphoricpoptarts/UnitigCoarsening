@@ -727,7 +727,7 @@ static sgp_eid_t binary_search_find_first_self_loop(edge_triple_t *edges, sgp_ei
     }
 }
 
-void heap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sgp_wgt_t* wgt_by_source, sgp_vid_t* edges_per_source, sgp_eid_t* gc_nedges) {
+void heap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sgp_wgt_t* wgt_by_source, sgp_vid_t* edges_per_source, atom_eid_t* gc_nedges) {
 
     sgp_eid_t bottom = *offset_bottom;
     sgp_eid_t top = *(offset_bottom + 1);
@@ -815,18 +815,20 @@ void heap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sgp_w
                 wgt_by_source[offset] = wgt_by_source[i];
                 last_offset = offset;
                 offset++;
+                //an instance of atomic counting that we should monitor for scaling issues
                 (*gc_nedges)++;
             }
         }
         else {
             offset++;
+            //an instance of atomic counting that we should monitor for scaling issues
             (*gc_nedges)++;
         }
     }
     *edges_per_source = offset - *offset_bottom;
 }
 
-void hashmap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sgp_wgt_t* wgt_by_source, sgp_vid_t* edges_per_source, sgp_eid_t* gc_nedges) {
+void hashmap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sgp_wgt_t* wgt_by_source, sgp_vid_t* edges_per_source, atom_eid_t* gc_nedges) {
 
     sgp_eid_t bottom = *offset_bottom;
     sgp_eid_t top = *(offset_bottom + 1);
@@ -848,6 +850,7 @@ void hashmap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sg
             dest_by_source[next_offset] = dest_by_source[i];
             wgt_by_source[next_offset] = wgt_by_source[i];
             next_offset++;
+            //an instance of atomic counting that we should monitor for scaling issues
             (*gc_nedges)++;
         }
     }
@@ -1147,7 +1150,11 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     sgp_vid_t* dest_by_source;
     sgp_wgt_t* wgt_by_source;
 
-    sgp_eid_t gc_count[256];
+#ifdef __cplusplus
+    atom_eid_t gc_nedges(0);
+#else
+    atom_eid_t gc_nedges = 0;
+#endif
 
     sgp_vid_t * edges_per_source = (sgp_vid_t *) malloc(nc * sizeof(sgp_vid_t));
     SGPAR_ASSERT(edges_per_source != NULL);
@@ -1157,7 +1164,6 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 {
     sgp_vid_t total_threads = omp_get_num_threads();
     sgp_vid_t t_id = omp_get_thread_num();
-    gc_count[t_id] = 0;
 
 #pragma omp for
     for (sgp_vid_t i = 0; i < nc; i++) {
@@ -1249,23 +1255,17 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
         sgp_vid_t size = source_bucket_offset[u + 1] - source_bucket_offset[u];
         //heapsort
         if ((coarsening_alg & 6) == 2 && size < 10) {
-            heap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, gc_count + t_id);
+            heap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, &gc_nedges);
         }
         //hashmap sort
         else {
-            hashmap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, gc_count + t_id);
+            hashmap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, &gc_nedges);
         }
     }
 
 #pragma omp single
 {
     time_ptrs[5] += (sgp_timer() - start_dedupe);
-
-    sgp_eid_t gc_nedges = 0;
-
-    for (int i = 0; i < total_threads; i++) {
-        gc_nedges += gc_count[i];
-    }
 
     gc_nedges = gc_nedges / 2;
 
@@ -2398,47 +2398,36 @@ SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
     if (local_search_alg == 0) 
         return 0;
 
-    sgp_improve_partition(part, 2, edgecut, perc_imbalance_allowed, evec, g);
-
-    return EXIT_SUCCESS;
-}    
-
-SGPAR_API int sgp_improve_partition(sgp_vid_t *part, sgp_vid_t num_partitions, 
-                                    sgp_eid_t *edgecut, int perc_imbalance_allowed, 
-                                    sgp_real_t *evec,
-                                    sgp_graph_t g) {
-
-    int64_t n_left = curr_split - n / 3;
+    int64_t n_left = curr_split-n/3;
     if (n_left < 0) {
         n_left = 0;
     }
-    int64_t n_right = curr_split + n / 3;
-    if (n_right > ((int64_t)n)) {
+    int64_t n_right = curr_split+n/3;
+    if (n_right > ((int64_t) n)) {
         n_right = n;
     }
     int num_swaps = 0;
     int64_t ec_change = 0;
-    int max_swaps = n / 3;
+    int max_swaps = n/3;
     while (num_swaps < max_swaps) {
         int64_t ec_dec_max = 0;
         sgp_vid_t move_right_vert = SGP_INFTY;
-        for (long i = n_left; i < curr_split; i++) {
+        for (long i=n_left; i<curr_split; i++) {
             sgp_vid_t part_i = part[i];
-
+            
             int64_t ec_dec_i = 0;
-            for (sgp_eid_t j = g.source_offsets[i];
-                j < g.source_offsets[i + 1]; j++) {
+            for (sgp_eid_t j=g.source_offsets[i]; 
+                           j<g.source_offsets[i+1]; j++) {
                 sgp_vid_t v = g.destination_indices[j];
                 if (part[v] != part_i) {
                     ec_dec_i++;
-                }
-                else {
+                } else {
                     ec_dec_i--;
                 }
             }
             if (ec_dec_i > ec_dec_max) {
                 ec_dec_max = ec_dec_i;
-                move_right_vert = i;
+                move_right_vert = i; 
             }
         }
         if (move_right_vert == SGP_INFTY) {
@@ -2449,8 +2438,7 @@ SGPAR_API int sgp_improve_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
         //                ec_dec_max, (uint64_t) move_right_vert);
         if (part[move_right_vert] == 0) {
             part[move_right_vert] = 1;
-        }
-        else {
+        } else {
             part[move_right_vert] = 0;
         }
         ec_change += ec_dec_max;
@@ -2458,30 +2446,28 @@ SGPAR_API int sgp_improve_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
 
         ec_dec_max = 0;
         sgp_vid_t move_left_vert = SGP_INFTY;
-        for (long i = curr_split; i < n_right; i++) {
+        for (long i=curr_split; i<n_right; i++) {
             sgp_vid_t part_i = part[i];
             int64_t ec_dec_i = 0;
-            for (sgp_eid_t j = g.source_offsets[i];
-                j < g.source_offsets[i + 1]; j++) {
+            for (sgp_eid_t j=g.source_offsets[i]; 
+                           j<g.source_offsets[i+1]; j++) {
                 sgp_vid_t v = g.destination_indices[j];
                 if (part[v] != part_i) {
                     ec_dec_i++;
-                }
-                else {
+                } else {
                     ec_dec_i--;
                 }
             }
             if (ec_dec_i > ec_dec_max) {
                 ec_dec_max = ec_dec_i;
-                move_left_vert = i;
+                move_left_vert = i; 
             }
         }
         if (move_left_vert == SGP_INFTY) {
             /* Roll back prev swap and exit */
             if (part[move_right_vert] == 0) {
                 part[move_right_vert] = 1;
-            }
-            else {
+            } else {
                 part[move_right_vert] = 0;
             }
             ec_change -= ec_dec_max_prev;
@@ -2492,21 +2478,20 @@ SGPAR_API int sgp_improve_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
         //                ec_dec_max, (uint64_t) move_left_vert);
         if (part[move_left_vert] == 0) {
             part[move_left_vert] = 1;
-        }
-        else {
+        } else {
             part[move_left_vert] = 0;
         }
         ec_change += ec_dec_max;
 
         num_swaps++;
     }
-    printf("Total change: %ld, swaps %d, new edgecut %ld\n",
-        ec_change, num_swaps, edgecut_min / 2 - ec_change);
+    printf("Total change: %ld, swaps %d, new edgecut %ld\n", 
+                    ec_change, num_swaps, edgecut_min/2-ec_change);
 
     edgecut_curr = 0;
-    for (sgp_vid_t i = 0; i < n; i++) {
+    for (sgp_vid_t i=0; i<n; i++) {
         sgp_vid_t part_i = part[i];
-        for (sgp_eid_t j = g.source_offsets[i]; j < g.source_offsets[i + 1]; j++) {
+        for (sgp_eid_t j=g.source_offsets[i]; j<g.source_offsets[i+1]; j++) {
             sgp_vid_t v = g.destination_indices[j];
             if (part[v] != part_i) {
                 edgecut_curr++;
@@ -2515,24 +2500,24 @@ SGPAR_API int sgp_improve_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
     }
     // fprintf(stderr, "computed %ld, est %ld\n", edgecut_curr/2,
     //                    edgecut_min/2-ec_change);
-    assert(edgecut_curr / 2 == (edgecut_min / 2 - ec_change));
-    *edgecut = edgecut_curr / 2;
+    assert(edgecut_curr/2 == (edgecut_min/2-ec_change));
+    *edgecut = edgecut_curr/2;
 
 #if 0
     sgp_real_t bin_width = 0.005;
-    int64_t num_bins = ((int64_t)(2.0 / bin_width) + 1);
-    int64_t* bin_counts = (int64_t*)malloc(num_bins * sizeof(int64_t));
-    for (int64_t i = 0; i < num_bins; i++) {
-        bin_counts[i] = 0;
+    int64_t num_bins = ((int64_t) (2.0/bin_width) + 1);
+    int64_t *bin_counts = (int64_t *) malloc(num_bins * sizeof(int64_t));
+    for (int64_t i=0; i<num_bins; i++) {
+        bin_counts[i] = 0; 
     }
-    for (int64_t i = 0; i < ((int64_t)n); i++) {
-        int64_t bin_num = ((int64_t)floor((1 + evec[i]) / bin_width));
+    for (int64_t i=0; i<((int64_t)n); i++) {
+        int64_t bin_num = ((int64_t) floor((1+evec[i])/bin_width));
         bin_counts[bin_num]++;
     }
 
     int64_t cumulative_bin_perc = 0;
-    for (int64_t i = 0; i < num_bins; i++) {
-        int64_t bin_perc = (100 * bin_counts[i]) / n;
+    for (int64_t i=0; i<num_bins; i++) {
+        int64_t bin_perc = (100*bin_counts[i])/n;
         if (bin_perc > 0) {
             cumulative_bin_perc += bin_perc;
             printf("bin %ld, perc %ld\n", i, bin_perc);
@@ -2542,6 +2527,14 @@ SGPAR_API int sgp_improve_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
 
     free(bin_counts);
 #endif
+
+    return EXIT_SUCCESS;
+}    
+
+SGPAR_API int sgp_improve_partition(sgp_vid_t *part, sgp_vid_t num_partitions, 
+                                    sgp_eid_t *edgecut, int perc_imbalance_allowed, 
+                                    sgp_real_t *evec,
+                                    sgp_graph_t g) {
 
     return EXIT_SUCCESS;
 }    
