@@ -133,7 +133,7 @@ def main():
         stem = Path(filepath).stem
         #will fill in the third argument later
         logFile = "{}/{}_{}_Sampling_Data.txt".format(logDir, stem,"{}")
-        t = Thread(processGraph, args=(filepath, metricDir, logFile))
+        t = Thread(target=processGraph, args=(filepath, metricDir, logFile))
         t.start()
         threads.append(t)
 
