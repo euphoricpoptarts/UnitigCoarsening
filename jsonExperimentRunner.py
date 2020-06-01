@@ -80,8 +80,8 @@ def runExperiment(executable, filepath, metricDir, logFile, t_count):
     metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
     call = [executable, filepath, metricsPath, "base_config.txt"]
     call_str = " ".join(call)
-    print("running {}".format(call_str), flush=True)
     with rateLimit:
+        print("running {}".format(call_str), flush=True)
         completed = subprocess.run(call, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=myenv)
 
     if(completed.returncode != 0):
