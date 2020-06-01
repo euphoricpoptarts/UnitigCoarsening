@@ -1,17 +1,21 @@
 import sys
 import os
+import subprocess
 from glob import glob
 from parse import parse
 from statistics import mean, stdev, median
 import secrets
 import json
 from pathlib import Path
-from threading import Thread
+from threading import Thread, BoundedSemaphore
 from itertools import zip_longest
 
-parCall = "./sgpar_hg_exp {} {} {} > /dev/null"
-serialCall = "./sgpar_hg_serial {} {} {} > /dev/null"
-set_threads = "export OMP_NUM_THREADS={}"
+parCall = "./sgpar_exp"
+serialCall = "./sgpar_serial"
+bigParCall = "./sgpar_hg_exp"
+bigSerialCall = "./sgpar_hg_serial"
+
+rateLimit = BoundedSemaphore(value = 4)
 
 def printStat(fieldTitle, statList, outfile):
     min_s = min(statList)
@@ -68,51 +72,32 @@ def analyzeMetrics(metricsPath, logFile):
             printStat("Coarse level {} refine iterations".format(levelIdx), [l['refine-iterations'] for l in level], output)
             printStat("Coarse level {} unrefined edge cuts".format(levelIdx), [l['unrefined-edge-cut'] for l in level], output)
 
+def runExperiment(executable, filepath, metricDir, logFile, t_count):
+
+    myenv = os.environ.copy()
+    myenv['OMP_NUM_THREADS'] = str(t_count)
+
+    metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
+    call = [executable, filepath, metricsPath, "base_config.txt"]
+    call_str = " ".join(call)
+    print("running {}".format(call_str), flush=True)
+    with rateLimit:
+        completed = subprocess.run(call, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=myenv)
+
+    if(completed.returncode != 0):
+        print("error code: {}".format(completed.returncode))
+        print("error produced by:")
+        print(call_str, flush=True)
+    else:
+        analyzeMetrics(metricsPath, logFile)
+
 def processGraph(filepath, metricDir, logFileTemplate):
     
-    #set omp thread count
-    os.system(set_threads.format(8))
+    logFile = logFileTemplate.format("parHEC")
+    runExperiment(parCall, filepath, metricDir, logFile, 8)
 
-    #parallel HEC
-    metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
-    print("running parallel HEC sgpar on {}, data logged in {}".format(filepath, metricsPath), flush=True)
-    call = parCall.format(filepath, metricsPath, "base_config.txt")
-    err = os.system(call)
-    if(err != 0):
-        print("error code: {}".format(err))
-        print("error produced by:")
-        print(call, flush=True)
-    else:
-        logFile = logFileTemplate.format("parHEC")
-        analyzeMetrics(metricsPath, logFile)
-
-    """
-    #serial HEC
-    metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
-    print("running serial HEC sgpar on {}, data logged in {}".format(filepath, metricsPath), flush=True)
-    call = serialCall.format(filepath, metricsPath, "base_config.txt")
-    err = os.system(call)
-    if(err != 0):
-        print("error code: {}".format(err))
-        print("error produced by:")
-        print(call, flush=True)
-    else:
-        logFile = logFileTemplate.format("serialHEC")
-        analyzeMetrics(metricsPath, logFile)
-
-    #serial matching
-    metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
-    print("running serial match sgpar on {}, data logged in {}".format(filepath, metricsPath), flush=True)
-    call = serialCall.format(filepath, metricsPath, "matching_config.txt")
-    err = os.system(call)
-    if(err != 0):
-        print("error code: {}".format(err))
-        print("error produced by:")
-        print(call, flush=True)
-    else:
-        logFile = logFileTemplate.format("serialMatch")
-        analyzeMetrics(metricsPath, logFile)
-    """
+    #logFile = logFileTemplate.format("serialHEC")
+    #runExperiment(serialCall, filepath, metricDir, logFile, t_count)
 
     print("end {} processing".format(filepath), flush=True)
 
@@ -142,13 +127,18 @@ def main():
     logDir = sys.argv[3]
     globMatch = "{}/*.csr".format(dirpath)
 
+    threads = []
     for file in glob(globMatch):
         filepath = file
         stem = Path(filepath).stem
         #will fill in the third argument later
         logFile = "{}/{}_{}_Sampling_Data.txt".format(logDir, stem,"{}")
-        processGraph(filepath, metricDir, logFile)
+        t = Thread(processGraph, args=(filepath, metricDir, logFile))
+        t.start()
+        threads.append(t)
 
+    for t in threads:
+        t.join()
 
 if __name__ == "__main__":
     main()
