@@ -1884,6 +1884,8 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
     sgp_real_t* v = (sgp_real_t*)malloc(n * sizeof(sgp_real_t));
     SGPAR_ASSERT(v != NULL);
 
+    sgp_eid_t* edge_scan = (sgp_eid_t*)malloc((n + 1) * sizeof(sgp_eid_t));
+
     sgp_vid_t work_split[MAX_THREADS + 1];
 
 #pragma omp parallel shared(u)
@@ -1921,12 +1923,19 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
         v[i] = u[i];
     }
 
+#pragma omp for
+    for (sgp_vid_t i = 0; i < n; i++) {
+        edge_scan[i + 1] = g.edges_per_source[i];
+    }
+
+    parallel_prefix_sum(edge_scan, n, t_id, total_threads);
+
     sgp_real_t tol = SGPAR_POWERITER_TOL;
     sgp_real_t dotprod = 0, lastDotprod = 1;
 
-    sgp_eid_t t_width = (g.source_offsets[g.nvertices] / total_threads) + 1;
+    sgp_eid_t t_width = (edge_scan[g.nvertices] / total_threads) + 1;
     sgp_eid_t start_edge = t_width * t_id;
-    work_split[t_id] = binary_search_find_source_index(g.source_offsets, 0, g.nvertices, start_edge);
+    work_split[t_id] = binary_search_find_source_index(edge_scan, 0, g.nvertices, start_edge);
     if (t_id + 1 == total_threads) {
         work_split[total_threads] = g.nvertices;
     }
