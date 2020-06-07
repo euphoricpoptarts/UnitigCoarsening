@@ -1884,7 +1884,13 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
     sgp_real_t* v = (sgp_real_t*)malloc(n * sizeof(sgp_real_t));
     SGPAR_ASSERT(v != NULL);
 
-    sgp_eid_t* edge_scan = (sgp_eid_t*)malloc((n + 1) * sizeof(sgp_eid_t));
+    sgp_eid_t* edge_scan;
+    if (!final) {
+       edge_scan = (sgp_eid_t*)malloc((n + 1) * sizeof(sgp_eid_t));
+    }
+    else {
+        edge_scan = g.source_offsets;
+    }
 
     sgp_vid_t work_split[MAX_THREADS + 1];
 
@@ -1923,9 +1929,11 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
         v[i] = u[i];
     }
 
+    if (!final) {
 #pragma omp for
-    for (sgp_vid_t i = 0; i < n; i++) {
-        edge_scan[i + 1] = g.edges_per_source[i];
+        for (sgp_vid_t i = 0; i < n; i++) {
+            edge_scan[i + 1] = g.edges_per_source[i];
+        }
     }
 
     parallel_prefix_sum(edge_scan, n, t_id, total_threads);
