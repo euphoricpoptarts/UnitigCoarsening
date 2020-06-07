@@ -1924,11 +1924,14 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
     sgp_real_t tol = SGPAR_POWERITER_TOL;
     sgp_real_t dotprod = 0, lastDotprod = 1;
 
-    sgp_eid_t t_width = g.source_offsets[g.nvertices] / total_threads;
+    sgp_eid_t t_width = (g.source_offsets[g.nvertices] / total_threads) + 1;
     sgp_eid_t start_edge = t_width * t_id;
-    work_split[t_id] = binary_search_find_source_index(g.source_offsets, 0, g.source_offsets[g.nvertices], start_edge);
+    work_split[t_id] = binary_search_find_source_index(g.source_offsets, 0, g.nvertices, start_edge);
     if (t_id + 1 == total_threads) {
         work_split[total_threads] = g.nvertices;
+    }
+    if (work_split[t_id] > g.nvertices) {
+        work_split[t_id] = g.nvertices;
     }
 
     while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
