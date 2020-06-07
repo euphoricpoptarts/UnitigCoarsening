@@ -1934,9 +1934,8 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
         for (sgp_vid_t i = 0; i < n; i++) {
             edge_scan[i + 1] = g.edges_per_source[i];
         }
+        parallel_prefix_sum(edge_scan, n, t_id, total_threads);
     }
-
-    parallel_prefix_sum(edge_scan, n, t_id, total_threads);
 
     sgp_real_t tol = SGPAR_POWERITER_TOL;
     sgp_real_t dotprod = 0, lastDotprod = 1;
