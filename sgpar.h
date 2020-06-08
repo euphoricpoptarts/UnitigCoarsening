@@ -13,10 +13,11 @@
 #include <stdint.h>
 #include <math.h>
 #include <time.h>
-#include <sys/time.h>
 
 #ifdef _OPENMP
 #include <omp.h>
+#else
+#include <sys/time.h>
 #endif
 
 #ifdef _KOKKOS
@@ -1846,7 +1847,7 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
     sgp_real_t *vec1 = (sgp_real_t *) malloc(n*sizeof(sgp_real_t));
     SGPAR_ASSERT(vec1 != NULL);
 
-    sgp_wgt_t *weighted_degree;
+    sgp_wgt_t *weighted_degree = NULL;
     
     if(normLap && final){
         weighted_degree = (sgp_wgt_t *) malloc(n*sizeof(sgp_wgt_t));
@@ -1856,7 +1857,7 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
         }
     }
 
-    sgp_wgt_t gb;
+    sgp_wgt_t gb = 2.0;
     if(!normLap){
         if(!final){
             gb = 2*g.weighted_degree[0];
@@ -1928,7 +1929,8 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
 #pragma omp for
         for (sgp_vid_t i=0; i<n; i++) {
             // sgp_real_t v_i = g.weighted_degree[i]*u[i];
-            sgp_real_t weighted_degree_inv, v_i;
+            sgp_real_t weighted_degree_inv = 1.0;
+            sgp_real_t v_i;
             if (normLap) {
                 if (final) {
                     weighted_degree_inv = 1.0 / weighted_degree[i];
@@ -2122,7 +2124,7 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int fina
     sgp_real_t* vec1 = (sgp_real_t*)malloc(n * sizeof(sgp_real_t));
     SGPAR_ASSERT(vec1 != NULL);
 
-    sgp_wgt_t* weighted_degree;
+    sgp_wgt_t* weighted_degree = NULL;
 
     if (normLap && final) {
         weighted_degree = (sgp_wgt_t*)malloc(n * sizeof(sgp_wgt_t));
@@ -2132,7 +2134,7 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int fina
         }
     }
 
-    sgp_wgt_t gb;
+    sgp_wgt_t gb = 2.0;
     if (!normLap) {
         if (!final) {
             gb = 2 * g.weighted_degree[0];
@@ -2198,7 +2200,8 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int fina
             // v = Lu
             for (sgp_vid_t i = 0; i < n; i++) {
                 // sgp_real_t v_i = g.weighted_degree[i]*u[i];
-                sgp_real_t weighted_degree_inv, v_i;
+                sgp_real_t weighted_degree_inv = 1.0;
+                sgp_real_t v_i;
                 if (!normLap) {
                     if (!final) {
                         v_i = (gb - g.weighted_degree[i]) * u[i];
@@ -2546,10 +2549,10 @@ SGPAR_API int sgp_improve_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
 
 SGPAR_API int sgp_load_graph(sgp_graph_t *g, char *csr_filename);
 SGPAR_API int sgp_free_graph(sgp_graph_t *g);
-SGPAR_API int sgp_load_partition(sgp_vid_t *part, int size, char *part_filename);
+SGPAR_API int sgp_load_partition(sgp_vid_t *part, sgp_vid_t size, char *part_filename);
 SGPAR_API int sgp_use_partition(sgp_vid_t* part, const sgp_graph_t g, sgp_graph_t* g1, sgp_graph_t* g2);
 SGPAR_API int sgp_load_config(const char* config_f, config_t * config);
-SGPAR_API int compute_partition_edit_distance(const sgp_vid_t* part1, const sgp_vid_t* part2, int size, unsigned int *diff);
+SGPAR_API int compute_partition_edit_distance(const sgp_vid_t* part1, const sgp_vid_t* part2, sgp_vid_t size, sgp_vid_t *diff);
 SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                   sgp_eid_t *edge_cut,
                                   config_t *config,
@@ -2635,15 +2638,19 @@ SGPAR_API int sgp_free_graph(sgp_graph_t *g) {
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int sgp_load_partition(sgp_vid_t *part, int size, char *part_filename){
+SGPAR_API int sgp_load_partition(sgp_vid_t *part, sgp_vid_t size, char *part_filename){
     FILE *infp = fopen(part_filename, "r");
     if (infp == NULL) {
         printf("Error: Could not open partition file %s. Exiting ...\n", part_filename);
         return EXIT_FAILURE;
     }
 
-    for(int i = 0; i < size; i++){
+    for(sgp_vid_t i = 0; i < size; i++){
+#if SGPAR_HUGEGRAPHS
+        if(fscanf(infp, "%li", part + i) == 0){
+#else
         if(fscanf(infp, "%i", part + i) == 0){
+#endif
             return EXIT_FAILURE;
         }
     }
@@ -2653,11 +2660,11 @@ SGPAR_API int sgp_load_partition(sgp_vid_t *part, int size, char *part_filename)
 }
 
 //partitions assumed to same vertex labellings
-SGPAR_API int compute_partition_edit_distance(const sgp_vid_t* part1, const sgp_vid_t* part2, int size, unsigned int *diff){
+SGPAR_API int compute_partition_edit_distance(const sgp_vid_t* part1, const sgp_vid_t* part2, sgp_vid_t size, sgp_vid_t *diff){
 
-    int d = 0; //difference if partition labelling is same
-    int d2 = 0; //difference if partition labelling is swapped
-    for(int i = 0; i < size; i++){
+    sgp_vid_t d = 0; //difference if partition labelling is same
+    sgp_vid_t d2 = 0; //difference if partition labelling is swapped
+    for(sgp_vid_t i = 0; i < size; i++){
         if(part1[i] != part2[i]){
             d++;
         } else {
