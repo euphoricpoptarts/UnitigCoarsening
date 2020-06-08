@@ -142,8 +142,6 @@ typedef sgp_eid_t atom_eid_t;
 
 static sgp_real_t SGPAR_POWERITER_TOL = 1e-10;
 static sgp_real_t MAX_COARSEN_RATIO = 0.9;
-//increase this if using more than 256 threads
-const int MAX_THREADS = 256;
 
 //100 trillion
 #define SGPAR_POWERITER_ITER 100000000000000
@@ -1149,7 +1147,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     sgp_vid_t* dest_by_source;
     sgp_wgt_t* wgt_by_source;
 
-    sgp_eid_t gc_count[MAX_THREADS];
+    sgp_eid_t gc_count[256];
 
     sgp_vid_t * edges_per_source = (sgp_vid_t *) malloc(nc * sizeof(sgp_vid_t));
     SGPAR_ASSERT(edges_per_source != NULL);
@@ -1883,13 +1881,8 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
 
     sgp_real_t* v = (sgp_real_t*)malloc(n * sizeof(sgp_real_t));
     SGPAR_ASSERT(v != NULL);
-
-    sgp_vid_t work_split[MAX_THREADS + 1];
-
 #pragma omp parallel shared(u)
 {
-    int total_threads = omp_get_num_threads();
-    int t_id = omp_get_thread_num();
 
     uint64_t niter = 0;
 #pragma omp for
@@ -1923,14 +1916,6 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
 
     sgp_real_t tol = SGPAR_POWERITER_TOL;
     sgp_real_t dotprod = 0, lastDotprod = 1;
-
-    sgp_eid_t t_width = g.source_offsets[g.nvertices] / total_threads;
-    sgp_eid_t start_edge = t_width * t_id;
-    work_split[t_id] = binary_search_find_source_index(g.source_offsets, 0, g.source_offsets[g.nvertices], start_edge);
-    if (t_id + 1 == total_threads) {
-        work_split[total_threads] = g.nvertices;
-    }
-
     while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
 
         // u = v
@@ -1940,7 +1925,8 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
         }
 
         // sparse matrix multiplication
-        for (sgp_vid_t i=work_split[t_id]; i < work_split[t_id + 1]; i++) {
+#pragma omp for
+        for (sgp_vid_t i=0; i<n; i++) {
             // sgp_real_t v_i = g.weighted_degree[i]*u[i];
             sgp_real_t weighted_degree_inv, v_i;
             if (normLap) {
@@ -1985,7 +1971,6 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
             }
             v[i] = v_i;
         }
-#pragma omp barrier
 
         if(!normLap){
             sgp_vec_orthogonalize_omp(v, vec1, n);
