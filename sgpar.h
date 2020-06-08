@@ -827,6 +827,7 @@ void heap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sgp_w
     *edges_per_source = offset - *offset_bottom;
 }
 
+#ifdef __cplusplus
 void hashmap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sgp_wgt_t* wgt_by_source, sgp_vid_t* edges_per_source, sgp_eid_t* gc_nedges) {
 
     sgp_eid_t bottom = *offset_bottom;
@@ -855,6 +856,7 @@ void hashmap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sg
 
     *edges_per_source = next_offset - *offset_bottom;
 }
+#endif
 
 #ifdef _KOKKOS
 SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
@@ -1248,6 +1250,8 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     for (sgp_vid_t u = 0; u < nc; u++) {
 
         sgp_vid_t size = source_bucket_offset[u + 1] - source_bucket_offset[u];
+
+#ifdef __cplusplus
         //heapsort
         if ((coarsening_alg & 6) == 2 && size < 10) {
             heap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, gc_count + t_id);
@@ -1256,6 +1260,9 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
         else {
             hashmap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, gc_count + t_id);
         }
+#else
+        heap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, gc_count + t_id);
+#endif
     }
 
 #pragma omp single
