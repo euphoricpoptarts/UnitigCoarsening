@@ -14,7 +14,7 @@ include $(KOKKOS_PATH)/Makefile.kokkos
 SRC = $(wildcard *par.c)
 OBJ = $(SRC:.c=.o)
 
-all: standard coarse_ec experiments single_thread_refine
+all: standard coarse_ec experiments serial
 
 standard: mtx2csr mtx2csr_hg sgpar sgpar_lg sgpar_hg sgpar_c sgpar_kokkos
 
