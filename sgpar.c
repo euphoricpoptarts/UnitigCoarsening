@@ -56,7 +56,7 @@ int main(int argc, char **argv) {
 #endif
                                         &rng) );
 
-        unsigned int part_diff = 0;
+        sgp_vid_t part_diff = 0;
         if (compare_part) {
             CHECK_SGPAR(compute_partition_edit_distance(part, best_part, g.nvertices, &part_diff));
         }

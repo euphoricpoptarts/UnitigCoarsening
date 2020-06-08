@@ -2588,9 +2588,9 @@ SGPAR_API int sgp_load_graph(sgp_graph_t *g, char *csr_filename) {
     }
     long n, m;
     long unused_vals[4];
-    fread(&n, sizeof(long), 1, infp);
-    fread(&m, sizeof(long), 1, infp);
-    fread(unused_vals, sizeof(long), 4, infp);
+    SGPAR_ASSERT(fread(&n, sizeof(long), 1, infp) != 0);
+    SGPAR_ASSERT(fread(&m, sizeof(long), 1, infp) != 0);
+    SGPAR_ASSERT(fread(unused_vals, sizeof(long), 4, infp) != 0);
     g->nvertices = n;
     g->nedges = m/2;
     g->source_offsets = (sgp_eid_t *) malloc((g->nvertices+1)*sizeof(sgp_eid_t));
@@ -2926,7 +2926,6 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
 
 SGPAR_API int sgp_use_partition(sgp_vid_t* part, const sgp_graph_t g, sgp_graph_t* g1, sgp_graph_t* g2) {
     sgp_vid_t n = g.nvertices;
-    sgp_eid_t e = g.nedges;
 
     sgp_vid_t* mapping = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
     sgp_vid_t g1_count = 0;
