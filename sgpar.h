@@ -148,8 +148,8 @@ static sgp_real_t MAX_COARSEN_RATIO = 0.9;
 #define SGPAR_POWERITER_ITER 100000000000000
 
 typedef struct {
-    int64_t   nvertices;
-    int64_t   nedges;
+    sgp_vid_t   nvertices;
+    sgp_eid_t   nedges;
     sgp_eid_t *source_offsets;
     sgp_vid_t *edges_per_source;
     sgp_vid_t *destination_indices;

@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
     part = (sgp_vid_t *) malloc(g.nvertices * sizeof(sgp_vid_t));
     SGPAR_ASSERT(part != NULL);
 
-    sgp_vid_t* best_part;
+    sgp_vid_t* best_part = NULL;
     int compare_part = 0;
     if(argc > 4){
         best_part = (sgp_vid_t*)malloc(g.nvertices * sizeof(sgp_vid_t));
