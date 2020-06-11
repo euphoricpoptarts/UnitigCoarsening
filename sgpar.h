@@ -973,7 +973,7 @@ Kokkos::initialize();
 
     time_ptrs[5] = sgp_timer() - start_dedupe;
 
-    sgp_eid_t* source_offsets = (sgp_eid_t*) malloc(nc + 1, sizeof(sgp_eid_t));
+    sgp_eid_t* source_offsets = (sgp_eid_t*) malloc((nc + 1) * sizeof(sgp_eid_t));
     SGPAR_ASSERT(source_offsets != NULL);
     source_offsets[0] = 0;
 
@@ -1594,8 +1594,8 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int fina
 
 Kokkos::initialize();
 {
-    Kokkos::View<sgp_vid_t> adj("adjacencies", g.source_offsets[);
-    Kokkos::View<sgp_vid_t> 
+//    Kokkos::View<sgp_vid_t> adj("adjacencies", g.source_offsets[);
+//    Kokkos::View<sgp_vid_t> 
 
     sgp_real_t *vec1 = (sgp_real_t *) malloc(n*sizeof(sgp_real_t));
     SGPAR_ASSERT(vec1 != NULL);
