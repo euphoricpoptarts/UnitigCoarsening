@@ -877,7 +877,7 @@ Kokkos::initialize();
 
     sgp_vid_t* mapped_edges = (sgp_vid_t*)malloc(g.source_offsets[n] * sizeof(sgp_vid_t));
 
-    sgp_eid_t* source_bucket_offset = (sgp_eid_t*) malloc(nc + 1, sizeof(sgp_eid_t));
+    sgp_eid_t* source_bucket_offset = (sgp_eid_t*) malloc((nc + 1) * sizeof(sgp_eid_t));
     SGPAR_ASSERT(source_bucket_offset != NULL);
     source_bucket_offset[0] = 0;
 
@@ -989,15 +989,15 @@ Kokkos::initialize();
         }
     });
     
-    sgp_vid_t dest_idx = (sgp_vid_t*) malloc(source_offsets[nc] * sizeof(sgp_vid_t));
+    sgp_vid_t * dest_idx = (sgp_vid_t*) malloc(source_offsets[nc] * sizeof(sgp_vid_t));
     SGPAR_ASSERT(dest_idx != NULL);
-    sgp_wgt_t wgts = (sgp_wgt_t*) malloc(source_offsets[nc] * sizeof(sgp_wgt_t));
+    sgp_wgt_t * wgts = (sgp_wgt_t*) malloc(source_offsets[nc] * sizeof(sgp_wgt_t));
     SGPAR_ASSERT(wgts != NULL);
 
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t u) {
-        sgp_eid_t end_offset = source_bucket_offsets[u] + g.edges_per_source[u];
+        sgp_eid_t end_offset = source_bucket_offset[u] + g.edges_per_source[u];
         sgp_vid_t dest_offset = source_offsets[u];
-        for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
+        for (sgp_eid_t j = source_bucket_offset[u]; j < end_offset; j++) {
             dest_idx[dest_offset] = dest_by_source[j];
             wgts[dest_offset] = wgt_by_source[j];
             dest_offset++;
@@ -1005,7 +1005,7 @@ Kokkos::initialize();
     });
     free(dest_by_source);
     free(wgt_by_source);
-    free(source_bucket_offsets);
+    free(source_bucket_offset);
 
     gc_nedges = gc_nedges / 2;
 
