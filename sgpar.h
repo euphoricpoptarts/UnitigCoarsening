@@ -1603,9 +1603,9 @@ Kokkos::initialize();
     using entries_type = typename graph_type::entries_type;
     using values_type = typename matrix_type::values_type;
 
-    Kokkos::View<sgp_vid_t> adj("adjacencies", g.source_offsets[n]);
-    Kokkos::View<sgp_vid_t> adj_wgt("weights", g.source_offsets[n]);
-    Kokkos::View<sgp_eid_t> row_map("rows", n);
+    Kokkos::View<sgp_vid_t*> adj("adjacencies", g.source_offsets[n]);
+    Kokkos::View<sgp_wgt_t*> adj_wgt("weights", g.source_offsets[n]);
+    Kokkos::View<sgp_eid_t*> row_map("rows", n);
 
     Kokkos::parallel_for(g.source_offsets[n], KOKKOS_LAMBDA(sgp_vid_t i) {
         adj(i) = g.destination_indices[i];
