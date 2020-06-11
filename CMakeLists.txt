@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.13)
 project(sgpar)
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 #change the first parameter to wherever your kokkos and kokkos-kernels are located
 add_subdirectory(../kokkos bin_kokkos/)
