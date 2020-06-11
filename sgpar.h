@@ -23,6 +23,7 @@
 #ifdef _KOKKOS
 #include <Kokkos_Core.hpp>
 #include <Kokkos_Atomic.hpp>
+#include "KokkosSparse_CrsMatrix.hpp"
 #endif
 
 #ifdef __cplusplus
@@ -876,7 +877,7 @@ Kokkos::initialize();
 
     sgp_vid_t* mapped_edges = (sgp_vid_t*)malloc(g.source_offsets[n] * sizeof(sgp_vid_t));
 
-    sgp_eid_t* source_bucket_offset = (sgp_eid_t*)calloc(nc + 1, sizeof(sgp_eid_t));
+    sgp_eid_t* source_bucket_offset = (sgp_eid_t*) malloc(nc + 1, sizeof(sgp_eid_t));
     SGPAR_ASSERT(source_bucket_offset != NULL);
     source_bucket_offset[0] = 0;
 
@@ -965,41 +966,53 @@ Kokkos::initialize();
     double start_dedupe = sgp_timer();
 
         //sort by dest and deduplicate
-    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
-
-        sgp_eid_t next_offset = source_bucket_offset[u];
-
-        std::unordered_map<sgp_vid_t, sgp_eid_t> map;
-        for (sgp_eid_t i = source_bucket_offset[u]; i < source_bucket_offset[u + 1]; i++) {
-
-            sgp_vid_t v = dest_by_source[i];
-
-            if (map.count(v) > 0) {
-                sgp_eid_t idx = map.at(v);
-
-                wgt_by_source[idx] += wgt_by_source[i];
-            }
-            else {
-                map.insert({ v, next_offset });
-                dest_by_source[next_offset] = dest_by_source[i];
-                wgt_by_source[next_offset] = wgt_by_source[i];
-                next_offset++;
-                //an instance of atomic counting that we should monitor for scaling issues
-                Kokkos::atomic_increment(gcnp);
-            }
-        }
-
-        edges_per_source[u] = next_offset - source_bucket_offset[u];
-    });
+    Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const sgp_vid_t u, sgp_eid_t& thread_sum) {
+        hashmap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, &thread_sum);
+        thread_sum += edges_per_source[u];
+    }, gc_nedges);
 
     time_ptrs[5] = sgp_timer() - start_dedupe;
+
+    sgp_eid_t* source_offsets = (sgp_eid_t*) malloc(nc + 1, sizeof(sgp_eid_t));
+    SGPAR_ASSERT(source_offsets != NULL);
+    source_offsets[0] = 0;
+
+    Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
+        sgp_eid_t& update, const bool final) {
+        // Load old value in case we update it before accumulating
+        const sgp_eid_t val_i = edges_per_source[i];
+        // For inclusive scan,
+        // change the update value before updating array.
+        update += val_i;
+        if (final) {
+            source_offsets[i + 1] = update; // only update array on final pass
+        }
+    });
+    
+    sgp_vid_t dest_idx = (sgp_vid_t*) malloc(source_offsets[nc] * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(dest_idx != NULL);
+    sgp_wgt_t wgts = (sgp_wgt_t*) malloc(source_offsets[nc] * sizeof(sgp_wgt_t));
+    SGPAR_ASSERT(wgts != NULL);
+
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t u) {
+        sgp_eid_t end_offset = source_bucket_offsets[u] + g.edges_per_source[u];
+        sgp_vid_t dest_offset = source_offsets[u];
+        for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
+            dest_idx[dest_offset] = dest_by_source[j];
+            wgts[dest_offset] = wgt_by_source[j];
+            dest_offset++;
+        }
+    });
+    free(dest_by_source);
+    free(wgt_by_source);
+    free(source_bucket_offsets);
 
     gc_nedges = gc_nedges / 2;
 
     gc->nedges = gc_nedges;
-    gc->destination_indices = dest_by_source;
-    gc->source_offsets = source_bucket_offset;
-    gc->eweights = wgt_by_source;
+    gc->destination_indices = dest_idx;
+    gc->source_offsets = source_offsets;
+    gc->eweights = wgts;
     gc->edges_per_source = edges_per_source;
 
     gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
@@ -1581,6 +1594,9 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int fina
 
 Kokkos::initialize();
 {
+    Kokkos::View<sgp_vid_t> adj("adjacencies", g.source_offsets[);
+    Kokkos::View<sgp_vid_t> 
+
     sgp_real_t *vec1 = (sgp_real_t *) malloc(n*sizeof(sgp_real_t));
     SGPAR_ASSERT(vec1 != NULL);
     for (sgp_vid_t i=0; i<n; i++) {
