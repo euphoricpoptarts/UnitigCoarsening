@@ -1618,7 +1618,7 @@ Kokkos::initialize();
     });
 
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
-        row_map[i] = g.source_offsets[i];
+        row_map(i) = g.source_offsets[i];
     });
 
     graph_type graph(adj, row_map);
@@ -1689,7 +1689,7 @@ Kokkos::initialize();
     while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
 
         //copying u everytime isn't efficient but I'm just tryna make this work for now
-        Kokkos::View<sgp_eid_t> u_view("u", n);
+        Kokkos::View<sgp_eid_t*> u_view("u", n);
 
         // u = v
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
