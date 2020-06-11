@@ -23,7 +23,14 @@
 #ifdef _KOKKOS
 #include <Kokkos_Core.hpp>
 #include <Kokkos_Atomic.hpp>
+#include "KokkosKernels_default_types.hpp"
 #include "KokkosSparse_CrsMatrix.hpp"
+#include "KokkosSparse_spmv.hpp"
+
+using Scalar = default_scalar;
+using Ordinal = default_lno_t;
+using Offset = default_size_type;
+using Layout = default_layout;
 #endif
 
 #ifdef __cplusplus
@@ -1594,8 +1601,34 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, int normLap, int fina
 
 Kokkos::initialize();
 {
-//    Kokkos::View<sgp_vid_t> adj("adjacencies", g.source_offsets[);
-//    Kokkos::View<sgp_vid_t> 
+    using device_type = typename Kokkos::Device<Kokkos::DefaultExecutionSpace,
+                        typename Kokkos::DefaultExecutionSpace::memory_space>;
+    using matrix_type = typename KokkosSparse::CrsMatrix<sgp_vid_t, sgp_eid_t, device_type, void, sgp_eid_t>;
+    using graph_type = typename matrix_type::staticcrsgraph_type;
+    using row_map_type = typename graph_type::row_map_type;
+    using entries_type = typename graph_type::entries_type;
+    using values_type = typename matrix_type::values_type;
+
+    Kokkos::View<sgp_vid_t> adj("adjacencies", g.source_offsets[n]);
+    Kokkos::View<sgp_vid_t> adj_wgt("weights", g.source_offsets[n]);
+    Kokkos::View<sgp_eid_t> row_map("rows", n);
+
+    Kokkos::parallel_for(g.source_offsets[n], KOKKOS_LAMBDA(sgp_vid_t i) {
+        adj[i] = g.destination_indices[i];
+        if (final) {
+            adj_wgt[i] = 1;
+        }
+        else {
+            adj_wgt[i] = g.eweights[i];
+        }
+    });
+
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        row_map[i] = g.source_offsets[i];
+    });
+
+    graph_type graph(adj, row_map);
+    matrix_type mtx("sparse matrix", n, adj_wgt, graph);
 
     sgp_real_t *vec1 = (sgp_real_t *) malloc(n*sizeof(sgp_real_t));
     SGPAR_ASSERT(vec1 != NULL);
@@ -1613,7 +1646,7 @@ Kokkos::initialize();
                 }
             }
         } else {
-            sgp_wgt_t gb = 2*(g.source_offsets[1]-g.source_offsets[0]);
+            gb = 2*(g.source_offsets[1]-g.source_offsets[0]);
             for (sgp_vid_t i=1; i<n; i++) {
                 if (gb < 2*(g.source_offsets[i+1]-g.source_offsets[i])) {
                     gb = 2*(g.source_offsets[i+1]-g.source_offsets[i]);
@@ -1661,10 +1694,16 @@ Kokkos::initialize();
     sgp_real_t dotprod = 0, lastDotprod = 1;
     while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
 
+        //copying u everytime isn't efficient but I'm just tryna make this work for now
+        Kokkos::View<sgp_eid_t> u_view("u", n);
+
         // u = v
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
             u[i] = v[i];
+            u_view[i] = v[i];
         });
+
+        KokkosSparse::spmv("N", 1.0, mtx, u_view, 0.0, u_view);
 
         // v = Lu
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
@@ -1681,26 +1720,11 @@ Kokkos::initialize();
                 weighted_degree_inv = 1.0/g.weighted_degree[i];
                 v_i = 0.5*u[i];
             }
-            sgp_real_t matvec_i = 0;
-
-            sgp_eid_t end_offset = g.source_offsets[i + 1];
-            if (!final) {
-                end_offset = g.source_offsets[i] + g.edges_per_source[i];
-            }
-
-            for (sgp_eid_t j=g.source_offsets[i]; 
-                           j<end_offset; j++) {
-                if(!final){
-                    matvec_i += u[g.destination_indices[j]]*g.eweights[j];
-                } else {
-                    matvec_i += u[g.destination_indices[j]];
-                }
-            }
             // v_i -= matvec_i;
             if(!normLap){
-                v_i += matvec_i;
+                v_i += u_view[i];
             } else {
-                v_i += 0.5*matvec_i*weighted_degree_inv;
+                v_i += 0.5*u_view[i]*weighted_degree_inv;
             }
             v[i] = v_i;
         });
