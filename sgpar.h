@@ -23,14 +23,8 @@
 #ifdef _KOKKOS
 #include <Kokkos_Core.hpp>
 #include <Kokkos_Atomic.hpp>
-#include "KokkosKernels_default_types.hpp"
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "KokkosSparse_spmv.hpp"
-
-using Scalar = default_scalar;
-using Ordinal = default_lno_t;
-using Offset = default_size_type;
-using Layout = default_layout;
 #endif
 
 #ifdef __cplusplus
