@@ -994,7 +994,7 @@ Kokkos::initialize();
     sgp_wgt_t * wgts = (sgp_wgt_t*) malloc(source_offsets[nc] * sizeof(sgp_wgt_t));
     SGPAR_ASSERT(wgts != NULL);
 
-    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t u) {
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
         sgp_eid_t end_offset = source_bucket_offset[u] + g.edges_per_source[u];
         sgp_vid_t dest_offset = source_offsets[u];
         for (sgp_eid_t j = source_bucket_offset[u]; j < end_offset; j++) {
