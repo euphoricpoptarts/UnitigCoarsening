@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.13)
-project(sgpar)
+project(sgpar CXX)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 add_subdirectory(../kokkos bin_kokkos/)
 add_subdirectory(../kokkos-kernels bin_kernels/)
 
+set_source_files_properties(sgpar.c PROPERTIES LANGUAGE CXX )
 add_executable(sgpar sgpar.c)
 target_compile_options(sgpar PRIVATE -D_KOKKOS)
 target_link_libraries(sgpar Kokkos::kokkoskernels)
-target_include_directories(sgpar PUBLIC "${PROJECT_BINARY_DIR}" "${PROJECT_SOURCE_DIR}/../kokkos-kernels")
