@@ -1608,12 +1608,12 @@ Kokkos::initialize();
     Kokkos::View<sgp_eid_t> row_map("rows", n);
 
     Kokkos::parallel_for(g.source_offsets[n], KOKKOS_LAMBDA(sgp_vid_t i) {
-        adj[i] = g.destination_indices[i];
+        adj(i) = g.destination_indices[i];
         if (final) {
-            adj_wgt[i] = 1;
+            adj_wgt(i) = 1;
         }
         else {
-            adj_wgt[i] = g.eweights[i];
+            adj_wgt(i) = g.eweights[i];
         }
     });
 
@@ -1694,7 +1694,7 @@ Kokkos::initialize();
         // u = v
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
             u[i] = v[i];
-            u_view[i] = v[i];
+            u_view(i) = v[i];
         });
 
         KokkosSparse::spmv("N", 1.0, mtx, u_view, 0.0, u_view);
@@ -1716,9 +1716,9 @@ Kokkos::initialize();
             }
             // v_i -= matvec_i;
             if(!normLap){
-                v_i += u_view[i];
+                v_i += u_view(i);
             } else {
-                v_i += 0.5*u_view[i]*weighted_degree_inv;
+                v_i += 0.5*u_view(i)*weighted_degree_inv;
             }
             v[i] = v_i;
         });
