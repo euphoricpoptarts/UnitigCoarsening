@@ -880,7 +880,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
 
     Kokkos::parallel_for(g.source_offsets[n], KOKKOS_LAMBDA(sgp_vid_t i) {
         adj_fine(i) = g.destination_indices[i];
-        if (final) {
+        if (coarsening_level == 1) {
             adj_wgt_fine(i) = 1;
         }
         else {
@@ -897,7 +897,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
     Kokkos::View<sgp_vid_t*> interp_adj_wgt("weights", n);
     Kokkos::View<sgp_vid_t*> interp_row_map("rows", n + 1);
 
-    sgp_vid_t* fine_per_course = (sgp_vid_t*)malloc(nc * sizeof(sgp_vid_t));
+    sgp_vid_t* fine_per_coarse = (sgp_vid_t*)malloc(nc * sizeof(sgp_vid_t));
     //transpose interpolation matrix
     Kokkos::View<sgp_vid_t*> interp_adj_transpose("adj_transpose", n);
     Kokkos::View<sgp_vid_t*> interp_adj_wgt_transpose("weights_transpose", n);
@@ -952,7 +952,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
 
     // Select an spgemm algorithm, limited by configuration at compile-time and set via the handle
     // Some options: {SPGEMM_KK_MEMORY, SPGEMM_KK_SPEED, SPGEMM_KK_MEMSPEED, /*SPGEMM_CUSPARSE, */ SPGEMM_MKL}
-    KokkosSparse::SPGEMMAlgorithm spgemm_algorithm = SPGEMM_KK_SPEED;
+    KokkosSparse::SPGEMMAlgorithm spgemm_algorithm = KokkosSparse::SPGEMM_KK_SPEED;
     kh.create_spgemm_handle(spgemm_algorithm);
 
     //partial-result matrix
