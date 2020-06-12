@@ -1689,15 +1689,17 @@ Kokkos::initialize();
     while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
 
         //copying u everytime isn't efficient but I'm just tryna make this work for now
-        Kokkos::View<sgp_eid_t*> u_view("u", n);
+        Kokkos::View<sgp_real_t*> u_view("u", n);
+        Kokkos::View<sgp_real_t*> v_view("v", n);
 
         // u = v
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
             u[i] = v[i];
             u_view(i) = v[i];
+            v_view(i) = 0.0;
         });
 
-        KokkosSparse::spmv("N", 1.0, mtx, u_view, 0.0, u_view);
+        KokkosSparse::spmv("N", 1.0, mtx, u_view, 0.0, v_view);
 
         // v = Lu
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
@@ -1716,9 +1718,9 @@ Kokkos::initialize();
             }
             // v_i -= matvec_i;
             if(!normLap){
-                v_i += u_view(i);
+                v_i += v_view(i);
             } else {
-                v_i += 0.5*u_view(i)*weighted_degree_inv;
+                v_i += 0.5*v_view(i)*weighted_degree_inv;
             }
             v[i] = v_i;
         });
