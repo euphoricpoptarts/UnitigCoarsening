@@ -25,6 +25,7 @@
 #include <Kokkos_Atomic.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "KokkosSparse_spmv.hpp"
+#include "KokkosSparse_spgemm.hpp"
 #endif
 
 #ifdef __cplusplus
@@ -482,7 +483,7 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
             sgp_vid_t hn_i = g.destination_indices[g.source_offsets[i]];
             sgp_wgt_t max_ewt = g.eweights[g.source_offsets[i]];
 
-            sgp_eid_t end_offset = g.source_offsets[i] + g.edges_per_source[i];
+            sgp_eid_t end_offset = g.source_offsets[i + 1];// +g.edges_per_source[i];
 
             for (sgp_eid_t j=g.source_offsets[i]+1; 
                            j< end_offset; j++) {
@@ -861,6 +862,173 @@ void hashmap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sg
 #endif
 
 #ifdef _KOKKOS
+
+SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
+    sgp_vid_t* vcmap,
+    const sgp_graph_t g,
+    const int coarsening_level,
+    double* time_ptrs) {
+
+    sgp_vid_t n = g.nvertices;
+    sgp_vid_t nc = gc->nvertices;
+
+    Kokkos::initialize();
+    //fine graph adjacency matrix
+    Kokkos::View<sgp_vid_t*> adj_fine("adjacencies", g.source_offsets[n]);
+    Kokkos::View<sgp_wgt_t*> adj_wgt_fine("weights", g.source_offsets[n]);
+    Kokkos::View<sgp_eid_t*> row_map_fine("rows", n + 1);
+
+    Kokkos::parallel_for(g.source_offsets[n], KOKKOS_LAMBDA(sgp_vid_t i) {
+        adj_fine(i) = g.destination_indices[i];
+        if (final) {
+            adj_wgt_fine(i) = 1;
+        }
+        else {
+            adj_wgt_fine(i) = g.eweights[i];
+        }
+    });
+
+    Kokkos::parallel_for(n + 1, KOKKOS_LAMBDA(sgp_vid_t i) {
+        row_map_fine(i) = g.source_offsets[i];
+    });
+
+    //interpolation matrix
+    Kokkos::View<sgp_vid_t*> interp_adj("adjacencies", n);
+    Kokkos::View<sgp_vid_t*> interp_adj_wgt("weights", n);
+    Kokkos::View<sgp_vid_t*> interp_row_map("rows", n + 1);
+
+    sgp_vid_t* fine_per_course = (sgp_vid_t*)malloc(nc * sizeof(sgp_vid_t));
+    //transpose interpolation matrix
+    Kokkos::View<sgp_vid_t*> interp_adj_transpose("adj_transpose", n);
+    Kokkos::View<sgp_vid_t*> interp_adj_wgt_transpose("weights_transpose", n);
+    Kokkos::View<sgp_vid_t*> interp_row_map_transpose("rows", nc + 1);
+
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        fine_per_coarse(i) = 0;
+    });
+
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        interp_adj(i) = vcmap[i];
+        interp_adj_wgt(i) = 1;
+        Kokkos::atomic_increment(fine_per_coarse + vcmap[i]);
+    });
+
+    Kokkos::parallel_for(n + 1, KOKKOS_LAMBDA(sgp_vid_t i) {
+        interp_row_map(i) = i;
+    });
+
+    interp_row_map_transpose(0) = 0;
+    Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
+        sgp_vid_t & update, const bool final) {
+        // Load old value in case we update it before accumulating
+        const sgp_vid_t val_i = fine_per_coarse[i];
+        // For inclusive scan,
+        // change the update value before updating array.
+        update += val_i;
+        if (final) {
+            interp_row_map_transpose(i + 1) = update; // only update array on final pass
+        }
+    });
+
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        fine_per_coarse(i) = 0;
+    });
+
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        sgp_eid_t offset = interp_row_map_transpose[vcmap[i]] + Kokkos::atomic_fetch_add(fine_per_coarse + vcmap[i], 1);
+        interp_adj_transpose(offset) = i;
+        interp_adj_wgt(offset) = 1;
+    });
+    free(fine_per_coarse);
+
+    typedef Kokkos::OpenMP Device;
+    typedef KokkosKernels::Experimental::KokkosKernelsHandle
+        <sgp_vid_t, sgp_vid_t, sgp_vid_t,
+        typename Device::execution_space, typename Device::memory_space, typename Device::memory_space > KernelHandle;
+
+    KernelHandle kh;
+    kh.set_team_work_size(16);
+    kh.set_dynamic_scheduling(true);
+
+    // Select an spgemm algorithm, limited by configuration at compile-time and set via the handle
+    // Some options: {SPGEMM_KK_MEMORY, SPGEMM_KK_SPEED, SPGEMM_KK_MEMSPEED, /*SPGEMM_CUSPARSE, */ SPGEMM_MKL}
+    KokkosSparse::SPGEMMAlgorithm spgemm_algorithm = SPGEMM_KK_SPEED;
+    kh.create_spgemm_handle(spgemm_algorithm);
+
+    //partial-result matrix
+    Kokkos::View<sgp_vid_t*> entries_p1("adjacencies", n);
+    Kokkos::View<sgp_vid_t*> values_p1("weights", n);
+    Kokkos::View<sgp_vid_t*> row_map_p1("rows", nc + 1);
+
+    KokkosSparse::Experimental::spgemm_numeric(
+        &kh,
+        nc,
+        n,
+        n,
+        interp_row_map_transpose,
+        interp_adj_transpose,
+        interp_adj_wgt_transpose,
+        false,
+        row_map_fine,
+        adj_fine,
+        adj_wgt_fine,
+        false,
+        row_map_p1,
+        entries_p1,
+        values_p1
+        );
+
+    //coarse-graph adjacency matrix
+    Kokkos::View<sgp_vid_t*> adj_coarse("adjacencies", n);
+    Kokkos::View<sgp_vid_t*> wgt_coarse("weights", n);
+    Kokkos::View<sgp_vid_t*> row_map_coarse("rows", n + 1);
+
+    KokkosSparse::Experimental::spgemm_numeric(
+        &kh,
+        nc,
+        n,
+        nc,
+        row_map_p1,
+        entries_p1,
+        values_p1,
+        false,
+        interp_row_map,
+        interp_adj,
+        interp_adj_wgt,
+        false,
+        row_map_coarse,
+        adj_coarse,
+        wgt_coarse
+        );
+
+    gc->source_offsets = (sgp_eid_t*)malloc((nc + 1) * sizeof(sgp_eid_t));
+    gc->dest_indices = (sgp_vid_t*)malloc(row_map_coarse(nc) * sizeof(sgp_vid_t));
+    gc->eweights = (sgp_vid_t*)malloc(row_map_coarse(nc) * sizeof(sgp_vid_t));
+    Kokkos::parallel_for(row_map_coarse(nc), KOKKOS_LAMBDA(sgp_vid_t i) {
+        gc->dest_indices[i] = adj_coarse(i);
+        gc->eweights[i] = wgt_coarse(i);
+    });
+
+    Kokkos::parallel_for(nc + 1, KOKKOS_LAMBDA(sgp_vid_t i) {
+        gc->source_offsets[i] = row_map_coarse(i);
+    });
+
+    gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
+    assert(gc->weighted_degree != NULL);
+
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
+        sgp_wgt_t degree_wt_i = 0;
+        sgp_eid_t end_offset = gc->source_offsets[i] + gc->edges_per_source[i];
+        for (sgp_eid_t j = gc->source_offsets[i]; j < end_offset; j++) {
+            degree_wt_i += gc->eweights[j];
+        }
+        gc->weighted_degree[i] = degree_wt_i;
+    });
+    Kokkos::finalize();
+
+    return EXIT_SUCCESS;
+}
+
 SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     sgp_vid_t* vcmap,
     const sgp_graph_t g,
@@ -1462,7 +1630,7 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
 
     double start_build = sgp_timer();
 #ifdef _KOKKOS
-    sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, time_ptrs);
+    sgp_build_coarse_graph_spgemm(gc, vcmap, g, coarsening_level, time_ptrs);
 #else
     sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, time_ptrs, coarsening_alg);
 #endif
@@ -1605,7 +1773,7 @@ Kokkos::initialize();
 
     Kokkos::View<sgp_vid_t*> adj("adjacencies", g.source_offsets[n]);
     Kokkos::View<sgp_wgt_t*> adj_wgt("weights", g.source_offsets[n]);
-    Kokkos::View<sgp_eid_t*> row_map("rows", n);
+    Kokkos::View<sgp_eid_t*> row_map("rows", n + 1);
 
     Kokkos::parallel_for(g.source_offsets[n], KOKKOS_LAMBDA(sgp_vid_t i) {
         adj(i) = g.destination_indices[i];
@@ -1617,7 +1785,7 @@ Kokkos::initialize();
         }
     });
 
-    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+    Kokkos::parallel_for(n + 1, KOKKOS_LAMBDA(sgp_vid_t i) {
         row_map(i) = g.source_offsets[i];
     });
 
