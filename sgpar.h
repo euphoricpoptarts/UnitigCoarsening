@@ -904,7 +904,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
     Kokkos::View<sgp_vid_t*> interp_row_map_transpose("rows", nc + 1);
 
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
-        fine_per_coarse(i) = 0;
+        fine_per_coarse[i] = 0;
     });
 
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
@@ -931,7 +931,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
     });
 
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
-        fine_per_coarse(i) = 0;
+        fine_per_coarse[i] = 0;
     });
 
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
@@ -1002,10 +1002,10 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         );
 
     gc->source_offsets = (sgp_eid_t*)malloc((nc + 1) * sizeof(sgp_eid_t));
-    gc->dest_indices = (sgp_vid_t*)malloc(row_map_coarse(nc) * sizeof(sgp_vid_t));
+    gc->destination_indices = (sgp_vid_t*)malloc(row_map_coarse(nc) * sizeof(sgp_vid_t));
     gc->eweights = (sgp_vid_t*)malloc(row_map_coarse(nc) * sizeof(sgp_vid_t));
     Kokkos::parallel_for(row_map_coarse(nc), KOKKOS_LAMBDA(sgp_vid_t i) {
-        gc->dest_indices[i] = adj_coarse(i);
+        gc->destination_indices[i] = adj_coarse(i);
         gc->eweights[i] = wgt_coarse(i);
     });
 
