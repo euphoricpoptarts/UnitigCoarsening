@@ -1046,7 +1046,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
 
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
         sgp_wgt_t degree_wt_i = 0;
-        sgp_eid_t end_offset = gc->source_offsets[i] + gc->edges_per_source[i];
+        sgp_eid_t end_offset = gc->source_offsets[i + 1];
         for (sgp_eid_t j = gc->source_offsets[i]; j < end_offset; j++) {
             degree_wt_i += gc->eweights[j];
         }
