@@ -955,10 +955,24 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
     KokkosSparse::SPGEMMAlgorithm spgemm_algorithm = KokkosSparse::SPGEMM_KK_SPEED;
     kh.create_spgemm_handle(spgemm_algorithm);
 
-    //partial-result matrix
-    Kokkos::View<sgp_vid_t*> entries_p1("adjacencies", n);
-    Kokkos::View<sgp_vid_t*> values_p1("weights", n);
     Kokkos::View<sgp_vid_t*> row_map_p1("rows", nc + 1);
+    KokkosSparse::Experimental::spgemm_symbolic(
+        &kh,
+        nc,
+        n,
+        n,
+        interp_row_map_transpose,
+        interp_adj_transpose,
+        false,
+        row_map_fine,
+        adj_fine,
+        false,
+        row_map_p1
+        );
+
+    //partial-result matrix
+    Kokkos::View<sgp_vid_t*> entries_p1("adjacencies", kh.get_spgemm_handle()->get_c_nnz());
+    Kokkos::View<sgp_vid_t*> values_p1("weights", kh.get_spgemm_handle()->get_c_nnz());
 
     KokkosSparse::Experimental::spgemm_numeric(
         &kh,
@@ -978,10 +992,24 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         values_p1
         );
 
+
+    Kokkos::View<sgp_vid_t*> row_map_coarse("rows", nc + 1);
+    KokkosSparse::Experimental::spgemm_symbolic(
+        &kh,
+        nc,
+        n,
+        nc,
+        row_map_p1,
+        entries_p1,
+        false,
+        interp_row_map,
+        interp_adj,
+        false,
+        row_map_coarse
+        );
     //coarse-graph adjacency matrix
-    Kokkos::View<sgp_vid_t*> adj_coarse("adjacencies", n);
-    Kokkos::View<sgp_vid_t*> wgt_coarse("weights", n);
-    Kokkos::View<sgp_vid_t*> row_map_coarse("rows", n + 1);
+    Kokkos::View<sgp_vid_t*> adj_coarse("adjacencies", kh.get_spgemm_handle()->get_c_nnz());
+    Kokkos::View<sgp_vid_t*> wgt_coarse("weights", kh.get_spgemm_handle()->get_c_nnz());
 
     KokkosSparse::Experimental::spgemm_numeric(
         &kh,
