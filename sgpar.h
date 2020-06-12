@@ -904,7 +904,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         Kokkos::View<sgp_vid_t*> interp_adj_wgt_transpose("interp_weights_transpose", n);
         Kokkos::View<sgp_vid_t*> interp_row_map_transpose("interp_rows_transpose", nc + 1);
 
-        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
             fine_per_coarse[i] = 0;
         });
 
@@ -931,7 +931,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
             }
         });
 
-        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
             fine_per_coarse[i] = 0;
         });
 
