@@ -948,7 +948,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         graph_type interp_graph(interp_adj, interp_row_map);
         matrix_type interp_mtx("interpolation crs", n, interp_adj_wgt, interp_graph);
 
-        matrix_type interp_transpose = KokkosKernels::Impl::tranpose_matrix(interp_mtx);
+        matrix_type interp_transpose = KokkosKernels::Impl::transpose_matrix(interp_mtx);
 
         typedef KokkosKernels::Experimental::KokkosKernelsHandle
             <sgp_vid_t, sgp_vid_t, sgp_vid_t,
