@@ -26,7 +26,7 @@
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "KokkosSparse_spmv.hpp"
 #include "KokkosSparse_spgemm.hpp"
-#include "KokkosSparse_SparseUtils.hpp"
+#include "KokkosKernels_SparseUtils.hpp"
 #endif
 
 #ifdef __cplusplus
@@ -947,7 +947,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         graph_type interp_graph(interp_adj, interp_row_map);
         matrix_type interp_mtx("interpolation crs", n, interp_adj_wgt, interp_graph);
 
-        matrix_type interp_transpose = tranpose_matrix(interp_mtx);
+        matrix_type interp_transpose = KokkosKernels::Impl::tranpose_matrix(interp_mtx);
 
         typedef Kokkos::OpenMP Device;
         typedef KokkosKernels::Experimental::KokkosKernelsHandle
