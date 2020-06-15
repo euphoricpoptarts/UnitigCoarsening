@@ -942,14 +942,14 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
             interp_adj_wgt_transpose(offset) = 1;
         });*/
 
-        using matrix_type = typename KokkosSparse::CrsMatrix<sgp_vid_t, sgp_vid_t, device_type, void, sgp_vid_t>;
+        typedef Kokkos::OpenMP Device;
+        using matrix_type = typename KokkosSparse::CrsMatrix<sgp_vid_t, sgp_vid_t, Device, void, sgp_vid_t>;
         using graph_type = typename matrix_type::staticcrsgraph_type;
         graph_type interp_graph(interp_adj, interp_row_map);
         matrix_type interp_mtx("interpolation crs", n, interp_adj_wgt, interp_graph);
 
         matrix_type interp_transpose = KokkosKernels::Impl::tranpose_matrix(interp_mtx);
 
-        typedef Kokkos::OpenMP Device;
         typedef KokkosKernels::Experimental::KokkosKernelsHandle
             <sgp_vid_t, sgp_vid_t, sgp_vid_t,
             typename Device::execution_space, typename Device::memory_space, typename Device::memory_space > KernelHandle;
