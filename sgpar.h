@@ -26,6 +26,7 @@
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "KokkosSparse_spmv.hpp"
 #include "KokkosSparse_spgemm.hpp"
+#include "KokkosSparse_SparseUtils.hpp"
 #endif
 
 #ifdef __cplusplus
@@ -898,7 +899,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         Kokkos::View<sgp_vid_t*> interp_adj_wgt("interp_weights", n);
         Kokkos::View<sgp_vid_t*> interp_row_map("interp_rows", n + 1);
 
-        sgp_vid_t* fine_per_coarse = (sgp_vid_t*)malloc(nc * sizeof(sgp_vid_t));
+        /*sgp_vid_t* fine_per_coarse = (sgp_vid_t*)malloc(nc * sizeof(sgp_vid_t));
         //transpose interpolation matrix
         Kokkos::View<sgp_vid_t*> interp_adj_transpose("interp_adj_transpose", n);
         Kokkos::View<sgp_vid_t*> interp_adj_wgt_transpose("interp_weights_transpose", n);
@@ -906,19 +907,19 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
 
         Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
             fine_per_coarse[i] = 0;
-        });
+        });*/
 
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
             interp_adj(i) = vcmap[i];
             interp_adj_wgt(i) = 1;
-            Kokkos::atomic_increment(fine_per_coarse + vcmap[i]);
+            //Kokkos::atomic_increment(fine_per_coarse + vcmap[i]);
         });
 
         Kokkos::parallel_for(n + 1, KOKKOS_LAMBDA(sgp_vid_t i) {
             interp_row_map(i) = i;
         });
 
-        interp_row_map_transpose(0) = 0;
+        /*interp_row_map_transpose(0) = 0;
         Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
             sgp_vid_t & update, const bool final) {
             // Load old value in case we update it before accumulating
@@ -939,7 +940,14 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
             sgp_eid_t offset = interp_row_map_transpose[vcmap[i]] + Kokkos::atomic_fetch_add(fine_per_coarse + vcmap[i], 1);
             interp_adj_transpose(offset) = i;
             interp_adj_wgt_transpose(offset) = 1;
-        });
+        });*/
+
+        using matrix_type = typename KokkosSparse::CrsMatrix<sgp_vid_t, sgp_vid_t, device_type, void, sgp_vid_t>;
+        using graph_type = typename matrix_type::staticcrsgraph_type;
+        graph_type interp_graph(interp_adj, interp_row_map);
+        matrix_type interp_mtx("interpolation crs", n, interp_adj_wgt, interp_graph);
+
+        matrix_type interp_transpose = tranpose_matrix(interp_mtx);
 
         typedef Kokkos::OpenMP Device;
         typedef KokkosKernels::Experimental::KokkosKernelsHandle
@@ -961,8 +969,8 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
             nc,
             n,
             n,
-            interp_row_map_transpose,
-            interp_adj_transpose,
+            interp_mtx.graph.row_map,
+            interp_mtx.graph.entries,
             false,
             row_map_fine,
             adj_fine,
@@ -979,9 +987,9 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
             nc,
             n,
             n,
-            interp_row_map_transpose,
-            interp_adj_transpose,
-            interp_adj_wgt_transpose,
+            interp_mtx.graph.row_map,
+            interp_mtx.graph.entries,
+            interp_mtx.values,
             false,
             row_map_fine,
             adj_fine,
@@ -1029,15 +1037,17 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
             wgt_coarse
             );
 
+        sgp_eid_t* nonLoops = (sgp_eid_t*)malloc(nc * sizeof(sgp_eid_t));
+
         //gonna reuse this to count non-self loop edges
         Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
-            fine_per_coarse[i] = 0;
+            nonLoops[i] = 0;
         });
 
         Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
             for (sgp_eid_t j = row_map_coarse(u); j < row_map_coarse(u + 1); j++) {
                 if (adj_coarse(j) != u) {
-                    Kokkos::atomic_increment(fine_per_coarse + u);
+                    Kokkos::atomic_increment(nonLoops + u);
                 }
             }
         });
@@ -1048,7 +1058,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
             sgp_vid_t& update, const bool final) {
             // Load old value in case we update it before accumulating
-            const sgp_vid_t val_i = fine_per_coarse[i];
+            const sgp_vid_t val_i = nonLoops[i];
             // For inclusive scan,
             // change the update value before updating array.
             update += val_i;
@@ -1061,19 +1071,19 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         gc->eweights = (sgp_vid_t*)malloc(row_map_coarse(nc) * sizeof(sgp_vid_t));
         
         Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
-            fine_per_coarse[i] = 0;
+            nonLoops[i] = 0;
         });
 
         Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
             for (sgp_eid_t j = row_map_coarse(u); j < row_map_coarse(u + 1); j++) {
                 if (adj_coarse(j) != u) {
-                    sgp_eid_t offset = gc->source_offsets[u] + Kokkos::atomic_fetch_add(fine_per_coarse + u, 1);
+                    sgp_eid_t offset = gc->source_offsets[u] + Kokkos::atomic_fetch_add(nonLoops + u, 1);
                     gc->destination_indices[offset] = adj_coarse(j);
                     gc->eweights[offset] = wgt_coarse(j);
                 }
             }
         });
-        free(fine_per_coarse);
+        free(nonLoops);
 
         gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
         assert(gc->weighted_degree != NULL);
