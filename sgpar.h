@@ -940,7 +940,6 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
             interp_adj_transpose(offset) = i;
             interp_adj_wgt(offset) = 1;
         });
-        free(fine_per_coarse);
 
         typedef Kokkos::OpenMP Device;
         typedef KokkosKernels::Experimental::KokkosKernelsHandle
@@ -1030,17 +1029,51 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
             wgt_coarse
             );
 
-        gc->source_offsets = (sgp_eid_t*)malloc((nc + 1) * sizeof(sgp_eid_t));
-        gc->destination_indices = (sgp_vid_t*)malloc(row_map_coarse(nc) * sizeof(sgp_vid_t));
-        gc->eweights = (sgp_vid_t*)malloc(row_map_coarse(nc) * sizeof(sgp_vid_t));
-        Kokkos::parallel_for(row_map_coarse(nc), KOKKOS_LAMBDA(sgp_vid_t i) {
-            gc->destination_indices[i] = adj_coarse(i);
-            gc->eweights[i] = wgt_coarse(i);
+        //gonna reuse this to count non-self loop edges
+        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
+            fine_per_coarse[i] = 0;
         });
 
-        Kokkos::parallel_for(nc + 1, KOKKOS_LAMBDA(sgp_vid_t i) {
-            gc->source_offsets[i] = row_map_coarse(i);
+        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
+            for (sgp_eid_t j = row_map_coarse(u); j < row_map_coarse(u + 1); j++) {
+                if (adj_coarse(j) != u) {
+                    Kokkos::atomic_increment(fine_per_coarse + u);
+                }
+            }
         });
+
+        gc->source_offsets = (sgp_eid_t*)malloc((nc + 1) * sizeof(sgp_eid_t));
+        gc->source_offsets[0] = 0;
+
+        Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
+            sgp_vid_t& update, const bool final) {
+            // Load old value in case we update it before accumulating
+            const sgp_vid_t val_i = fine_per_coarse[i];
+            // For inclusive scan,
+            // change the update value before updating array.
+            update += val_i;
+            if (final) {
+                gc->source_offsets[i + 1] = update; // only update array on final pass
+            }
+        });
+
+        gc->destination_indices = (sgp_vid_t*)malloc(row_map_coarse(nc) * sizeof(sgp_vid_t));
+        gc->eweights = (sgp_vid_t*)malloc(row_map_coarse(nc) * sizeof(sgp_vid_t));
+        
+        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
+            fine_per_coarse[i] = 0;
+        });
+
+        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
+            for (sgp_eid_t j = row_map_coarse(u); j < row_map_coarse(u + 1); j++) {
+                if (adj_coarse(j) != u) {
+                    sgp_eid_t offset = gc->source_offsets[u] + Kokkos::atomic_fetch_add(fine_per_coarse + u, 1);
+                    gc->destination_indices[offset] = adj_coarse(j);
+                    gc->eweights[offset] = wgt_coarse(j);
+                }
+            }
+        });
+        free(fine_per_coarse);
 
         gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
         assert(gc->weighted_degree != NULL);
