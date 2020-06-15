@@ -285,8 +285,95 @@ SGPAR_API int sgp_coarsen_heavy_edge_matching(sgp_vid_t* vcmap,
 	return EXIT_SUCCESS;
 
 }
+#ifdef _KOKKOS
+SGPAR_API int sgp_coarsen_HEC(sgp_vid_t* vcmap,
+    sgp_vid_t* nvertices_coarse_ptr,
+    const sgp_graph_t g,
+    const int coarsening_level,
+    sgp_pcg32_random_t* rng) {
+    Kokkos::initialize();
+    {
 
-#ifdef _OPENMP
+        sgp_vid_t n = g.nvertices;
+
+        sgp_vid_t* vperm = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
+        SGPAR_ASSERT(vperm != NULL);
+
+        sgp_vid_t* hn = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
+        SGPAR_ASSERT(hn != NULL);
+
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(int i) {
+            vcmap[i] = SGP_INFTY;
+            vperm[i] = i;
+            hn[i] = SGP_INFTY;
+        });
+
+
+        for (sgp_vid_t i = n - 1; i > 0; i--) {
+            sgp_vid_t v_i = vperm[i];
+#ifndef SGPAR_HUGEGRAPHS
+            uint32_t j = (sgp_pcg32_random_r(rng)) % (i + 1);
+#else
+            uint64_t j1 = (sgp_pcg32_random_r(rng)) % (i + 1);
+            uint64_t j2 = (sgp_pcg32_random_r(rng)) % (i + 1);
+            uint64_t j = ((j1 << 32) + j2) % (i + 1);
+#endif 
+            sgp_vid_t v_j = vperm[j];
+            vperm[i] = v_j;
+            vperm[j] = v_i;
+        }
+
+        if (coarsening_level == 1) {
+            for (sgp_vid_t i = 0; i < n; i++) {
+                sgp_vid_t adj_size = g.source_offsets[i + 1] - g.source_offsets[i];
+                sgp_vid_t offset = (sgp_pcg32_random_r(rng)) % adj_size;
+                // sgp_vid_t offset = 0;
+                hn[i] = g.destination_indices[g.source_offsets[i] + offset];
+            }
+        }
+        else {
+            Kokkos::parallel_for(n, KOKKOS_LAMBDA(int i) {
+                sgp_vid_t hn_i = g.destination_indices[g.source_offsets[i]];
+                sgp_wgt_t max_ewt = g.eweights[g.source_offsets[i]];
+
+                sgp_eid_t end_offset = g.source_offsets[i + 1];// +g.edges_per_source[i];
+
+                for (sgp_eid_t j = g.source_offsets[i] + 1;
+                    j < end_offset; j++) {
+                    if (max_ewt < g.eweights[j]) {
+                        max_ewt = g.eweights[j];
+                        hn_i = g.destination_indices[j];
+                    }
+
+                }
+                hn[i] = hn_i;
+            });
+        }
+
+        sgp_vid_t nvertices_coarse = 0;
+
+        for (sgp_vid_t i = 0; i < n; i++) {
+            sgp_vid_t u = vperm[i];
+            sgp_vid_t v = hn[u];
+            if (vcmap[u] == SGP_INFTY) {
+                if (vcmap[v] == SGP_INFTY) {
+                    vcmap[v] = nvertices_coarse++;
+                }
+                vcmap[u] = vcmap[v];
+            }
+        }
+
+        free(hn);
+        free(vperm);
+
+        *nvertices_coarse_ptr = nvertices_coarse;
+    }
+    Kokkos::finalize();
+
+
+    return EXIT_SUCCESS;
+}
+#elif defined(_OPENMP)
 SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap, 
                               sgp_vid_t *nvertices_coarse_ptr, 
                               const sgp_graph_t g, 
@@ -430,93 +517,6 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap,
 	free(v_locks);
 
     *nvertices_coarse_ptr = nvertices_coarse;
-    
-    return EXIT_SUCCESS;
-}
-#elif defined(_KOKKOS)
-SGPAR_API int sgp_coarsen_HEC(sgp_vid_t *vcmap, 
-                              sgp_vid_t *nvertices_coarse_ptr, 
-                              const sgp_graph_t g, 
-                              const int coarsening_level,
-                              sgp_pcg32_random_t *rng) {
-    Kokkos::initialize();
-    {
-
-    sgp_vid_t n = g.nvertices;
-
-    sgp_vid_t *vperm = (sgp_vid_t *) malloc(n * sizeof(sgp_vid_t));
-    SGPAR_ASSERT(vperm != NULL);
-
-    sgp_vid_t *hn = (sgp_vid_t *) malloc(n * sizeof(sgp_vid_t));
-    SGPAR_ASSERT(hn != NULL);
-
-    Kokkos::parallel_for( n, KOKKOS_LAMBDA ( int i ) {
-        vcmap[i] = SGP_INFTY;
-        vperm[i] = i;
-        hn[i] = SGP_INFTY;
-    });
-
-
-    for (sgp_vid_t i=n-1; i>0; i--) {
-        sgp_vid_t v_i = vperm[i];
-#ifndef SGPAR_HUGEGRAPHS
-        uint32_t j = (sgp_pcg32_random_r(rng)) % (i+1);
-#else
-        uint64_t j1 = (sgp_pcg32_random_r(rng)) % (i+1);
-        uint64_t j2 = (sgp_pcg32_random_r(rng)) % (i+1);
-        uint64_t j  = ((j1<<32) + j2) % (i+1);
-#endif 
-        sgp_vid_t v_j = vperm[j];
-        vperm[i] = v_j;
-        vperm[j] = v_i;
-    }
-
-    if (coarsening_level == 1) {
-        for (sgp_vid_t i=0; i<n; i++) {
-            sgp_vid_t adj_size = g.source_offsets[i+1]-g.source_offsets[i];
-            sgp_vid_t offset = (sgp_pcg32_random_r(rng)) % adj_size;
-            // sgp_vid_t offset = 0;
-            hn[i] = g.destination_indices[g.source_offsets[i]+offset];
-        }
-    } else {
-        Kokkos::parallel_for( n, KOKKOS_LAMBDA ( int i ) {
-            sgp_vid_t hn_i = g.destination_indices[g.source_offsets[i]];
-            sgp_wgt_t max_ewt = g.eweights[g.source_offsets[i]];
-
-            sgp_eid_t end_offset = g.source_offsets[i + 1];// +g.edges_per_source[i];
-
-            for (sgp_eid_t j=g.source_offsets[i]+1; 
-                           j< end_offset; j++) {
-                if (max_ewt < g.eweights[j]) {
-                    max_ewt = g.eweights[j];
-                    hn_i = g.destination_indices[j];
-                }
-
-            }
-            hn[i] = hn_i;
-        });
-    }
-
-    sgp_vid_t nvertices_coarse = 0;
-   
-    for (sgp_vid_t i=0; i<n; i++) {
-        sgp_vid_t u = vperm[i];
-        sgp_vid_t v = hn[u];
-        if (vcmap[u] == SGP_INFTY) {
-            if (vcmap[v] == SGP_INFTY) {
-                vcmap[v] = nvertices_coarse++;
-            }
-            vcmap[u] = vcmap[v];
-        }
-    } 
-    
-    free(hn);
-    free(vperm);
-
-    *nvertices_coarse_ptr = nvertices_coarse;
-    }
-    Kokkos::finalize();
-
     
     return EXIT_SUCCESS;
 }
@@ -879,7 +879,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         Kokkos::View<sgp_wgt_t*> adj_wgt_fine("weights_fine", g.source_offsets[n]);
         Kokkos::View<sgp_eid_t*> row_map_fine("rows_fine", n + 1);
 
-        Kokkos::parallel_for(g.source_offsets[n], KOKKOS_LAMBDA(sgp_vid_t i) {
+        Kokkos::parallel_for(g.source_offsets[n], KOKKOS_LAMBDA(sgp_eid_t i) {
             adj_fine(i) = g.destination_indices[i];
             if (coarsening_level == 1) {
                 adj_wgt_fine(i) = 1;
@@ -938,7 +938,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
             sgp_eid_t offset = interp_row_map_transpose[vcmap[i]] + Kokkos::atomic_fetch_add(fine_per_coarse + vcmap[i], 1);
             interp_adj_transpose(offset) = i;
-            interp_adj_wgt(offset) = 1;
+            interp_adj_wgt_transpose(offset) = 1;
         });
 
         typedef Kokkos::OpenMP Device;
