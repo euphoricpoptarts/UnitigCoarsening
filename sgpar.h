@@ -1081,7 +1081,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         matrix_type interp_transpose = KokkosKernels::Impl::transpose_matrix(interp_mtx);
 
         typedef KokkosKernels::Experimental::KokkosKernelsHandle
-            <sgp_vid_t, sgp_vid_t, sgp_vid_t,
+            <sgp_eid_t, sgp_eid_t, sgp_wgt_t,
             typename Device::execution_space, typename Device::memory_space, typename Device::memory_space > KernelHandle;
 
         KernelHandle kh;
