@@ -354,6 +354,7 @@ SGPAR_API int sgp_coarsen_ACE(sgp_graph_t* interp,
             }
         }
     }
+    free(vcmap);
 
     *nvertices_coarse_ptr = nvertices_coarse;
 
