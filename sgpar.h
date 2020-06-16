@@ -300,7 +300,7 @@ SGPAR_API int sgp_coarsen_ACE(sgp_graph_t* interp,
         interp->source_offsets[u + 1] = interp->source_offsets[u] + counter;
     }
     interp->destination_indices = (sgp_vid_t*)malloc(interp->source_offsets[n] * sizeof(sgp_vid_t));
-    interp->eweights = (sgp_vid_t*)malloc(interp->source_offsets[n] * sizeof(sgp_vid_t));
+    interp->eweights = (sgp_wgt_t*) malloc(interp->source_offsets[n] * sizeof(sgp_wgt_t));
     //copmute the interpolation weights
     if (coarsening_level == 1) {
         for (sgp_vid_t u = 0; u < n; u++) {
@@ -1060,8 +1060,8 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
 
         //interpolation matrix
         Kokkos::View<sgp_vid_t*> interp_adj("interp_adjacencies", n);
-        Kokkos::View<sgp_vid_t*> interp_adj_wgt("interp_weights", n);
-        Kokkos::View<sgp_vid_t*> interp_row_map("interp_rows", n + 1);
+        Kokkos::View<sgp_wgt_t*> interp_adj_wgt("interp_weights", n);
+        Kokkos::View<sgp_eid_t*> interp_row_map("interp_rows", n + 1);
 
         Kokkos::parallel_for(interpolate_graph->source_offsets[n], KOKKOS_LAMBDA(sgp_vid_t i) {
             interp_adj(i) = interpolate_graph->destination_indices[i];
@@ -1073,7 +1073,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         });
 
         typedef Kokkos::OpenMP Device;
-        using matrix_type = typename KokkosSparse::CrsMatrix<sgp_vid_t, sgp_vid_t, Device, void, sgp_vid_t>;
+        using matrix_type = typename KokkosSparse::CrsMatrix<sgp_vid_t, sgp_wgt_t, Device, void, sgp_vid_t>;
         using graph_type = typename matrix_type::staticcrsgraph_type;
         graph_type interp_graph(interp_adj, interp_row_map);
         matrix_type interp_mtx("interpolation crs", n, interp_adj_wgt, interp_graph);
@@ -1109,8 +1109,8 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
             );
 
         //partial-result matrix
-        Kokkos::View<sgp_vid_t*> entries_p1("adjacencies_partial", kh.get_spgemm_handle()->get_c_nnz());
-        Kokkos::View<sgp_vid_t*> values_p1("weights_partial", kh.get_spgemm_handle()->get_c_nnz());
+        Kokkos::View<sgp_eid_t*> entries_p1("adjacencies_partial", kh.get_spgemm_handle()->get_c_nnz());
+        Kokkos::View<sgp_wgt_t*> values_p1("weights_partial", kh.get_spgemm_handle()->get_c_nnz());
 
         KokkosSparse::Experimental::spgemm_numeric(
             &kh,
@@ -1198,7 +1198,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         });
 
         gc->destination_indices = (sgp_vid_t*)malloc(row_map_coarse(nc) * sizeof(sgp_vid_t));
-        gc->eweights = (sgp_vid_t*)malloc(row_map_coarse(nc) * sizeof(sgp_vid_t));
+        gc->eweights = (sgp_wgt_t*)malloc(row_map_coarse(nc) * sizeof(sgp_wgt_t));
         
         Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
             nonLoops[i] = 0;
@@ -1838,7 +1838,7 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
 
     double start_build = sgp_timer();
 #ifdef _KOKKOS
-    sgp_build_coarse_graph_spgemm(gc, interpolation_graph, g, coarsening_level, time_ptrs);
+    sgp_build_coarse_graph_spgemm(gc, &interpolation_graph, g, coarsening_level, time_ptrs);
 #else
     sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, time_ptrs, coarsening_alg);
 #endif
