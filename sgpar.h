@@ -1059,8 +1059,8 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         });
 
         //interpolation matrix
-        Kokkos::View<sgp_vid_t*> interp_adj("interp_adjacencies", n);
-        Kokkos::View<sgp_wgt_t*> interp_adj_wgt("interp_weights", n);
+        Kokkos::View<sgp_vid_t*> interp_adj("interp_adjacencies", interpolate_graph->source_offsets[n]);
+        Kokkos::View<sgp_wgt_t*> interp_adj_wgt("interp_weights", interpolate_graph->source_offsets[n]);
         Kokkos::View<sgp_eid_t*> interp_row_map("interp_rows", n + 1);
 
         Kokkos::parallel_for(interpolate_graph->source_offsets[n], KOKKOS_LAMBDA(sgp_vid_t i) {
