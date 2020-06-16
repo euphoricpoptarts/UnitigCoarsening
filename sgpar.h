@@ -281,7 +281,7 @@ SGPAR_API int sgp_coarsen_ACE(sgp_graph_t* interp,
     }
     free(vperm);
 
-    interp->source_offsets = (sgp_eid_t*)malloc((n + 1) * sizeof(sgp_eid_t));
+    interp->source_offsets = (sgp_eid_t*) malloc((n + 1) * sizeof(sgp_eid_t));
 
     interp->source_offsets[0] = 0;
     for (sgp_vid_t u = 0; u < n; u++) {
@@ -1842,6 +1842,11 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
 #else
     sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, time_ptrs, coarsening_alg);
 #endif
+    if ((coarsening_alg & 6) == 6) {
+        free(interpolation_graph->source_offsets);
+        free(interpolation_graph->destination_indices);
+        free(interpolation_graph->eweights);
+    }
     time_ptrs[1] += (sgp_timer() - start_build);
 
     return EXIT_SUCCESS;
