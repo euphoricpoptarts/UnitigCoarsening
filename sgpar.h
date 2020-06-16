@@ -1073,7 +1073,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         });
 
         typedef Kokkos::OpenMP Device;
-        using matrix_type = typename KokkosSparse::CrsMatrix<sgp_vid_t, sgp_wgt_t, Device, void, sgp_vid_t>;
+        using matrix_type = typename KokkosSparse::CrsMatrix<sgp_wgt_t, sgp_eid_t, Device, void, sgp_vid_t>;
         using graph_type = typename matrix_type::staticcrsgraph_type;
         graph_type interp_graph(interp_adj, interp_row_map);
         matrix_type interp_mtx("interpolation crs", n, interp_adj_wgt, interp_graph);
