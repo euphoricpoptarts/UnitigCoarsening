@@ -121,8 +121,12 @@ typedef uint32_t sgp_vid_t;
 #define SGP_INFTY UINT32_MAX
 typedef uint32_t sgp_eid_t;
 #endif
-typedef sgp_vid_t sgp_wgt_t;
 typedef double sgp_real_t;
+#ifdef _KOKKOS
+typedef sgp_real_t sgp_wgt_t;
+#else
+typedef sgp_vid_t sgp_wgt_t;
+#endif
 
 #ifndef SGPAR_COARSENING_VTX_CUTOFF
 #define SGPAR_COARSENING_VTX_CUTOFF 50
@@ -195,6 +199,166 @@ SGPAR_API double sgp_timer() {
     gettimeofday(&tp, NULL);
     return (double) (tp.tv_sec + ((1e-6)*tp.tv_usec));
 #endif
+}
+
+SGPAR_API int sgp_coarsen_ACE(sgp_graph_t* interp,
+    sgp_vid_t* nvertices_coarse_ptr,
+    const sgp_graph_t g,
+    const int coarsening_level,
+    sgp_pcg32_random_t* rng) {
+
+    sgp_vid_t n = g.nvertices;
+
+    sgp_vid_t* vperm = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(vperm != NULL);
+
+    sgp_vid_t* vcmap = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
+
+    for (sgp_vid_t i = 0; i < n; i++) {
+        vcmap[i] = SGP_INFTY;
+        vperm[i] = i;
+    }
+
+
+    for (sgp_vid_t i = n - 1; i > 0; i--) {
+        sgp_vid_t v_i = vperm[i];
+#ifndef SGPAR_HUGEGRAPHS
+        uint32_t j = (sgp_pcg32_random_r(rng)) % (i + 1);
+#else
+        uint64_t j1 = (sgp_pcg32_random_r(rng)) % (i + 1);
+        uint64_t j2 = (sgp_pcg32_random_r(rng)) % (i + 1);
+        uint64_t j = ((j1 << 32) + j2) % (i + 1);
+#endif 
+        sgp_vid_t v_j = vperm[j];
+        vperm[i] = v_j;
+        vperm[j] = v_i;
+    }
+
+    sgp_vid_t nvertices_coarse = 0;
+
+    sgp_real_t threshold = 0.3;
+
+    //add some vertices to the representative set
+    if (coarsening_level == 1) {
+        for (sgp_vid_t i = 0; i < n; i++) {
+            sgp_vid_t u = vperm[i];
+
+            sgp_real_t degree_total = 0.0;
+            sgp_real_t degree_representative = 0.0;
+            for (sgp_eid_t j = g.source_offsets[u];
+                j < g.source_offsets[u + 1]; j++) {
+                sgp_vid_t v = g.destination_indices[j];
+                degree_total += 1.0;
+                if (vcmap[v] != SGP_INFTY) {
+                    degree_representative += 1.0;
+                }
+
+            }
+            if (degree_representative / degree_total < threshold) {
+                vcmap[u] = nvertices_coarse++;
+            }
+        }
+    }
+    else {
+        for (sgp_vid_t i = 0; i < n; i++) {
+            sgp_vid_t u = vperm[i];
+
+            sgp_real_t degree_total = 0.0;
+            sgp_real_t degree_representative = 0.0;
+            for (sgp_eid_t j = g.source_offsets[u];
+                j < g.source_offsets[u + 1]; j++) {
+                sgp_vid_t v = g.destination_indices[j];
+                degree_total += g.eweights[j];
+                if (vcmap[v] != SGP_INFTY) {
+                    degree_representative += g.eweights[j];
+                }
+
+            }
+            if (degree_representative / degree_total < threshold) {
+                vcmap[u] = nvertices_coarse++;
+            }
+        }
+    }
+    free(vperm);
+
+    interp->source_offsets = (sgp_eid_t*)malloc((n + 1) * sizeof(sgp_eid_t));
+
+    interp->source_offsets[0] = 0;
+    for (sgp_vid_t u = 0; u < n; u++) {
+        sgp_eid_t counter = 0;
+        if (vcmap[u] != SGP_INFTY) {
+            counter = 1;
+        }
+        else {
+            for (sgp_eid_t j = g.source_offsets[u]; j < g.source_offsets[u + 1]; j++) {
+                sgp_vid_t v = g.destination_indices[j];
+                if (vcmap[v] != SGP_INFTY) {
+                    counter += 1;
+                }
+            }
+        }
+        interp->source_offsets[u + 1] = interp->source_offsets[u] + counter;
+    }
+    interp->destination_indices = (sgp_vid_t*)malloc(interp->source_offsets[n] * sizeof(sgp_vid_t));
+    interp->eweights = (sgp_vid_t*)malloc(interp->source_offsets[n] * sizeof(sgp_vid_t));
+    //copmute the interpolation weights
+    if (coarsening_level == 1) {
+        for (sgp_vid_t u = 0; u < n; u++) {
+            sgp_eid_t offset = interp->source_offsets[u];
+            if (vcmap[u] != SGP_INFTY) {
+                interp->destination_indices[offset] = vcmap[u];
+                interp->eweights[offset] = 1.0;
+            }
+            else {
+                sgp_real_t degree_representative = 0.0;
+                //count sum weights to representative vertices
+                for (sgp_eid_t j = g.source_offsets[u]; j < g.source_offsets[u + 1]; j++) {
+                    sgp_vid_t v = g.destination_indices[j];
+                    if (vcmap[v] != SGP_INFTY) {
+                        degree_representative += 1.0;
+                    }
+                }
+                for (sgp_eid_t j = g.source_offsets[u]; j < g.source_offsets[u + 1]; j++) {
+                    sgp_vid_t v = g.destination_indices[j];
+                    if (vcmap[v] != SGP_INFTY) {
+                        interp->destination_indices[offset] = vcmap[v];
+                        interp->eweights[offset] = 1.0 / degree_representative;
+                    }
+                }
+            }
+        }
+    }
+    else {
+        for (sgp_vid_t u = 0; u < n; u++) {
+            sgp_eid_t offset = interp->source_offsets[u];
+            if (vcmap[u] != SGP_INFTY) {
+                interp->destination_indices[offset] = vcmap[u];
+                interp->eweights[offset] = 1.0;
+            }
+            else {
+                sgp_real_t degree_representative = 0.0;
+                //count sum weights to representative vertices
+                for (sgp_eid_t j = g.source_offsets[u]; j < g.source_offsets[u + 1]; j++) {
+                    sgp_vid_t v = g.destination_indices[j];
+                    if (vcmap[v] != SGP_INFTY) {
+                        degree_representative += g.eweights[j];
+                    }
+                }
+                for (sgp_eid_t j = g.source_offsets[u]; j < g.source_offsets[u + 1]; j++) {
+                    sgp_vid_t v = g.destination_indices[j];
+                    if (vcmap[v] != SGP_INFTY) {
+                        interp->destination_indices[offset] = vcmap[v];
+                        interp->eweights[offset] = g.eweights[j] / degree_representative;
+                    }
+                }
+            }
+        }
+    }
+
+    *nvertices_coarse_ptr = nvertices_coarse;
+
+    return EXIT_SUCCESS;
+
 }
 
 SGPAR_API int sgp_coarsen_heavy_edge_matching(sgp_vid_t* vcmap,
@@ -865,7 +1029,7 @@ void hashmap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sg
 #ifdef _KOKKOS
 
 SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
-    sgp_vid_t* vcmap,
+    sgp_graph_t* interpolate_graph,
     const sgp_graph_t g,
     const int coarsening_level,
     double* time_ptrs) {
@@ -899,48 +1063,14 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         Kokkos::View<sgp_vid_t*> interp_adj_wgt("interp_weights", n);
         Kokkos::View<sgp_vid_t*> interp_row_map("interp_rows", n + 1);
 
-        /*sgp_vid_t* fine_per_coarse = (sgp_vid_t*)malloc(nc * sizeof(sgp_vid_t));
-        //transpose interpolation matrix
-        Kokkos::View<sgp_vid_t*> interp_adj_transpose("interp_adj_transpose", n);
-        Kokkos::View<sgp_vid_t*> interp_adj_wgt_transpose("interp_weights_transpose", n);
-        Kokkos::View<sgp_vid_t*> interp_row_map_transpose("interp_rows_transpose", nc + 1);
-
-        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
-            fine_per_coarse[i] = 0;
-        });*/
-
-        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
-            interp_adj(i) = vcmap[i];
-            interp_adj_wgt(i) = 1;
-            //Kokkos::atomic_increment(fine_per_coarse + vcmap[i]);
+        Kokkos::parallel_for(interpolate_graph->source_offsets[n], KOKKOS_LAMBDA(sgp_vid_t i) {
+            interp_adj(i) = interpolate_graph->destination_indices[i];
+            interp_adj_wgt(i) = interpolate_graph->eweights[i];
         });
 
         Kokkos::parallel_for(n + 1, KOKKOS_LAMBDA(sgp_vid_t i) {
-            interp_row_map(i) = i;
+            interp_row_map(i) = interpolate_graph->source_offsets[i];
         });
-
-        /*interp_row_map_transpose(0) = 0;
-        Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
-            sgp_vid_t & update, const bool final) {
-            // Load old value in case we update it before accumulating
-            const sgp_vid_t val_i = fine_per_coarse[i];
-            // For inclusive scan,
-            // change the update value before updating array.
-            update += val_i;
-            if (final) {
-                interp_row_map_transpose(i + 1) = update; // only update array on final pass
-            }
-        });
-
-        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
-            fine_per_coarse[i] = 0;
-        });
-
-        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
-            sgp_eid_t offset = interp_row_map_transpose[vcmap[i]] + Kokkos::atomic_fetch_add(fine_per_coarse + vcmap[i], 1);
-            interp_adj_transpose(offset) = i;
-            interp_adj_wgt_transpose(offset) = 1;
-        });*/
 
         typedef Kokkos::OpenMP Device;
         using matrix_type = typename KokkosSparse::CrsMatrix<sgp_vid_t, sgp_vid_t, Device, void, sgp_vid_t>;
@@ -1688,8 +1818,13 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
     sgp_pcg32_random_t* rng,
     double* time_ptrs) {
 
+    sgp_graph_t interpolation_graph;
+
     double start_map = sgp_timer();
-    if ((coarsening_alg & 1) == 0) {
+    if ((coarsening_alg & 6) == 6) {
+        sgp_coarsen_ACE(&interpolation_graph, &gc->nvertices, g, coarsening_level, rng);
+    }
+    else if ((coarsening_alg & 1) == 0) {
         sgp_vid_t nvertices_coarse;
         sgp_coarsen_HEC(vcmap, &nvertices_coarse, g, coarsening_level, rng);
         gc->nvertices = nvertices_coarse;
@@ -1703,7 +1838,7 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
 
     double start_build = sgp_timer();
 #ifdef _KOKKOS
-    sgp_build_coarse_graph_spgemm(gc, vcmap, g, coarsening_level, time_ptrs);
+    sgp_build_coarse_graph_spgemm(gc, interpolation_graph, g, coarsening_level, time_ptrs);
 #else
     sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, time_ptrs, coarsening_alg);
 #endif
