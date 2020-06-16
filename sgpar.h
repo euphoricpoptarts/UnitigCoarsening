@@ -1843,9 +1843,9 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
     sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, time_ptrs, coarsening_alg);
 #endif
     if ((coarsening_alg & 6) == 6) {
-        free(interpolation_graph->source_offsets);
-        free(interpolation_graph->destination_indices);
-        free(interpolation_graph->eweights);
+        free(interpolation_graph.source_offsets);
+        free(interpolation_graph.destination_indices);
+        free(interpolation_graph.eweights);
     }
     time_ptrs[1] += (sgp_timer() - start_build);
 
