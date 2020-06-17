@@ -1198,8 +1198,8 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
             }
         });
 
-        gc->destination_indices = (sgp_vid_t*)malloc(row_map_coarse(nc) * sizeof(sgp_vid_t));
-        gc->eweights = (sgp_wgt_t*)malloc(row_map_coarse(nc) * sizeof(sgp_wgt_t));
+        gc->destination_indices = (sgp_vid_t*)malloc(gc->source_offsets[nc] * sizeof(sgp_vid_t));
+        gc->eweights = (sgp_wgt_t*)malloc(gc->source_offsets[nc] * sizeof(sgp_wgt_t));
         
         Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
             nonLoops[i] = 0;
