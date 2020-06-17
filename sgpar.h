@@ -1840,11 +1840,11 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_graph_t* interpolation_
 
     double start_map = sgp_timer();
     if ((coarsening_alg & 6) == 6) {
-        sgp_coarsen_ACE(&interpolation_graph, &gc->nvertices, g, coarsening_level, rng);
+        sgp_coarsen_ACE(interpolation_graph, &gc->nvertices, g, coarsening_level, rng);
     }
     else if ((coarsening_alg & 1) == 0) {
         sgp_vid_t nvertices_coarse;
-        sgp_coarsen_HEC(&interpolation_graph, &nvertices_coarse, g, coarsening_level, rng);
+        sgp_coarsen_HEC(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng);
         gc->nvertices = nvertices_coarse;
     }
     else if ((coarsening_alg & 1) == 1) {
@@ -3272,7 +3272,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         SGPAR_ASSERT(eigenvec[l] != NULL);
 
 #ifdef _KOKKOS
-        interpolate_eigenvec(eigenvec + l + 1, eigenvec + l, interpolate + l, gcl_n, g_all[l + 1].nvertices);
+        interpolate_eigenvec(eigenvec[l + 1], eigenvec[l], interpolate + l, gcl_n, g_all[l + 1].nvertices);
         sgp_free_graph(interpolate + l);
 #else
         //prolong eigenvector from coarser level to finer level
