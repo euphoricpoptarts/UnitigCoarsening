@@ -1187,9 +1187,9 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         gc->source_offsets[0] = 0;
 
         Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
-            sgp_vid_t& update, const bool final) {
+            sgp_eid_t& update, const bool final) {
             // Load old value in case we update it before accumulating
-            const sgp_vid_t val_i = nonLoops[i];
+            const sgp_eid_t val_i = nonLoops[i];
             // For inclusive scan,
             // change the update value before updating array.
             update += val_i;
