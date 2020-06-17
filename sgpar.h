@@ -3277,7 +3277,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         SGPAR_ASSERT(eigenvec[l] != NULL);
 
 #ifdef _KOKKOS
-        interpolate_eigenvec(eigenvec[l + 1], eigenvec[l], interpolate + l, gcl_n, g_all[l + 1].nvertices);
+        interpolate_eigenvec(eigenvec[l + 1], eigenvec[l], interpolate[l], gcl_n, g_all[l + 1].nvertices);
         sgp_free_graph(interpolate + l);
 #else
         //prolong eigenvector from coarser level to finer level
