@@ -323,6 +323,7 @@ SGPAR_API int sgp_coarsen_ACE(sgp_graph_t* interp,
                     if (vcmap[v] != SGP_INFTY) {
                         interp->destination_indices[offset] = vcmap[v];
                         interp->eweights[offset] = 1.0 / degree_representative;
+                        offset++;
                     }
                 }
             }
@@ -349,6 +350,7 @@ SGPAR_API int sgp_coarsen_ACE(sgp_graph_t* interp,
                     if (vcmap[v] != SGP_INFTY) {
                         interp->destination_indices[offset] = vcmap[v];
                         interp->eweights[offset] = g.eweights[j] / degree_representative;
+                        offset++;
                     }
                 }
             }
