@@ -547,7 +547,7 @@ SGPAR_API int sgp_coarsen_HEC(sgp_graph_t* interp,
         interp->eweights = (sgp_wgt_t*)malloc(interp->source_offsets[n] * sizeof(sgp_wgt_t));
         //compute the interpolation weights
         for (sgp_vid_t u = 0; u < n; u++) {
-            interp->destination_indices[u] = vcmap[v];
+            interp->destination_indices[u] = vcmap[u];
             interp->eweights[u] = 1.0;
         }
         free(vcmap);
