@@ -293,7 +293,7 @@ SGPAR_API int sgp_coarsen_ACE(sgp_graph_t* interp,
             for (sgp_eid_t j = g.source_offsets[u]; j < g.source_offsets[u + 1]; j++) {
                 sgp_vid_t v = g.destination_indices[j];
                 if (vcmap[v] != SGP_INFTY) {
-                    counter += 1;
+                    counter++;
                 }
             }
         }
@@ -1079,7 +1079,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
         using matrix_type = typename KokkosSparse::CrsMatrix<sgp_wgt_t, sgp_eid_t, Device, void, sgp_eid_t>;
         using graph_type = typename matrix_type::staticcrsgraph_type;
         graph_type interp_graph(interp_adj, interp_row_map);
-        matrix_type interp_mtx("interpolation crs", n, interp_adj_wgt, interp_graph);
+        matrix_type interp_mtx("interpolation crs", nc, interp_adj_wgt, interp_graph);
 
         matrix_type interp_transpose = KokkosKernels::Impl::transpose_matrix(interp_mtx);
 
