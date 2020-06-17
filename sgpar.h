@@ -2727,6 +2727,11 @@ SGPAR_API int interpolate_eigenvec(sgp_real_t* eigenvec, sgp_real_t* eigenvec_in
         row_map(i) = interpolate.source_offsets[i];
     });
 
+    using device_type = typename Kokkos::Device<Kokkos::DefaultExecutionSpace,
+        typename Kokkos::DefaultExecutionSpace::memory_space>;
+    using matrix_type = typename KokkosSparse::CrsMatrix<sgp_wgt_t, sgp_eid_t, device_type, void, sgp_eid_t>;
+    using graph_type = typename matrix_type::staticcrsgraph_type;
+
     graph_type graph(adj, row_map);
     matrix_type mtx("sparse matrix", n, adj_wgt, graph);
 
