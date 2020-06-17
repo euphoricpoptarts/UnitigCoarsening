@@ -1229,6 +1229,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(sgp_graph_t* gc,
             }
             gc->weighted_degree[i] = degree_wt_i;
         });
+        kh.destroy_spgemm_handle();
     }
     Kokkos::finalize();
 
