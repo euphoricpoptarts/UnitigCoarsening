@@ -1831,14 +1831,12 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 }
 #endif 
 
-SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
+SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_graph_t* interpolation_graph, sgp_vid_t* vcmap,
     const sgp_graph_t g,
     const int coarsening_level,
     const int coarsening_alg,
     sgp_pcg32_random_t* rng,
     double* time_ptrs) {
-
-    sgp_graph_t interpolation_graph;
 
     double start_map = sgp_timer();
     if ((coarsening_alg & 6) == 6) {
@@ -1859,9 +1857,6 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
     double start_build = sgp_timer();
 #ifdef _KOKKOS
     sgp_build_coarse_graph_spgemm(gc, &interpolation_graph, g, coarsening_level, time_ptrs);
-    free(interpolation_graph.source_offsets);
-    free(interpolation_graph.destination_indices);
-    free(interpolation_graph.eweights);
 #else
     sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, time_ptrs, coarsening_alg);
 #endif
@@ -2716,6 +2711,41 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int fina
 }
 #endif
 
+#ifdef _KOKKOS
+SGPAR_API int interpolate_eigenvec(sgp_real_t* eigenvec, sgp_real_t* eigenvec_interpolate, sgp_graph_t interpolate, sgp_vid_t n, sgp_vid_t nc) {
+
+    Kokkos::View<sgp_vid_t*> adj("adjacencies", interpolate.source_offsets[n]);
+    Kokkos::View<sgp_wgt_t*> adj_wgt("weights", interpolate.source_offsets[n]);
+    Kokkos::View<sgp_eid_t*> row_map("rows", n + 1);
+
+    Kokkos::parallel_for(interpolate.source_offsets[n], KOKKOS_LAMBDA(sgp_vid_t i) {
+        adj(i) = interpolate.destination_indices[i];
+        adj_wgt(i) = interpolate.eweights[i];
+    });
+
+    Kokkos::parallel_for(n + 1, KOKKOS_LAMBDA(sgp_vid_t i) {
+        row_map(i) = interpolate.source_offsets[i];
+    });
+
+    graph_type graph(adj, row_map);
+    matrix_type mtx("sparse matrix", n, adj_wgt, graph);
+
+    Kokkos::View<sgp_real_t*> u_view("u", nc);
+    Kokkos::View<sgp_real_t*> v_view("v", n);
+
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
+        u_view(i) = eigenvec[i];
+    });
+
+    KokkosSparse::spmv("N", 1.0, mtx, u_view, 0.0, v_view);
+
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        eigenvec_interpolate[i] = v_view[i];
+    });
+    return EXIT_SUCCESS;
+}
+#endif
+
 SGPAR_API int write_sorted_eigenvec(sgp_vv_pair_t* vu_pair, sgp_vid_t n) {
     FILE* infp = fopen("eigenvec_debug.txt", "w");
     if (infp == NULL) {
@@ -3139,6 +3169,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
 
     int coarsening_level = 0;
     sgp_graph_t g_all[SGPAR_COARSENING_MAXLEVELS];
+    sgp_graph_t interpolate[SGPAR_COARSENING_MAXLEVELS];
     sgp_vid_t *vcmap[SGPAR_COARSENING_MAXLEVELS];
     
     for (int i=0; i<SGPAR_COARSENING_MAXLEVELS; i++) {
@@ -3148,6 +3179,15 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         g_all[i].eweights = NULL;
         g_all[i].weighted_degree = NULL;
         g_all[i].edges_per_source = NULL;
+    }
+
+    for (int i = 0; i < SGPAR_COARSENING_MAXLEVELS; i++) {
+        interpolate[i].nvertices = 0;
+        interpolate[i].source_offsets = NULL;
+        interpolate[i].destination_indices = NULL;
+        interpolate[i].eweights = NULL;
+        interpolate[i].weighted_degree = NULL;
+        interpolate[i].edges_per_source = NULL;
     }
     g_all[0].nvertices = g.nvertices; g_all[0].nedges = g.nedges;
     g_all[0].source_offsets = g.source_offsets;
@@ -3169,6 +3209,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                                  * sizeof(sgp_vid_t));
         SGPAR_ASSERT(vcmap[coarsening_level-1] != NULL);
         CHECK_SGPAR( sgp_coarsen_one_level(&g_all[coarsening_level],
+                                            interpolate + coarsening_level - 1,
                                             vcmap[coarsening_level-1],
                                             g_all[coarsening_level-1], 
                                             coarsening_level, config->coarsening_alg, 
@@ -3230,13 +3271,21 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         eigenvec[l] = (sgp_real_t*)malloc(gcl_n * sizeof(sgp_real_t));
         SGPAR_ASSERT(eigenvec[l] != NULL);
 
+#ifdef _KOKKOS
+        interpolate_eigenvec(eigenvec + l + 1, eigenvec + l, interpolate + l, gcl_n, g_all[l + 1].nvertices);
+        sgp_free_graph(interpolate + l);
+#else
         //prolong eigenvector from coarser level to finer level
         for (sgp_vid_t i = 0; i < gcl_n; i++) {
             eigenvec[l][i] = eigenvec[l + 1][vcmap[l][i]];
         }
+#endif
+        
 #ifndef COARSE_EIGEN_EC
         free(eigenvec[l + 1]);
+#ifndef _KOKKOS
         free(vcmap[l]);
+#endif
 #endif
 
         sgp_vec_normalize(eigenvec[l], gcl_n);
