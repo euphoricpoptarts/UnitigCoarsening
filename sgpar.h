@@ -301,7 +301,7 @@ SGPAR_API int sgp_coarsen_ACE(sgp_graph_t* interp,
     }
     interp->destination_indices = (sgp_vid_t*)malloc(interp->source_offsets[n] * sizeof(sgp_vid_t));
     interp->eweights = (sgp_wgt_t*) malloc(interp->source_offsets[n] * sizeof(sgp_wgt_t));
-    //copmute the interpolation weights
+    //compute the interpolation weights
     if (coarsening_level == 1) {
         for (sgp_vid_t u = 0; u < n; u++) {
             sgp_eid_t offset = interp->source_offsets[u];
@@ -454,7 +454,7 @@ SGPAR_API int sgp_coarsen_heavy_edge_matching(sgp_vid_t* vcmap,
 
 }
 #ifdef _KOKKOS
-SGPAR_API int sgp_coarsen_HEC(sgp_vid_t* vcmap,
+SGPAR_API int sgp_coarsen_HEC(sgp_graph_t* interp,
     sgp_vid_t* nvertices_coarse_ptr,
     const sgp_graph_t g,
     const int coarsening_level,
@@ -469,6 +469,8 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t* vcmap,
 
         sgp_vid_t* hn = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
         SGPAR_ASSERT(hn != NULL);
+
+        sgp_vid_t* vcmap = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
 
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(int i) {
             vcmap[i] = SGP_INFTY;
@@ -537,6 +539,20 @@ SGPAR_API int sgp_coarsen_HEC(sgp_vid_t* vcmap,
         *nvertices_coarse_ptr = nvertices_coarse;
     }
     Kokkos::finalize();
+
+    interp->source_offsets = (sgp_eid_t*)malloc((n + 1) * sizeof(sgp_eid_t));
+
+    for (sgp_vid_t u = 0; u < n + 1; u++) {
+        interp->source_offsets[u] = u;
+    }
+    interp->destination_indices = (sgp_vid_t*)malloc(interp->source_offsets[n] * sizeof(sgp_vid_t));
+    interp->eweights = (sgp_wgt_t*)malloc(interp->source_offsets[n] * sizeof(sgp_wgt_t));
+    //compute the interpolation weights
+    for (sgp_vid_t u = 0; u < n; u++) {
+        interp->destination_indices[u] = vcmap[v];
+        interp->eweights[u] = 1.0;
+    }
+    free(vcmap);
 
 
     return EXIT_SUCCESS;
@@ -1830,7 +1846,7 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
     }
     else if ((coarsening_alg & 1) == 0) {
         sgp_vid_t nvertices_coarse;
-        sgp_coarsen_HEC(vcmap, &nvertices_coarse, g, coarsening_level, rng);
+        sgp_coarsen_HEC(&interpolation_graph, &nvertices_coarse, g, coarsening_level, rng);
         gc->nvertices = nvertices_coarse;
     }
     else if ((coarsening_alg & 1) == 1) {
@@ -1843,14 +1859,12 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_vid_t* vcmap,
     double start_build = sgp_timer();
 #ifdef _KOKKOS
     sgp_build_coarse_graph_spgemm(gc, &interpolation_graph, g, coarsening_level, time_ptrs);
+    free(interpolation_graph.source_offsets);
+    free(interpolation_graph.destination_indices);
+    free(interpolation_graph.eweights);
 #else
     sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, time_ptrs, coarsening_alg);
 #endif
-    if ((coarsening_alg & 6) == 6) {
-        free(interpolation_graph.source_offsets);
-        free(interpolation_graph.destination_indices);
-        free(interpolation_graph.eweights);
-    }
     time_ptrs[1] += (sgp_timer() - start_build);
 
     return EXIT_SUCCESS;
