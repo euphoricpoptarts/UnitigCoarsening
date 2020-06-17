@@ -1856,7 +1856,7 @@ SGPAR_API int sgp_coarsen_one_level(sgp_graph_t* gc, sgp_graph_t* interpolation_
 
     double start_build = sgp_timer();
 #ifdef _KOKKOS
-    sgp_build_coarse_graph_spgemm(gc, &interpolation_graph, g, coarsening_level, time_ptrs);
+    sgp_build_coarse_graph_spgemm(gc, interpolation_graph, g, coarsening_level, time_ptrs);
 #else
     sgp_build_coarse_graph_msd(gc, vcmap, g, coarsening_level, time_ptrs, coarsening_alg);
 #endif
