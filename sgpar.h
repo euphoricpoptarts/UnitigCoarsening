@@ -537,22 +537,22 @@ SGPAR_API int sgp_coarsen_HEC(sgp_graph_t* interp,
         free(vperm);
 
         *nvertices_coarse_ptr = nvertices_coarse;
+
+        interp->source_offsets = (sgp_eid_t*)malloc((n + 1) * sizeof(sgp_eid_t));
+
+        for (sgp_vid_t u = 0; u < n + 1; u++) {
+            interp->source_offsets[u] = u;
+        }
+        interp->destination_indices = (sgp_vid_t*)malloc(interp->source_offsets[n] * sizeof(sgp_vid_t));
+        interp->eweights = (sgp_wgt_t*)malloc(interp->source_offsets[n] * sizeof(sgp_wgt_t));
+        //compute the interpolation weights
+        for (sgp_vid_t u = 0; u < n; u++) {
+            interp->destination_indices[u] = vcmap[v];
+            interp->eweights[u] = 1.0;
+        }
+        free(vcmap);
     }
     Kokkos::finalize();
-
-    interp->source_offsets = (sgp_eid_t*)malloc((n + 1) * sizeof(sgp_eid_t));
-
-    for (sgp_vid_t u = 0; u < n + 1; u++) {
-        interp->source_offsets[u] = u;
-    }
-    interp->destination_indices = (sgp_vid_t*)malloc(interp->source_offsets[n] * sizeof(sgp_vid_t));
-    interp->eweights = (sgp_wgt_t*)malloc(interp->source_offsets[n] * sizeof(sgp_wgt_t));
-    //compute the interpolation weights
-    for (sgp_vid_t u = 0; u < n; u++) {
-        interp->destination_indices[u] = vcmap[v];
-        interp->eweights[u] = 1.0;
-    }
-    free(vcmap);
 
 
     return EXIT_SUCCESS;
