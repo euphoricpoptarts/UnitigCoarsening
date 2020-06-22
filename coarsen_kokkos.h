@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <math.h>
 #include <time.h>
+#include <list>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -582,6 +583,70 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
         });
     }
     Kokkos::finalize();
+
+    return EXIT_SUCCESS;
+}
+
+SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_graph,
+    const matrix_type& g,
+    const int coarsening_level,
+    sgp_pcg32_random_t* rng,
+    double* time_ptrs) {
+
+    double start_map = sgp_timer();
+    sgp_vid_t nvertices_coarse;
+    sgp_coarsen_HEC(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng);
+    gc->nvertices = nvertices_coarse;
+    time_ptrs[0] += (sgp_timer() - start_map);
+
+    double start_build = sgp_timer();
+    sgp_build_coarse_graph_spgemm(gc, interpolation_graph, g, coarsening_level, time_ptrs);
+    time_ptrs[1] += (sgp_timer() - start_build);
+
+    return EXIT_SUCCESS;
+}
+
+SGPAR_API int sgp_generate_coarse_graphs(sgp_graph_t* fine_g, std::vector<matrix_type> coarse_graphs, std::vector<matrix_type> interp_mtxs, double* time_ptrs) {
+    Kokkos::View<sgp_eid_t*> row_map("row map", fine_g.nvertices + 1);
+    Kokkos::View<sgp_vid_t*> entries("entries", fine_g.nedges);
+    Kokkos::View<sgp_wgt_t*> values("values", fine_g.nedges);
+
+    for (sgp_vid_t u = 0; u < fine_g.nvertices + 1; u++) {
+        row_map(u) = fine_g->source_offsets[u];
+    }
+    for (sgp_vid_t i = 0; i < fine_g.nedges; i++) {
+        entries(i) = fine_g->destination_indices[i];
+        values(i) = 1.0;
+    }
+
+    graph_type fine_graph(entries, row_map);
+    coarse_graphs.push_back(matrix_type("interpolate", fine_g.nvertices, values, fine_graph));
+
+    int coarsening_level = 0;
+    while (coarse_graphs.back()->nvertices > SGPAR_COARSENING_VTX_CUTOFF) {
+        printf("Calculating coarse graph %d\n", coarse_graphs.size());
+
+        coarse_graphs.push_back(matrix_type());
+        interp_mtxs.push_back(matrix_type());
+
+        CHECK_SGPAR(sgp_coarsen_one_level(*(coarse_graphs.back()--),
+            *interp_mtxs.back(),
+            *coarse_graphs.back(),
+            ++coarsening_level,
+            rng, time_counters));
+
+#ifdef DEBUG
+        sgp_real_t coarsen_ratio = (sgp_real_t)g_all[coarsening_level].nvertices / (sgp_real_t)g_all[coarsening_level - 1].nvertices;
+        printf("Coarsening ratio: %.8f\n", coarsen_ratio);
+#endif
+    }
+
+    //don't use the coarsest level if it has too few vertices
+    if (coarse_graphs.back()->nvertices < 30) {
+        coarse_graphs.pop_back();
+        interp_mtxs.pop_back();
+        coarsening_level--;
+    }
 
     return EXIT_SUCCESS;
 }
