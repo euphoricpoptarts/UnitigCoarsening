@@ -2,84 +2,70 @@
 
 #include "definitions_kokkos.h"
 
-SGPAR_API int sgp_vec_normalize_kokkos(sgp_real_t* u, sgp_vid_t n) {
+using eigenview_t = Kokkos::View<sgp_real_t*>;
+
+SGPAR_API int sgp_vec_normalize_kokkos(eigenview_t& u, sgp_vid_t n) {
 
     assert(u != NULL);
     sgp_real_t squared_sum = 0;
 
-    Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(const sgp_vid_t & i, sgp_real_t & thread_squared_sum) {
-        thread_squared_sum += u[i] * u[i];
-    }, squared_sum);
+    squared_sum = KokkosBlas::dot(u, u);
     sgp_real_t sum_inv = 1 / sqrt(squared_sum);
 
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(int64_t i) {
-        u[i] = u[i] * sum_inv;
+        u(i) = u(i) * sum_inv;
     });
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int sgp_vec_dotproduct_kokkos(sgp_real_t* dot_prod_ptr,
-    sgp_real_t* u1, sgp_real_t* u2, sgp_vid_t n) {
 
-    sgp_real_t dot_prod = 0;
+SGPAR_API int sgp_vec_orthogonalize_kokkos(eigenview_t& u1, eigenview_t& u2, sgp_vid_t n) {
 
-    Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(const sgp_vid_t & i, sgp_real_t & thread_dot_prod) {
-        thread_dot_prod += u1[i] * u2[i];
-    }, dot_prod);
-    *dot_prod_ptr = dot_prod;
-    return EXIT_SUCCESS;
-}
-
-
-SGPAR_API int sgp_vec_orthogonalize_kokkos(sgp_real_t* u1, sgp_real_t* u2, sgp_vid_t n) {
-
-    sgp_real_t mult1;
-    sgp_vec_dotproduct_kokkos(&mult1, u1, u2, n);
+    sgp_real_t mult1 = KokkosBlas::dot(u1,u2);
 
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
-        u1[i] -= mult1 * u2[i];
+        u1(i) -= mult1 * u2(i);
     });
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int sgp_vec_D_orthogonalize_kokkos(sgp_real_t* u1, sgp_real_t* u2,
-    sgp_wgt_t* D, sgp_vid_t n) {
+SGPAR_API int sgp_vec_D_orthogonalize_kokkos(eigenview_t& u1, eigenview_t& u2,
+    Kokkos::View<sgp_wgt_t*>& D, sgp_vid_t n) {
 
     //u1[i] = u1[i] - (dot(u1, D*u2)/dot(u2, D*u2)) * u2[i]
 
-    sgp_real_t mult1;
-    sgp_vec_dotproduct_kokkos(&mult1, u1, u2, n);
+    sgp_real_t mult1 = KokkosBlas::dot(u1, u2);
 
     sgp_real_t mult_numer = 0.0;
     sgp_real_t mult_denom = 0.0;
 
     Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(const sgp_vid_t & i, sgp_real_t & thread_mult_numer) {
-        thread_mult_numer += u1[i] * D[i] * u2[i];
+        thread_mult_numer += u1(i) * D(i) * u2(i);
     }, mult_numer);
     Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(const sgp_vid_t & i, sgp_real_t & thread_mult_denom) {
-        thread_mult_denom += u2[i] * D[i] * u2[i];
+        thread_mult_denom += u2(i) * D(i) * u2(i);
     }, mult_denom);
 
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
-        u1[i] -= mult_numer * u2[i] / mult_denom;
+        u1(i) -= mult_numer * u2(i) / mult_denom;
     });
     return EXIT_SUCCESS;
 }
 
-SGPAR_API void sgp_power_iter_eigenvalue_log(sgp_real_t* u, sgp_graph_t g) {
+SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u, const matrix_type& g) {
     sgp_real_t eigenval = 0;
     sgp_real_t eigenval_max = 0;
     sgp_real_t eigenval_min = 2;
-    for (sgp_vid_t i = 0; i < (g.nvertices); i++) {
-        sgp_vid_t weighted_degree = g.source_offsets[i + 1] - g.source_offsets[i];
-        sgp_real_t u_i = weighted_degree * u[i];
+    for (sgp_vid_t i = 0; i < (g.numRows()); i++) {
+        sgp_vid_t weighted_degree = g.graph.row_map(i + 1) - g.graph.row_map(i);
+        sgp_real_t u_i = weighted_degree * u(i);
         sgp_real_t matvec_i = 0;
-        for (sgp_eid_t j = g.source_offsets[i];
-            j < g.source_offsets[i + 1]; j++) {
-            matvec_i += u[g.destination_indices[j]];
+        for (sgp_eid_t j = g.graph.row_map(i);
+            j < g.graph.row_map(i + 1); j++) {
+            matvec_i += u(g.graph.entries(j));
         }
         u_i -= matvec_i;
-        sgp_real_t eigenval_est = u_i / u[i];
+        sgp_real_t eigenval_est = u_i / u(i);
         if (eigenval_est < eigenval_min) {
             eigenval_min = eigenval_est;
         }
@@ -98,7 +84,7 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(sgp_real_t* u, sgp_graph_t g) {
         ceil(1.0 / (1.0 - eigenval * 1e-9)));
 }
 
-SGPAR_API int sgp_power_iter(sgp_real_t* u, const matrix_type& g, int normLap, int final
+SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, int final
 #ifdef EXPERIMENT
     , ExperimentLoggerUtil& experiment
 #endif
@@ -109,29 +95,27 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, const matrix_type& g, int normLap, i
     Kokkos::initialize();
     {
 
-        sgp_real_t* vec1 = (sgp_real_t*)malloc(n * sizeof(sgp_real_t));
-        SGPAR_ASSERT(vec1 != NULL);
-        for (sgp_vid_t i = 0; i < n; i++) {
-            vec1[i] = 1.0;
-        }
+        eigenview_t vec1("vec1", n);
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+            vec1(i) = 1.0;
+        });
 
-        sgp_wgt_t* weighted_degree = (sgp_wgt_t*)malloc(n * sizeof(sgp_wgt_t));
-        assert(weighted_degree != NULL);
+        Kokkos::View<sgp_wgt_t*> weighted_degree("weighted degree",n);
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
             sgp_wgt_t degree_wt_i = 0;
             sgp_eid_t end_offset = gc.graph.row_map(i + 1);
             for (sgp_eid_t j = gc.graph.row_map(i); j < end_offset; j++) {
                 degree_wt_i += gc.values(j);
             }
-            weighted_degree[i] = degree_wt_i;
+            weighted_degree(i) = degree_wt_i;
         });
 
         sgp_wgt_t gb = 2.0;
         if (!normLap) {
-            gb = 2 * weighted_degree[0];
+            gb = 2 * weighted_degree(0);
             for (sgp_vid_t i = 1; i < n; i++) {
-                if (gb < 2 * g.weighted_degree[i]) {
-                    gb = 2 * g.weighted_degree[i];
+                if (gb < 2 * g.weighted_degree(i)) {
+                    gb = 2 * g.weighted_degree(i);
                 }
             }
         }
@@ -145,11 +129,9 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, const matrix_type& g, int normLap, i
         }
         sgp_vec_normalize_kokkos(u, n);
 
-        sgp_real_t* v = (sgp_real_t*)malloc(n * sizeof(sgp_real_t));
-        SGPAR_ASSERT(v != NULL);
-        for (sgp_vid_t i = 0; i < n; i++) {
-            v[i] = u[i];
-        }
+        eigenview_t v("v", n);
+        //is this necessary?
+        Kokkos::deep_copy(v, u);
 
         sgp_real_t tol = SGPAR_POWERITER_TOL;
         uint64_t niter = 0;
@@ -157,38 +139,29 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, const matrix_type& g, int normLap, i
         sgp_real_t dotprod = 0, lastDotprod = 1;
         while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
 
-            //copying u everytime isn't efficient but I'm just tryna make this work for now
-            Kokkos::View<sgp_real_t*> u_view("u", n);
-            Kokkos::View<sgp_real_t*> v_view("v", n);
+            Kokkos::deep_copy(u, v);
 
-            // u = v
-            Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
-                u[i] = v[i];
-                u_view(i) = v[i];
-                v_view(i) = 0.0;
-            });
-
-            KokkosSparse::spmv("N", 1.0, g, u_view, 0.0, v_view);
+            KokkosSparse::spmv("N", 1.0, g, u, 0.0, v);
 
             // v = Lu
             Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
                 // sgp_real_t v_i = g.weighted_degree[i]*u[i];
                 sgp_real_t weighted_degree_inv, v_i;
                 if (!normLap) {
-                    v_i = (gb - weighted_degree[i]) * u[i];
+                    v_i = (gb - weighted_degree(i)) * u(i);
                 }
                 else {
-                    weighted_degree_inv = 1.0 / weighted_degree[i];
-                    v_i = 0.5 * u[i];
+                    weighted_degree_inv = 1.0 / weighted_degree(i);
+                    v_i = 0.5 * u(i);
                 }
                 // v_i -= matvec_i;
                 if (!normLap) {
-                    v_i += v_view(i);
+                    v_i += v(i);
                 }
                 else {
-                    v_i += 0.5 * v_view(i) * weighted_degree_inv;
+                    v_i += 0.5 * v(i) * weighted_degree_inv;
                 }
-                v[i] = v_i;
+                v(i) = v_i;
             });
 
             if (!normLap) {
@@ -196,7 +169,7 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, const matrix_type& g, int normLap, i
             }
             sgp_vec_normalize_kokkos(v, n);
             lastDotprod = dotprod;
-            sgp_vec_dotproduct_kokkos(&dotprod, u, v, n);
+            dotprod = KokkosBlas::dot(u, v);
             niter++;
         }
         int max_iter_reached = 0;
@@ -213,15 +186,55 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, const matrix_type& g, int normLap, i
         if (!normLap && final) {
             sgp_power_iter_eigenvalue_log(u, g);
         }
-
-        free(vec1);
-        free(v);
         if (normLap && final) {
             free(weighted_degree);
         }
 
     }
     Kokkos::finalize();
+
+    return EXIT_SUCCESS;
+}
+
+SGPAR_API int eigensolve(sgp_real_t* eigenvec, std::vector<matrix_type>& graphs, std::vector<matrix_type>& interpolates) {
+
+    sgp_vid_t gc_n = graphs.back()->numRows();
+    eigenview_t coarse_guess("coarse_guess", gc_n);
+    //randomly initialize guess eigenvector for coarsest graph
+    for (sgp_vid_t i = 0; i < gc_n; i++) {
+        coarse_guess(i) = ((double)sgp_pcg32_random_r(rng)) / UINT32_MAX;
+    }
+    sgp_vec_normalize(coarse_guess, gc_n);
+
+    auto graph_iter = graphs.back(), interp_iter = interpolates.back();
+
+    //there is always one more refinement than interpolation
+    while (graph_iter != graphs.front()) {
+        //refine
+        CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, config->refine_alg, 0
+#ifdef EXPERIMENT
+            , experiment
+#endif
+            ));
+        graph_iter--;
+
+        //interpolate
+        eigenview_t fine_vec("fine vec", graph_iter->numRows());
+        KokkosSparse::spmv("N", 1.0, *interp_iter, coarse_guess, 0.0, fine_vec);
+        coarse_guess = fine_vec;
+        interp_iter--;
+    }
+
+    //last refine
+    CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, config->refine_alg, 1
+#ifdef EXPERIMENT
+        , experiment
+#endif
+        ));
+
+    Kokkos::parallel_for(graph_iter->numRows(), KOKKOS_LAMBDA(sgp_vid_t i) {
+        eigenvec[i] = coarse_guess(i);
+    });
 
     return EXIT_SUCCESS;
 }
