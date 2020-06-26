@@ -2,9 +2,9 @@
 
 #include "definitions_kokkos.h"
 
-using eigenview_t = Kokkos::View<sgp_real_t*>;
-
 namespace sgpar_kokkos {
+
+using eigenview_t = Kokkos::View<sgp_real_t*>;
 
 SGPAR_API int sgp_vec_normalize_kokkos(eigenview_t& u, sgp_vid_t n) {
 

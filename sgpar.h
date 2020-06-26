@@ -2463,7 +2463,6 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     printf("Coarsest level: %d\n", coarsening_level);
 
     int num_coarsening_levels = coarsening_level+1;
-#endif
 
     double fin_coarsening_time = sgp_timer();
 
