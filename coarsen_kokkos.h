@@ -147,13 +147,13 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     const int coarsening_level,
     double* time_ptrs) {
 
-    sgp_vid_t n = g.nvertices;
-    sgp_vid_t nc = gc->nvertices;
+    sgp_vid_t n = g.numRows();
+    sgp_vid_t nc = gc.numRows();
 
     Kokkos::initialize();
     {
 
-        matrix_type interp_transpose = KokkosKernels::Impl::transpose_matrix(interpolate_mtx);
+        matrix_type interp_transpose = KokkosKernels::Impl::transpose_matrix(interp_mtx);
 
         typedef KokkosKernels::Experimental::KokkosKernelsHandle
             <sgp_eid_t, sgp_eid_t, sgp_wgt_t,
@@ -177,8 +177,8 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
             interp_transpose.graph.row_map,
             interp_transpose.graph.entries,
             false,
-            row_map_fine,
-            adj_fine,
+            g.graph.row_map,
+            g.graph.entries,
             false,
             row_map_p1
             );
@@ -196,9 +196,9 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
             interp_transpose.graph.entries,
             interp_transpose.values,
             false,
-            row_map_fine,
-            adj_fine,
-            adj_wgt_fine,
+            g.graph.row_map,
+            g.graph.entries,
+            g.values,
             false,
             row_map_p1,
             entries_p1,
@@ -282,7 +282,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
         Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
             for (sgp_eid_t j = row_map_coarse(u); j < row_map_coarse(u + 1); j++) {
                 if (adj_coarse(j) != u) {
-                    sgp_eid_t offset = gc->source_offsets[u] + nonLoops[u]++;
+                    sgp_eid_t offset = row_map_nonloop(u) + nonLoops[u]++;
                     entries_nonloop(offset) = adj_coarse(j);
                     values_nonloop(offset) = wgt_coarse(j);
                 }
@@ -293,13 +293,14 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
         kh.destroy_spgemm_handle();
 
         graph_type gc_graph(entries_nonloop, row_map_nonloop);
-        gc = matrix_type("gc", nc, values_nonloop, return_graph);
+        gc = matrix_type("gc", nc, values_nonloop, gc_graph);
     }
     Kokkos::finalize();
 
     return EXIT_SUCCESS;
 }
 
+#if 0
 SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
     sgp_vid_t* vcmap,
     const sgp_graph_t g,
@@ -471,6 +472,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 
     return EXIT_SUCCESS;
 }
+#endif
 
 SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_graph,
     const matrix_type& g,
@@ -481,7 +483,6 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
     double start_map = sgp_timer();
     sgp_vid_t nvertices_coarse;
     sgp_coarsen_HEC(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng);
-    gc->nvertices = nvertices_coarse;
     time_ptrs[0] += (sgp_timer() - start_map);
 
     double start_build = sgp_timer();
@@ -492,14 +493,14 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
 }
 
 SGPAR_API int sgp_generate_coarse_graphs(sgp_graph_t* fine_g, std::vector<matrix_type>& coarse_graphs, std::vector<matrix_type>& interp_mtxs, int& coarsening_level, double* time_ptrs) {
-    Kokkos::View<sgp_eid_t*> row_map("row map", fine_g.nvertices + 1);
-    Kokkos::View<sgp_vid_t*> entries("entries", fine_g.nedges);
-    Kokkos::View<sgp_wgt_t*> values("values", fine_g.nedges);
+    Kokkos::View<sgp_eid_t*> row_map("row map", fine_g->nvertices + 1);
+    Kokkos::View<sgp_vid_t*> entries("entries", fine_g->nedges);
+    Kokkos::View<sgp_wgt_t*> values("values", fine_g->nedges);
 
-    for (sgp_vid_t u = 0; u < fine_g.nvertices + 1; u++) {
+    for (sgp_vid_t u = 0; u < fine_g->nvertices + 1; u++) {
         row_map(u) = fine_g->source_offsets[u];
     }
-    for (sgp_vid_t i = 0; i < fine_g.nedges; i++) {
+    for (sgp_vid_t i = 0; i < fine_g->nedges; i++) {
         entries(i) = fine_g->destination_indices[i];
         values(i) = 1.0;
     }
@@ -514,14 +515,14 @@ SGPAR_API int sgp_generate_coarse_graphs(sgp_graph_t* fine_g, std::vector<matrix
         coarse_graphs.push_back(matrix_type());
         interp_mtxs.push_back(matrix_type());
 
-        CHECK_SGPAR(sgp_coarsen_one_level(*(coarse_graphs.back()--),
+        CHECK_SGPAR(sgp_coarsen_one_level(*(coarse_graphs.back()-1),
             *interp_mtxs.back(),
             *coarse_graphs.back(),
             ++coarsening_level,
             rng, time_counters));
 
 #ifdef DEBUG
-        sgp_real_t coarsen_ratio = (sgp_real_t)g_all[coarsening_level].nvertices / (sgp_real_t)g_all[coarsening_level - 1].nvertices;
+        sgp_real_t coarsen_ratio = (sgp_real_t) coarse_graphs.back()->nvertices / (sgp_real_t) (coarse_graphs.back() - 1)->nvertices;
         printf("Coarsening ratio: %.8f\n", coarsen_ratio);
 #endif
     }
