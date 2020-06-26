@@ -1,14 +1,13 @@
 #pragma once
 
 #include "definitions_kokkos.h"
+#include "KokkosBlas1_dot.hpp"
 
 namespace sgpar_kokkos {
 
 using eigenview_t = Kokkos::View<sgp_real_t*>;
 
 SGPAR_API int sgp_vec_normalize_kokkos(eigenview_t& u, sgp_vid_t n) {
-
-    assert(u != NULL);
     sgp_real_t squared_sum = 0;
 
     squared_sum = KokkosBlas::dot(u, u);
