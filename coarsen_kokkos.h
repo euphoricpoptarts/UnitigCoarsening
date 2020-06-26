@@ -150,152 +150,147 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     sgp_vid_t n = g.numRows();
     sgp_vid_t nc = gc.numRows();
 
-    Kokkos::initialize();
-    {
+    matrix_type interp_transpose = KokkosKernels::Impl::transpose_matrix(interp_mtx);
 
-        matrix_type interp_transpose = KokkosKernels::Impl::transpose_matrix(interp_mtx);
+    typedef KokkosKernels::Experimental::KokkosKernelsHandle
+        <sgp_eid_t, sgp_eid_t, sgp_wgt_t,
+        typename Device::execution_space, typename Device::memory_space, typename Device::memory_space > KernelHandle;
 
-        typedef KokkosKernels::Experimental::KokkosKernelsHandle
-            <sgp_eid_t, sgp_eid_t, sgp_wgt_t,
-            typename Device::execution_space, typename Device::memory_space, typename Device::memory_space > KernelHandle;
+    KernelHandle kh;
+    kh.set_team_work_size(16);
+    kh.set_dynamic_scheduling(true);
 
-        KernelHandle kh;
-        kh.set_team_work_size(16);
-        kh.set_dynamic_scheduling(true);
+    // Select an spgemm algorithm, limited by configuration at compile-time and set via the handle
+    // Some options: {SPGEMM_KK_MEMORY, SPGEMM_KK_SPEED, SPGEMM_KK_MEMSPEED, /*SPGEMM_CUSPARSE, */ SPGEMM_MKL}
+    KokkosSparse::SPGEMMAlgorithm spgemm_algorithm = KokkosSparse::SPGEMM_KK_SPEED;
+    kh.create_spgemm_handle(spgemm_algorithm);
 
-        // Select an spgemm algorithm, limited by configuration at compile-time and set via the handle
-        // Some options: {SPGEMM_KK_MEMORY, SPGEMM_KK_SPEED, SPGEMM_KK_MEMSPEED, /*SPGEMM_CUSPARSE, */ SPGEMM_MKL}
-        KokkosSparse::SPGEMMAlgorithm spgemm_algorithm = KokkosSparse::SPGEMM_KK_SPEED;
-        kh.create_spgemm_handle(spgemm_algorithm);
+    Kokkos::View<sgp_eid_t*> row_map_p1("rows_partial", nc + 1);
+    KokkosSparse::Experimental::spgemm_symbolic(
+        &kh,
+        nc,
+        n,
+        n,
+        interp_transpose.graph.row_map,
+        interp_transpose.graph.entries,
+        false,
+        g.graph.row_map,
+        g.graph.entries,
+        false,
+        row_map_p1
+        );
 
-        Kokkos::View<sgp_eid_t*> row_map_p1("rows_partial", nc + 1);
-        KokkosSparse::Experimental::spgemm_symbolic(
-            &kh,
-            nc,
-            n,
-            n,
-            interp_transpose.graph.row_map,
-            interp_transpose.graph.entries,
-            false,
-            g.graph.row_map,
-            g.graph.entries,
-            false,
-            row_map_p1
-            );
+    //partial-result matrix
+    Kokkos::View<sgp_vid_t*> entries_p1("adjacencies_partial", kh.get_spgemm_handle()->get_c_nnz());
+    Kokkos::View<sgp_wgt_t*> values_p1("weights_partial", kh.get_spgemm_handle()->get_c_nnz());
 
-        //partial-result matrix
-        Kokkos::View<sgp_vid_t*> entries_p1("adjacencies_partial", kh.get_spgemm_handle()->get_c_nnz());
-        Kokkos::View<sgp_wgt_t*> values_p1("weights_partial", kh.get_spgemm_handle()->get_c_nnz());
-
-        KokkosSparse::Experimental::spgemm_numeric(
-            &kh,
-            nc,
-            n,
-            n,
-            interp_transpose.graph.row_map,
-            interp_transpose.graph.entries,
-            interp_transpose.values,
-            false,
-            g.graph.row_map,
-            g.graph.entries,
-            g.values,
-            false,
-            row_map_p1,
-            entries_p1,
-            values_p1
-            );
+    KokkosSparse::Experimental::spgemm_numeric(
+        &kh,
+        nc,
+        n,
+        n,
+        interp_transpose.graph.row_map,
+        interp_transpose.graph.entries,
+        interp_transpose.values,
+        false,
+        g.graph.row_map,
+        g.graph.entries,
+        g.values,
+        false,
+        row_map_p1,
+        entries_p1,
+        values_p1
+        );
 
 
-        Kokkos::View<sgp_eid_t*> row_map_coarse("rows_coarse", nc + 1);
-        KokkosSparse::Experimental::spgemm_symbolic(
-            &kh,
-            nc,
-            n,
-            nc,
-            row_map_p1,
-            entries_p1,
-            false,
-            interp_mtx.graph.row_map,
-            interp_mtx.graph.entries,
-            false,
-            row_map_coarse
-            );
-        //coarse-graph adjacency matrix
-        Kokkos::View<sgp_vid_t*> adj_coarse("adjacencies_coarse", kh.get_spgemm_handle()->get_c_nnz());
-        Kokkos::View<sgp_wgt_t*> wgt_coarse("weights_coarse", kh.get_spgemm_handle()->get_c_nnz());
+    Kokkos::View<sgp_eid_t*> row_map_coarse("rows_coarse", nc + 1);
+    KokkosSparse::Experimental::spgemm_symbolic(
+        &kh,
+        nc,
+        n,
+        nc,
+        row_map_p1,
+        entries_p1,
+        false,
+        interp_mtx.graph.row_map,
+        interp_mtx.graph.entries,
+        false,
+        row_map_coarse
+        );
+    //coarse-graph adjacency matrix
+    Kokkos::View<sgp_vid_t*> adj_coarse("adjacencies_coarse", kh.get_spgemm_handle()->get_c_nnz());
+    Kokkos::View<sgp_wgt_t*> wgt_coarse("weights_coarse", kh.get_spgemm_handle()->get_c_nnz());
 
-        KokkosSparse::Experimental::spgemm_numeric(
-            &kh,
-            nc,
-            n,
-            nc,
-            row_map_p1,
-            entries_p1,
-            values_p1,
-            false,
-            interp_mtx.graph.row_map,
-            interp_mtx.graph.entries,
-            interp_mtx.values,
-            false,
-            row_map_coarse,
-            adj_coarse,
-            wgt_coarse
-            );
+    KokkosSparse::Experimental::spgemm_numeric(
+        &kh,
+        nc,
+        n,
+        nc,
+        row_map_p1,
+        entries_p1,
+        values_p1,
+        false,
+        interp_mtx.graph.row_map,
+        interp_mtx.graph.entries,
+        interp_mtx.values,
+        false,
+        row_map_coarse,
+        adj_coarse,
+        wgt_coarse
+        );
 
-        sgp_eid_t* nonLoops = (sgp_eid_t*)malloc(nc * sizeof(sgp_eid_t));
+    sgp_eid_t* nonLoops = (sgp_eid_t*)malloc(nc * sizeof(sgp_eid_t));
 
-        //gonna reuse this to count non-self loop edges
-        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
-            nonLoops[i] = 0;
-        });
+    //gonna reuse this to count non-self loop edges
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
+        nonLoops[i] = 0;
+    });
 
-        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
-            for (sgp_eid_t j = row_map_coarse(u); j < row_map_coarse(u + 1); j++) {
-                if (adj_coarse(j) != u) {
-                    nonLoops[u]++;
-                }
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
+        for (sgp_eid_t j = row_map_coarse(u); j < row_map_coarse(u + 1); j++) {
+            if (adj_coarse(j) != u) {
+                nonLoops[u]++;
             }
-        });
+        }
+    });
 
-        Kokkos::View<sgp_eid_t*> row_map_nonloop("nonloop row map", nc + 1);
-        row_map_nonloop(0) = 0;
+    Kokkos::View<sgp_eid_t*> row_map_nonloop("nonloop row map", nc + 1);
+    row_map_nonloop(0) = 0;
 
-        Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
-            sgp_eid_t & update, const bool final) {
-            // Load old value in case we update it before accumulating
-            const sgp_eid_t val_i = nonLoops[i];
-            // For inclusive scan,
-            // change the update value before updating array.
-            update += val_i;
-            if (final) {
-                row_map_nonloop(i + 1) = update; // only update array on final pass
+    Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
+        sgp_eid_t & update, const bool final) {
+        // Load old value in case we update it before accumulating
+        const sgp_eid_t val_i = nonLoops[i];
+        // For inclusive scan,
+        // change the update value before updating array.
+        update += val_i;
+        if (final) {
+            row_map_nonloop(i + 1) = update; // only update array on final pass
+        }
+    });
+
+    Kokkos::View<sgp_vid_t*> entries_nonloop("nonloop entries", row_map_nonloop(nc));
+    Kokkos::View<sgp_wgt_t*> values_nonloop("nonloop values", row_map_nonloop(nc));
+
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
+        nonLoops[i] = 0;
+    });
+
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
+        for (sgp_eid_t j = row_map_coarse(u); j < row_map_coarse(u + 1); j++) {
+            if (adj_coarse(j) != u) {
+                sgp_eid_t offset = row_map_nonloop(u) + nonLoops[u]++;
+                entries_nonloop(offset) = adj_coarse(j);
+                values_nonloop(offset) = wgt_coarse(j);
             }
-        });
+        }
+    });
+    free(nonLoops);
 
-        Kokkos::View<sgp_vid_t*> entries_nonloop("nonloop entries", row_map_nonloop(nc));
-        Kokkos::View<sgp_wgt_t*> values_nonloop("nonloop values", row_map_nonloop(nc));
+    kh.destroy_spgemm_handle();
 
-        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
-            nonLoops[i] = 0;
-        });
-
-        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
-            for (sgp_eid_t j = row_map_coarse(u); j < row_map_coarse(u + 1); j++) {
-                if (adj_coarse(j) != u) {
-                    sgp_eid_t offset = row_map_nonloop(u) + nonLoops[u]++;
-                    entries_nonloop(offset) = adj_coarse(j);
-                    values_nonloop(offset) = wgt_coarse(j);
-                }
-            }
-        });
-        free(nonLoops);
-
-        kh.destroy_spgemm_handle();
-
-        graph_type gc_graph(entries_nonloop, row_map_nonloop);
-        gc = matrix_type("gc", nc, values_nonloop, gc_graph);
-    }
-    Kokkos::finalize();
+    graph_type gc_graph(entries_nonloop, row_map_nonloop);
+    gc = matrix_type("gc", nc, values_nonloop, gc_graph);
 
     return EXIT_SUCCESS;
 }

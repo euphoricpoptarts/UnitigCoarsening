@@ -2373,6 +2373,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     double start_time = sgp_timer();
     double time_counters[6] = { 0, 0, 0, 0, 0, 0 };
 
+    Kokkos::initialize();
     std::list<sgpar_kokkos::matrix_type> coarse_graphs, interp_mtxs;
     CHECK_SGPAR(sgpar_kokkos::sgp_generate_coarse_graphs(&g, coarse_graphs, interp_mtxs, rng, time_counters));
 
@@ -2383,6 +2384,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
 
     coarse_graphs.clear();
     interp_mtxs.clear();
+    Kokkos::finalize();
     double fin_final_level_time = sgp_timer();
     //I don't feel like redoing the timing stuff rn
     double fin_refine_time = sgp_timer();

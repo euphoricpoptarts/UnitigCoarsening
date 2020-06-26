@@ -93,103 +93,97 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
 
     sgp_vid_t n = g.numRows();
 
-    Kokkos::initialize();
-    {
+    eigenview_t vec1("vec1", n);
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        vec1(i) = 1.0;
+    });
 
-        eigenview_t vec1("vec1", n);
-        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
-            vec1(i) = 1.0;
-        });
+    Kokkos::View<sgp_wgt_t*> weighted_degree("weighted degree",n);
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        sgp_wgt_t degree_wt_i = 0;
+        sgp_eid_t end_offset = g.graph.row_map(i + 1);
+        for (sgp_eid_t j = g.graph.row_map(i); j < end_offset; j++) {
+            degree_wt_i += g.values(j);
+        }
+        weighted_degree(i) = degree_wt_i;
+    });
 
-        Kokkos::View<sgp_wgt_t*> weighted_degree("weighted degree",n);
-        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
-            sgp_wgt_t degree_wt_i = 0;
-            sgp_eid_t end_offset = g.graph.row_map(i + 1);
-            for (sgp_eid_t j = g.graph.row_map(i); j < end_offset; j++) {
-                degree_wt_i += g.values(j);
-            }
-            weighted_degree(i) = degree_wt_i;
-        });
-
-        sgp_wgt_t gb = 2.0;
-        if (!normLap) {
-            gb = 2 * weighted_degree(0);
-            for (sgp_vid_t i = 1; i < n; i++) {
-                if (gb < 2 * weighted_degree(i)) {
-                    gb = 2 * weighted_degree(i);
-                }
+    sgp_wgt_t gb = 2.0;
+    if (!normLap) {
+        gb = 2 * weighted_degree(0);
+        for (sgp_vid_t i = 1; i < n; i++) {
+            if (gb < 2 * weighted_degree(i)) {
+                gb = 2 * weighted_degree(i);
             }
         }
+    }
 
-        sgp_vec_normalize_kokkos(vec1, n);
-        if (!normLap) {
-            sgp_vec_orthogonalize_kokkos(u, vec1, n);
-        }
-        else {
-            sgp_vec_D_orthogonalize_kokkos(u, vec1, weighted_degree, n);
-        }
-        sgp_vec_normalize_kokkos(u, n);
+    sgp_vec_normalize_kokkos(vec1, n);
+    if (!normLap) {
+        sgp_vec_orthogonalize_kokkos(u, vec1, n);
+    }
+    else {
+        sgp_vec_D_orthogonalize_kokkos(u, vec1, weighted_degree, n);
+    }
+    sgp_vec_normalize_kokkos(u, n);
 
-        eigenview_t v("v", n);
-        //is this necessary?
-        Kokkos::deep_copy(v, u);
+    eigenview_t v("v", n);
+    //is this necessary?
+    Kokkos::deep_copy(v, u);
 
-        sgp_real_t tol = SGPAR_POWERITER_TOL;
-        uint64_t niter = 0;
-        uint64_t iter_max = (uint64_t)SGPAR_POWERITER_ITER / (uint64_t)n;
-        sgp_real_t dotprod = 0, lastDotprod = 1;
-        while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
+    sgp_real_t tol = SGPAR_POWERITER_TOL;
+    uint64_t niter = 0;
+    uint64_t iter_max = (uint64_t)SGPAR_POWERITER_ITER / (uint64_t)n;
+    sgp_real_t dotprod = 0, lastDotprod = 1;
+    while (fabs(dotprod - lastDotprod) > tol && (niter < iter_max)) {
 
-            Kokkos::deep_copy(u, v);
+        Kokkos::deep_copy(u, v);
 
-            KokkosSparse::spmv("N", 1.0, g, u, 0.0, v);
+        KokkosSparse::spmv("N", 1.0, g, u, 0.0, v);
 
-            // v = Lu
-            Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
-                // sgp_real_t v_i = g.weighted_degree[i]*u[i];
-                sgp_real_t weighted_degree_inv, v_i;
-                if (!normLap) {
-                    v_i = (gb - weighted_degree(i)) * u(i);
-                }
-                else {
-                    weighted_degree_inv = 1.0 / weighted_degree(i);
-                    v_i = 0.5 * u(i);
-                }
-                // v_i -= matvec_i;
-                if (!normLap) {
-                    v_i += v(i);
-                }
-                else {
-                    v_i += 0.5 * v(i) * weighted_degree_inv;
-                }
-                v(i) = v_i;
-            });
-
+        // v = Lu
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+            // sgp_real_t v_i = g.weighted_degree[i]*u[i];
+            sgp_real_t weighted_degree_inv, v_i;
             if (!normLap) {
-                sgp_vec_orthogonalize_kokkos(v, vec1, n);
+                v_i = (gb - weighted_degree(i)) * u(i);
             }
-            sgp_vec_normalize_kokkos(v, n);
-            lastDotprod = dotprod;
-            dotprod = KokkosBlas::dot(u, v);
-            niter++;
+            else {
+                weighted_degree_inv = 1.0 / weighted_degree(i);
+                v_i = 0.5 * u(i);
+            }
+            // v_i -= matvec_i;
+            if (!normLap) {
+                v_i += v(i);
+            }
+            else {
+                v_i += 0.5 * v(i) * weighted_degree_inv;
+            }
+            v(i) = v_i;
+        });
+
+        if (!normLap) {
+            sgp_vec_orthogonalize_kokkos(v, vec1, n);
         }
-        int max_iter_reached = 0;
-        if (niter >= iter_max) {
-            printf("exceeded max iter count, ");
-            max_iter_reached = 1;
-        }
-        printf("number of iterations: %lu\n", niter);
+        sgp_vec_normalize_kokkos(v, n);
+        lastDotprod = dotprod;
+        dotprod = KokkosBlas::dot(u, v);
+        niter++;
+    }
+    int max_iter_reached = 0;
+    if (niter >= iter_max) {
+        printf("exceeded max iter count, ");
+        max_iter_reached = 1;
+    }
+    printf("number of iterations: %lu\n", niter);
 
 #ifdef EXPERIMENT
-        experiment.addCoarseLevel(niter, max_iter_reached, n);
+    experiment.addCoarseLevel(niter, max_iter_reached, n);
 #endif
 
-        if (!normLap && final) {
-            sgp_power_iter_eigenvalue_log(u, g);
-        }
-
+    if (!normLap && final) {
+        sgp_power_iter_eigenvalue_log(u, g);
     }
-    Kokkos::finalize();
 
     return EXIT_SUCCESS;
 }
