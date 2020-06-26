@@ -40,103 +40,99 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     const matrix_type& g,
     const int coarsening_level,
     sgp_pcg32_random_t* rng) {
-    Kokkos::initialize();
-    {
 
-        sgp_vid_t n = g.numRows();
+    sgp_vid_t n = g.numRows();
 
-        sgp_vid_t* vperm = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
-        SGPAR_ASSERT(vperm != NULL);
+    sgp_vid_t* vperm = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(vperm != NULL);
 
-        sgp_vid_t* hn = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
-        SGPAR_ASSERT(hn != NULL);
+    sgp_vid_t* hn = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
+    SGPAR_ASSERT(hn != NULL);
 
-        sgp_vid_t* vcmap = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
+    sgp_vid_t* vcmap = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
 
-        Kokkos::parallel_for(n, KOKKOS_LAMBDA(int i) {
-            vcmap[i] = SGP_INFTY;
-            vperm[i] = i;
-            hn[i] = SGP_INFTY;
-        });
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(int i) {
+        vcmap[i] = SGP_INFTY;
+        vperm[i] = i;
+        hn[i] = SGP_INFTY;
+    });
 
 
-        for (sgp_vid_t i = n - 1; i > 0; i--) {
-            sgp_vid_t v_i = vperm[i];
+    for (sgp_vid_t i = n - 1; i > 0; i--) {
+        sgp_vid_t v_i = vperm[i];
 #ifndef SGPAR_HUGEGRAPHS
-            uint32_t j = (sgp_pcg32_random_r(rng)) % (i + 1);
+        uint32_t j = (sgp_pcg32_random_r(rng)) % (i + 1);
 #else
-            uint64_t j1 = (sgp_pcg32_random_r(rng)) % (i + 1);
-            uint64_t j2 = (sgp_pcg32_random_r(rng)) % (i + 1);
-            uint64_t j = ((j1 << 32) + j2) % (i + 1);
+        uint64_t j1 = (sgp_pcg32_random_r(rng)) % (i + 1);
+        uint64_t j2 = (sgp_pcg32_random_r(rng)) % (i + 1);
+        uint64_t j = ((j1 << 32) + j2) % (i + 1);
 #endif 
-            sgp_vid_t v_j = vperm[j];
-            vperm[i] = v_j;
-            vperm[j] = v_i;
-        }
-
-        if (coarsening_level == 1) {
-            //all weights equal at this level so choose heaviest edge randomly
-            for (sgp_vid_t i = 0; i < n; i++) {
-                sgp_vid_t adj_size = g.graph.row_map(i + 1) - g.graph.row_map(i);
-                sgp_vid_t offset = g.graph.row_map(i) + ((sgp_pcg32_random_r(rng)) % adj_size);
-                hn[i] = g.graph.entries(offset);
-            }
-        }
-        else {
-            Kokkos::parallel_for(n, KOKKOS_LAMBDA(int i) {
-                sgp_vid_t hn_i = g.graph.entries(g.graph.row_map(i));
-                sgp_wgt_t max_ewt = g.values(g.graph.row_map(i));
-
-                sgp_eid_t end_offset = g.graph.row_map(i + 1);// +g.edges_per_source[i];
-
-                for (sgp_eid_t j = g.graph.row_map(i) + 1; j < end_offset; j++) {
-                    if (max_ewt < g.values(j)) {
-                        max_ewt = g.values(j);
-                        hn_i = g.graph.entries(j);
-                    }
-
-                }
-                hn[i] = hn_i;
-            });
-        }
-
-        sgp_vid_t nvertices_coarse = 0;
-
-        for (sgp_vid_t i = 0; i < n; i++) {
-            sgp_vid_t u = vperm[i];
-            sgp_vid_t v = hn[u];
-            if (vcmap[u] == SGP_INFTY) {
-                if (vcmap[v] == SGP_INFTY) {
-                    vcmap[v] = nvertices_coarse++;
-                }
-                vcmap[u] = vcmap[v];
-            }
-        }
-
-        free(hn);
-        free(vperm);
-
-        *nvertices_coarse_ptr = nvertices_coarse;
-
-        Kokkos::View<sgp_eid_t*> row_map("interpolate row map", n + 1);
-
-        for (sgp_vid_t u = 0; u < n + 1; u++) {
-            row_map(u) = u;
-        }
-
-        Kokkos::View<sgp_vid_t*> entries("interpolate entries", n);
-        Kokkos::View<sgp_wgt_t*> values("interpolate entries", n);
-        //compute the interpolation weights
-        for (sgp_vid_t u = 0; u < n; u++) {
-            entries(u) = vcmap[u];
-            values(u) = 1.0;
-        }
-        free(vcmap);
-
-        graph_type graph(entries, row_map);
-        interp = matrix_type("interpolate", nvertices_coarse, values, graph);
+        sgp_vid_t v_j = vperm[j];
+        vperm[i] = v_j;
+        vperm[j] = v_i;
     }
-    Kokkos::finalize();
+
+    if (coarsening_level == 1) {
+        //all weights equal at this level so choose heaviest edge randomly
+        for (sgp_vid_t i = 0; i < n; i++) {
+            sgp_vid_t adj_size = g.graph.row_map(i + 1) - g.graph.row_map(i);
+            sgp_vid_t offset = g.graph.row_map(i) + ((sgp_pcg32_random_r(rng)) % adj_size);
+            hn[i] = g.graph.entries(offset);
+        }
+    }
+    else {
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(int i) {
+            sgp_vid_t hn_i = g.graph.entries(g.graph.row_map(i));
+            sgp_wgt_t max_ewt = g.values(g.graph.row_map(i));
+
+            sgp_eid_t end_offset = g.graph.row_map(i + 1);// +g.edges_per_source[i];
+
+            for (sgp_eid_t j = g.graph.row_map(i) + 1; j < end_offset; j++) {
+                if (max_ewt < g.values(j)) {
+                    max_ewt = g.values(j);
+                    hn_i = g.graph.entries(j);
+                }
+
+            }
+            hn[i] = hn_i;
+        });
+    }
+
+    sgp_vid_t nvertices_coarse = 0;
+
+    for (sgp_vid_t i = 0; i < n; i++) {
+        sgp_vid_t u = vperm[i];
+        sgp_vid_t v = hn[u];
+        if (vcmap[u] == SGP_INFTY) {
+            if (vcmap[v] == SGP_INFTY) {
+                vcmap[v] = nvertices_coarse++;
+            }
+            vcmap[u] = vcmap[v];
+        }
+    }
+
+    free(hn);
+    free(vperm);
+
+    *nvertices_coarse_ptr = nvertices_coarse;
+
+    Kokkos::View<sgp_eid_t*> row_map("interpolate row map", n + 1);
+
+    for (sgp_vid_t u = 0; u < n + 1; u++) {
+        row_map(u) = u;
+    }
+
+    Kokkos::View<sgp_vid_t*> entries("interpolate entries", n);
+    Kokkos::View<sgp_wgt_t*> values("interpolate entries", n);
+    //compute the interpolation weights
+    for (sgp_vid_t u = 0; u < n; u++) {
+        entries(u) = vcmap[u];
+        values(u) = 1.0;
+    }
+    free(vcmap);
+
+    graph_type graph(entries, row_map);
+    interp = matrix_type("interpolate", nvertices_coarse, values, graph);
 
     return EXIT_SUCCESS;
 }
