@@ -104,9 +104,9 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
         Kokkos::View<sgp_wgt_t*> weighted_degree("weighted degree",n);
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
             sgp_wgt_t degree_wt_i = 0;
-            sgp_eid_t end_offset = gc.graph.row_map(i + 1);
-            for (sgp_eid_t j = gc.graph.row_map(i); j < end_offset; j++) {
-                degree_wt_i += gc.values(j);
+            sgp_eid_t end_offset = g.graph.row_map(i + 1);
+            for (sgp_eid_t j = g.graph.row_map(i); j < end_offset; j++) {
+                degree_wt_i += g.values(j);
             }
             weighted_degree(i) = degree_wt_i;
         });
@@ -115,8 +115,8 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
         if (!normLap) {
             gb = 2 * weighted_degree(0);
             for (sgp_vid_t i = 1; i < n; i++) {
-                if (gb < 2 * g.weighted_degree(i)) {
-                    gb = 2 * g.weighted_degree(i);
+                if (gb < 2 * weighted_degree(i)) {
+                    gb = 2 * weighted_degree(i);
                 }
             }
         }
