@@ -194,7 +194,7 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graphs, std::list<matrix_type>& interpolates, sgp_pcg32_random_t* rng) {
+SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graphs, std::list<matrix_type>& interpolates, sgp_pcg32_random_t* rng, int refine_alg) {
 
     sgp_vid_t gc_n = graphs.rbegin()->numRows();
     eigenview_t coarse_guess("coarse_guess", gc_n);
@@ -209,7 +209,7 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     //there is always one more refinement than interpolation
     while (graph_iter != graphs.rend()) {
         //refine
-        CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, config->refine_alg, 0
+        CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, refine_alg, 0
 #ifdef EXPERIMENT
             , experiment
 #endif
@@ -224,7 +224,7 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     }
 
     //last refine
-    CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, config->refine_alg, 1
+    CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, refine_alg, 1
 #ifdef EXPERIMENT
         , experiment
 #endif
