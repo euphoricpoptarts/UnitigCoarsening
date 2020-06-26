@@ -81,7 +81,7 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u, const matrix_type& 
         "gap ratio %.0lf\n",
         eigenval * 1e-9,
         eigenval_min, eigenval_max,
-        eigenval * 1e-9 * (g.nvertices) / 4,
+        eigenval * 1e-9 * (g.numRows()) / 4,
         ceil(1.0 / (1.0 - eigenval * 1e-9)));
 }
 
@@ -187,9 +187,6 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
         if (!normLap && final) {
             sgp_power_iter_eigenvalue_log(u, g);
         }
-        if (normLap && final) {
-            free(weighted_degree);
-        }
 
     }
     Kokkos::finalize();
@@ -197,7 +194,7 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graphs, std::list<matrix_type>& interpolates) {
+SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graphs, std::list<matrix_type>& interpolates, sgp_pcg32_random_t* rng) {
 
     sgp_vid_t gc_n = graphs.rbegin()->numRows();
     eigenview_t coarse_guess("coarse_guess", gc_n);
@@ -205,7 +202,7 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     for (sgp_vid_t i = 0; i < gc_n; i++) {
         coarse_guess(i) = ((double)sgp_pcg32_random_r(rng)) / UINT32_MAX;
     }
-    sgp_vec_normalize(coarse_guess, gc_n);
+    sgp_vec_normalize_kokkos(coarse_guess, gc_n);
 
     auto graph_iter = graphs.rbegin(), interp_iter = interpolates.rbegin();
 

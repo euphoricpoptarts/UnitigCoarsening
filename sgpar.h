@@ -2378,7 +2378,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     double fin_coarsening_time = sgp_timer();
     sgp_real_t* eigenvec = (sgp_real_t*)malloc(g.nvertices * sizeof(sgp_real_t));
 
-    CHECK_SGPAR(sgpar_kokkos::sgp_eigensolve(eigenvec, coarse_graphs, interp_mtxs));
+    CHECK_SGPAR(sgpar_kokkos::sgp_eigensolve(eigenvec, coarse_graphs, interp_mtxs, rng));
 
     coarse_graphs.clear();
     interp_mtxs.clear();
