@@ -47,6 +47,8 @@ namespace sgpar {
 //extern "C" {
 #endif
 
+//prevent conflicts with definitions_kokkos.h (included from coarsen_kokkos.h)
+#ifndef _KOKKOS
 #ifdef __cplusplus
 #define SGPAR_API 
 #endif // __cplusplus
@@ -68,17 +70,6 @@ namespace sgpar {
 #else
 #define SGPAR_ASSERT(expr) 
 #endif
-
-//typedef struct { uint64_t niters; int max_iter_reached; long edge_cut; long swaps; } sgp_refine_stats;
-
-typedef struct configuration {
-    int coarsening_alg;
-    int refine_alg;
-    int local_search_alg;
-    int num_iter;
-    double tol;
-    int num_partitions;
-} config_t;
 
 /**********************************************************
  *  PCG Random Number Generator
@@ -154,11 +145,11 @@ static sgp_real_t MAX_COARSEN_RATIO = 0.9;
 typedef struct {
     sgp_vid_t   nvertices;
     sgp_eid_t   nedges;
-    sgp_eid_t *source_offsets;
-    sgp_vid_t *edges_per_source;
-    sgp_vid_t *destination_indices;
-    sgp_wgt_t *weighted_degree;
-    sgp_wgt_t *eweights;
+    sgp_eid_t* source_offsets;
+    sgp_vid_t* edges_per_source;
+    sgp_vid_t* destination_indices;
+    sgp_wgt_t* weighted_degree;
+    sgp_wgt_t* eweights;
 } sgp_graph_t;
 
 #define CHECK_SGPAR(func)                                                      \
@@ -181,20 +172,30 @@ typedef struct {
     }                                                                          \
 }
 
-SGPAR_API int change_tol(sgp_real_t new_tol){
-    SGPAR_POWERITER_TOL = new_tol;
-
-    return EXIT_SUCCESS;
-}
-
 SGPAR_API double sgp_timer() {
 #ifdef _OPENMP
     return omp_get_wtime();
 #else
     struct timeval tp;
     gettimeofday(&tp, NULL);
-    return (double) (tp.tv_sec + ((1e-6)*tp.tv_usec));
+    return (double)(tp.tv_sec + ((1e-6) * tp.tv_usec));
 #endif
+}
+#endif
+
+typedef struct configuration {
+    int coarsening_alg;
+    int refine_alg;
+    int local_search_alg;
+    int num_iter;
+    double tol;
+    int num_partitions;
+} config_t;
+
+SGPAR_API int change_tol(sgp_real_t new_tol){
+    SGPAR_POWERITER_TOL = new_tol;
+
+    return EXIT_SUCCESS;
 }
 
 SGPAR_API int sgp_coarsen_ACE(sgp_graph_t* interp,
