@@ -198,9 +198,9 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::vector<matrix_type>& graphs, std::vector<matrix_type>& interpolates) {
+SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graphs, std::list<matrix_type>& interpolates) {
 
-    sgp_vid_t gc_n = graphs.back()->numRows();
+    sgp_vid_t gc_n = graphs.rbegin()->numRows();
     eigenview_t coarse_guess("coarse_guess", gc_n);
     //randomly initialize guess eigenvector for coarsest graph
     for (sgp_vid_t i = 0; i < gc_n; i++) {
@@ -208,23 +208,23 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::vector<matrix_type>& gra
     }
     sgp_vec_normalize(coarse_guess, gc_n);
 
-    auto graph_iter = graphs.back(), interp_iter = interpolates.back();
+    auto graph_iter = graphs.rbegin(), interp_iter = interpolates.rbegin();
 
     //there is always one more refinement than interpolation
-    while (graph_iter != graphs.front()) {
+    while (graph_iter != graphs.rend()) {
         //refine
         CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, config->refine_alg, 0
 #ifdef EXPERIMENT
             , experiment
 #endif
             ));
-        graph_iter--;
+        graph_iter++;
 
         //interpolate
         eigenview_t fine_vec("fine vec", graph_iter->numRows());
         KokkosSparse::spmv("N", 1.0, *interp_iter, coarse_guess, 0.0, fine_vec);
         coarse_guess = fine_vec;
-        interp_iter--;
+        interp_iter++;
     }
 
     //last refine

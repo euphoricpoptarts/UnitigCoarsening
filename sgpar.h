@@ -2372,7 +2372,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     double start_time = sgp_timer();
     double time_counters[6] = { 0, 0, 0, 0, 0, 0 };
 
-    std::vector<matrix_type> coarse_graphs, interp_mtxs;
+    std::list<matrix_type> coarse_graphs, interp_mtxs;
     CHECK_SGPAR(sgpar_kokkos::sgp_generate_coarse_graphs(g, coarse_graphs, interp_mtxs, coarsening_level, time_counters));
 
     double fin_coarsening_time = sgp_timer();
