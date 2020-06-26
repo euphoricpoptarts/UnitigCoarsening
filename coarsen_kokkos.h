@@ -51,7 +51,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 
     sgp_vid_t* vcmap = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
 
-    Kokkos::parallel_for(n, KOKKOS_LAMBDA(int i) {
+    Kokkos::parallel_for(host_policy(n), KOKKOS_LAMBDA(int i) {
         vcmap[i] = SGP_INFTY;
         vperm[i] = i;
         hn[i] = SGP_INFTY;
@@ -81,7 +81,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         }
     }
     else {
-        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        Kokkos::parallel_for(host_policy(n), KOKKOS_LAMBDA(sgp_vid_t i) {
             sgp_vid_t hn_i = g.graph.entries(g.graph.row_map(i));
             sgp_wgt_t max_ewt = g.values(g.graph.row_map(i));
 
@@ -116,20 +116,27 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 
     *nvertices_coarse_ptr = nvertices_coarse;
 
-    Kokkos::View<sgp_eid_t*> row_map("interpolate row map", n + 1);
+    edge_view_t row_map("interpolate row map", n + 1);
+    edge_mirror_t row_mirror = Kokkos::create_mirror(row_map);
 
     for (sgp_vid_t u = 0; u < n + 1; u++) {
-        row_map(u) = u;
+        row_mirror(u) = u;
     }
 
-    Kokkos::View<sgp_vid_t*> entries("interpolate entries", n);
-    Kokkos::View<sgp_wgt_t*> values("interpolate entries", n);
+    vtx_view_t entries("interpolate entries", n);
+    vtx_mirror_t entries_mirror = Kokkos::create_mirror(entries);
+    wgt_view_t values("interpolate entries", n);
+    wgt_mirror_t values_mirror = Kokkos::create_mirror(values);
     //compute the interpolation weights
     for (sgp_vid_t u = 0; u < n; u++) {
-        entries(u) = vcmap[u];
-        values(u) = 1.0;
+        entries_mirror(u) = vcmap[u];
+        values_mirror(u) = 1.0;
     }
     free(vcmap);
+
+    Kokkos::deep_copy(row_map, row_mirror);
+    Kokkos::deep_copy(entries, entries_mirror);
+    Kokkos::deep_copy(values, values_mirror);
 
     graph_type graph(entries, row_map);
     interp = matrix_type("interpolate", nvertices_coarse, values, graph);
@@ -235,17 +242,17 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
         wgt_coarse
         );
 
-    sgp_eid_t* nonLoops = (sgp_eid_t*)malloc(nc * sizeof(sgp_eid_t));
+    edge_view_t nonLoops("nonLoop", nc);
 
     //gonna reuse this to count non-self loop edges
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
-        nonLoops[i] = 0;
+        nonLoops(i) = 0;
     });
 
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
         for (sgp_eid_t j = row_map_coarse(u); j < row_map_coarse(u + 1); j++) {
             if (adj_coarse(j) != u) {
-                nonLoops[u]++;
+                nonLoops(u)++;
             }
         }
     });
@@ -269,7 +276,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     Kokkos::View<sgp_wgt_t*> values_nonloop("nonloop values", row_map_nonloop(nc));
 
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
-        nonLoops[i] = 0;
+        nonLoops(i) = 0;
     });
 
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
@@ -281,7 +288,6 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
             }
         }
     });
-    free(nonLoops);
 
     kh.destroy_spgemm_handle();
 
@@ -485,17 +491,24 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
 
 SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<matrix_type>& coarse_graphs, std::list<matrix_type>& interp_mtxs, sgp_pcg32_random_t* rng, double* time_ptrs) {
     sgp_vid_t fine_n = fine_g->nvertices;
-    Kokkos::View<sgp_eid_t*> row_map("row map", fine_n + 1);
-    Kokkos::View<sgp_vid_t*> entries("entries", fine_g->source_offsets[fine_n]);
-    Kokkos::View<sgp_wgt_t*> values("values", fine_g->source_offsets[fine_n]);
+    edge_view_t row_map("row map", fine_n + 1);
+    edge_mirror_t row_mirror = Kokkos::create_mirror(row_map);
+    vtx_view_t entries("entries", fine_g->source_offsets[fine_n]);
+    vtx_mirror_t entries_mirror = Kokkos::create_mirror(entries);
+    wgt_view_t values("values", fine_g->source_offsets[fine_n]);
+    wgt_mirror_t values_mirror = Kokkos::create_mirror(values);
 
     for (sgp_vid_t u = 0; u < fine_g->nvertices + 1; u++) {
-        row_map(u) = fine_g->source_offsets[u];
+        row_mirror(u) = fine_g->source_offsets[u];
     }
     for (sgp_vid_t i = 0; i < fine_g->source_offsets[fine_n]; i++) {
-        entries(i) = fine_g->destination_indices[i];
-        values(i) = 1.0;
+        entries_mirror(i) = fine_g->destination_indices[i];
+        values_mirror(i) = 1.0;
     }
+
+    Kokkos::deep_copy(row_map, row_mirror);
+    Kokkos::deep_copy(entries, entries_mirror);
+    Kokkos::deep_copy(values, values_mirror);
 
     graph_type fine_graph(entries, row_map);
     coarse_graphs.push_back(matrix_type("interpolate", fine_g->nvertices, values, fine_graph));

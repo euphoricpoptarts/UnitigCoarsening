@@ -114,8 +114,17 @@ namespace sgpar {
     }
 
     namespace sgpar_kokkos {
-        typedef Kokkos::OpenMP Device;
+        typedef Kokkos::Device<Kokkos::DefaultExecutionSpace, typename Kokkos::DefaultExecutionSpace::memory_space> Device;
         using matrix_type = typename KokkosSparse::CrsMatrix<sgp_wgt_t, sgp_eid_t, Device, void, sgp_eid_t>;
         using graph_type = typename matrix_type::staticcrsgraph_type;
+
+        using host_policy = Kokkos::RangePolicy<Kokkos::OpenMP>;
+
+        using edge_view_t = Kokkos::View<sgp_eid_t*>;
+        using edge_mirror_t = edge_view_t::HostMirror;
+        using vtx_view_t = Kokkos::View<sgp_vid_t*>;
+        using vtx_mirror_t = vtx_view_t::HostMirror;
+        using wgt_view_t = Kokkos::View<sgp_wgt_t*>;
+        using wgt_mirror_t = wgt_view_t::HostMirror;
     }
 }

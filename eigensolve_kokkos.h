@@ -85,11 +85,13 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u, const matrix_type& 
         ceil(1.0 / (1.0 - eigenval * 1e-9)));
 }
 
-SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, int final
+SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g_device, int normLap, int final
 #ifdef EXPERIMENT
     , ExperimentLoggerUtil& experiment
 #endif
     ) {
+
+    matrix_type::HostMirror g = Kokkos::create_mirror(g_device);
 
     sgp_vid_t n = g.numRows();
 
