@@ -201,7 +201,7 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     auto graph_iter = graphs.rbegin(), interp_iter = interpolates.rbegin();
 
     //there is always one more refinement than interpolation
-    while (graph_iter != graphs.rend()) {
+    while (graph_iter != graphs.begin()) {
         //refine
         CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, refine_alg, 0
 #ifdef EXPERIMENT
