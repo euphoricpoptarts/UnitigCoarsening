@@ -199,9 +199,10 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     sgp_vec_normalize_kokkos(coarse_guess, gc_n);
 
     auto graph_iter = graphs.rbegin(), interp_iter = interpolates.rbegin();
+    auto end = --graphs.rend();
 
     //there is always one more refinement than interpolation
-    while (graph_iter != graphs.begin()) {
+    while (graph_iter != end) {
         //refine
         CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, refine_alg, 0
 #ifdef EXPERIMENT
