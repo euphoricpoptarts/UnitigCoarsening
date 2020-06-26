@@ -492,7 +492,7 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int sgp_generate_coarse_graphs(sgp_graph_t* fine_g, std::list<matrix_type>& coarse_graphs, std::list<matrix_type>& interp_mtxs, int& coarsening_level, double* time_ptrs) {
+SGPAR_API int sgp_generate_coarse_graphs(sgp_graph_t* fine_g, std::list<matrix_type>& coarse_graphs, std::list<matrix_type>& interp_mtxs, int& coarsening_level, sgp_pcg32_random_t* rng, double* time_ptrs) {
     Kokkos::View<sgp_eid_t*> row_map("row map", fine_g->nvertices + 1);
     Kokkos::View<sgp_vid_t*> entries("entries", fine_g->nedges);
     Kokkos::View<sgp_wgt_t*> values("values", fine_g->nedges);
@@ -509,7 +509,7 @@ SGPAR_API int sgp_generate_coarse_graphs(sgp_graph_t* fine_g, std::list<matrix_t
     coarse_graphs.push_back(matrix_type("interpolate", fine_g->nvertices, values, fine_graph));
 
     coarsening_level = 0;
-    while (coarse_graphs.rbegin()->nvertices > SGPAR_COARSENING_VTX_CUTOFF) {
+    while (coarse_graphs.rbegin()->numRows() > SGPAR_COARSENING_VTX_CUTOFF) {
         printf("Calculating coarse graph %d\n", coarse_graphs.size());
 
         coarse_graphs.push_back(matrix_type());
@@ -528,7 +528,7 @@ SGPAR_API int sgp_generate_coarse_graphs(sgp_graph_t* fine_g, std::list<matrix_t
     }
 
     //don't use the coarsest level if it has too few vertices
-    if (coarse_graphs.rbegin()->nvertices < 30) {
+    if (coarse_graphs.rbegin()->numRows() < 30) {
         coarse_graphs.pop_back();
         interp_mtxs.pop_back();
         coarsening_level--;
