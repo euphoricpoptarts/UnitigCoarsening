@@ -3,7 +3,7 @@
 #include "definitions_kokkos.h"
 #include "KokkosBlas1_dot.hpp"
 
-namespace sgpar_kokkos {
+namespace sgpar::sgpar_kokkos {
 
 using eigenview_t = Kokkos::View<sgp_real_t*>;
 

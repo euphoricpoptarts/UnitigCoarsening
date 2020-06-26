@@ -1,6 +1,6 @@
 #pragma once
 
-namespace sgpar_kokkos {
+namespace sgpar {
 
 #ifdef __cplusplus
 #define SGPAR_API 
@@ -103,10 +103,6 @@ namespace sgpar_kokkos {
     }                                                                          \
 }
 
-    typedef Kokkos::OpenMP Device;
-    using matrix_type = typename KokkosSparse::CrsMatrix<sgp_wgt_t, sgp_eid_t, Device, void, sgp_eid_t>;
-    using graph_type = typename matrix_type::staticcrsgraph_type;
-
     SGPAR_API double sgp_timer() {
 #ifdef _OPENMP
         return omp_get_wtime();
@@ -115,5 +111,11 @@ namespace sgpar_kokkos {
         gettimeofday(&tp, NULL);
         return (double)(tp.tv_sec + ((1e-6) * tp.tv_usec));
 #endif
+    }
+
+    namespace sgpar_kokkos {
+        typedef Kokkos::OpenMP Device;
+        using matrix_type = typename KokkosSparse::CrsMatrix<sgpar::sgp_wgt_t, sgp_eid_t, Device, void, sgp_eid_t>;
+        using graph_type = typename matrix_type::staticcrsgraph_type;
     }
 }

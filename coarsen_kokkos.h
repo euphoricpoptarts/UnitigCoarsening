@@ -33,7 +33,7 @@
 
 #include "definitions_kokkos.h"
 
-namespace sgpar_kokkos {
+namespace sgpar::sgpar_kokkos {
 
 SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     sgp_vid_t* nvertices_coarse_ptr,
