@@ -484,14 +484,15 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
 }
 
 SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<matrix_type>& coarse_graphs, std::list<matrix_type>& interp_mtxs, sgp_pcg32_random_t* rng, double* time_ptrs) {
-    Kokkos::View<sgp_eid_t*> row_map("row map", fine_g->nvertices + 1);
-    Kokkos::View<sgp_vid_t*> entries("entries", fine_g->nedges);
-    Kokkos::View<sgp_wgt_t*> values("values", fine_g->nedges);
+    sgp_vid_t fine_n = fine_g->nvertices;
+    Kokkos::View<sgp_eid_t*> row_map("row map", fine_n + 1);
+    Kokkos::View<sgp_vid_t*> entries("entries", fine_g->source_offsets[fine_n]);
+    Kokkos::View<sgp_wgt_t*> values("values", fine_g->source_offsets[fine_n]);
 
     for (sgp_vid_t u = 0; u < fine_g->nvertices + 1; u++) {
         row_map(u) = fine_g->source_offsets[u];
     }
-    for (sgp_vid_t i = 0; i < fine_g->nedges; i++) {
+    for (sgp_vid_t i = 0; i < fine_g->source_offsets[fine_n]; i++) {
         entries(i) = fine_g->destination_indices[i];
         values(i) = 1.0;
     }
