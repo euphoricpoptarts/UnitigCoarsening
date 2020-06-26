@@ -514,15 +514,16 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
 
         coarse_graphs.push_back(matrix_type());
         interp_mtxs.push_back(matrix_type());
+        auto end_pointer = coarse_graphs.rbegin();
 
-        CHECK_SGPAR(sgp_coarsen_one_level(*(coarse_graphs.rbegin()+1),
+        CHECK_SGPAR(sgp_coarsen_one_level(*(++coarse_graphs.rbegin()),
             *interp_mtxs.rbegin(),
             *coarse_graphs.rbegin(),
             ++coarsening_level,
             rng, time_ptrs));
 
 #ifdef DEBUG
-        sgp_real_t coarsen_ratio = (sgp_real_t) coarse_graphs.rbegin()->nvertices / (sgp_real_t) (coarse_graphs.rbegin() + 1)->nvertices;
+        sgp_real_t coarsen_ratio = (sgp_real_t) coarse_graphs.rbegin()->nvertices / (sgp_real_t) (++coarse_graphs.rbegin())->nvertices;
         printf("Coarsening ratio: %.8f\n", coarsen_ratio);
 #endif
     }
