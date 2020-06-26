@@ -507,9 +507,9 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
         interp_mtxs.push_back(matrix_type());
         auto end_pointer = coarse_graphs.rbegin();
 
-        CHECK_SGPAR(sgp_coarsen_one_level(*(++coarse_graphs.rbegin()),
+        CHECK_SGPAR(sgp_coarsen_one_level(*coarse_graphs.rbegin(),
             *interp_mtxs.rbegin(),
-            *coarse_graphs.rbegin(),
+            *(++coarse_graphs.rbegin()),
             ++coarsening_level,
             rng, time_ptrs));
 
