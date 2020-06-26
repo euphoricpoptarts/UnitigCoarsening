@@ -2368,6 +2368,47 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                     (uint64_t) SGPAR_POWERITER_ITER,
                     SGPAR_POWERITER_TOL);
 
+#ifdef _KOKKOS
+    double start_time = sgp_timer();
+    double time_counters[6] = { 0, 0, 0, 0, 0, 0 };
+
+    std::vector<matrix_type> coarse_graphs, interp_mtxs;
+    CHECK_SGPAR(sgpar_kokkos::sgp_generate_coarse_graphs(g, coarse_graphs, interp_mtxs, coarsening_level, time_counters));
+
+    double fin_coarsening_time = sgp_timer();
+    sgp_real_t* eigenvec = (sgp_real_t*)malloc(g.nvertices * sizeof(sgp_real_t));
+
+    CHECK_SGPAR(sgpar_kokkos::sgp_eigensolve(eigenvec, coarse_graphs, interp_mtxs));
+
+    coarse_graphs.clear();
+    interp_mtxs.clear();
+    double fin_final_level_time = sgp_timer();
+    //I don't feel like redoing the timing stuff rn
+    double fin_refine_time = sgp_timer();
+
+    sgp_compute_partition(part, config->num_partitions, edge_cut,
+        perc_imbalance_allowed,
+        config->local_search_alg,
+        eigenvec, g);
+
+    free(eigenvec);
+
+    printf("Total: %3.3lf s, coarsening %3.3lf %3.0lf%% "
+        "(sort %3.3lf %3.0lf%%), "
+        "refine %3.3lf s (%3.3lf s, %3.0lf%% + %3.3lf, %3.0lf%%)\n",
+        fin_final_level_time - start_time,
+        fin_coarsening_time - start_time,
+        (fin_coarsening_time - start_time) * 100 / (fin_final_level_time - start_time),
+        time_counters[1],
+        time_counters[1] * 100 / (fin_final_level_time - start_time),
+        fin_final_level_time - fin_coarsening_time,
+        fin_final_level_time - fin_refine_time,
+        100 * (fin_final_level_time - fin_refine_time) / (fin_final_level_time - start_time),
+        fin_refine_time - fin_coarsening_time,
+        100 * (fin_refine_time - fin_coarsening_time) /
+    (fin_final_level_time - start_time));
+#else
+
     int coarsening_level = 0;
     sgp_graph_t g_all[SGPAR_COARSENING_MAXLEVELS];
     sgp_vid_t *vcmap[SGPAR_COARSENING_MAXLEVELS];
@@ -2387,10 +2428,6 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     double start_time = sgp_timer();
     double time_counters[6] = { 0, 0, 0, 0, 0, 0 };
 
-#ifdef _KOKKOS
-    std::vector<matrix_type> coarse_graphs, interp_mtxs;
-    sgpar_kokkos::sgp_generate_coarse_graphs(g_all[0], coarse_graphs, interp_mtxs, coarsening_level, time_counters);
-#else
     int coarsen_ratio_exceeded = 0;
     //generate all coarse graphs
     while ((coarsening_level < (SGPAR_COARSENING_MAXLEVELS-1)) && 
@@ -2601,6 +2638,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                            perc_imbalance_allowed,
                            eigenvec[0], g);
     free(eigenvec[0]);
+#endif
 
     return EXIT_SUCCESS;
 }

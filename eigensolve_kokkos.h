@@ -4,6 +4,8 @@
 
 using eigenview_t = Kokkos::View<sgp_real_t*>;
 
+namespace sgpar_kokkos {
+
 SGPAR_API int sgp_vec_normalize_kokkos(eigenview_t& u, sgp_vid_t n) {
 
     assert(u != NULL);
@@ -196,7 +198,7 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int eigensolve(sgp_real_t* eigenvec, std::vector<matrix_type>& graphs, std::vector<matrix_type>& interpolates) {
+SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::vector<matrix_type>& graphs, std::vector<matrix_type>& interpolates) {
 
     sgp_vid_t gc_n = graphs.back()->numRows();
     eigenview_t coarse_guess("coarse_guess", gc_n);
@@ -237,4 +239,6 @@ SGPAR_API int eigensolve(sgp_real_t* eigenvec, std::vector<matrix_type>& graphs,
     });
 
     return EXIT_SUCCESS;
+}
+
 }
