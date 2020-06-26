@@ -144,7 +144,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     double* time_ptrs) {
 
     sgp_vid_t n = g.numRows();
-    sgp_vid_t nc = gc.numRows();
+    sgp_vid_t nc = interp_mtx.numCols();
 
     matrix_type interp_transpose = KokkosKernels::Impl::transpose_matrix(interp_mtx);
 
