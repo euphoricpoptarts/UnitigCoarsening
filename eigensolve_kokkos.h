@@ -58,9 +58,10 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u_device, const matrix
     sgp_real_t eigenval_max = 0;
     sgp_real_t eigenval_min = 2;
 
-    matrix_type::staticcrsgraph_type::HostMirror graph = Kokkos::create_mirror(g_device.graph);
-    Kokkos::deep_copy(graph.row_map, g_device.graph.row_map);
-    Kokkos::deep_copy(graph.entries, g_device.graph.entries);
+    edge_mirror_t row_map = Kokkos::create_mirror(g_device.graph.row_map);
+    Kokkos::deep_copy(row_map, g_device.graph.row_map);
+    vtx_mirror_t entries = Kokkos::create_mirror(g_device.graph.entries);
+    Kokkos::deep_copy(entries, g_device.graph.entries);
     wgt_mirror_t values = Kokkos::create_mirror(g_device.values);
     Kokkos::deep_copy(values, g_device.values);
 
@@ -69,12 +70,12 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u_device, const matrix
     sgp_vid_t n = g_device.numRows();
 
     for (sgp_vid_t i = 0; i < n; i++) {
-        sgp_vid_t weighted_degree = graph.row_map(i + 1) - graph.row_map(i);
+        sgp_vid_t weighted_degree = row_map(i + 1) - row_map(i);
         sgp_real_t u_i = weighted_degree * u(i);
         sgp_real_t matvec_i = 0;
-        for (sgp_eid_t j = graph.row_map(i);
-            j < graph.row_map(i + 1); j++) {
-            matvec_i += u(graph.entries(j));
+        for (sgp_eid_t j = row_map(i);
+            j < row_map(i + 1); j++) {
+            matvec_i += u(entries(j));
         }
         u_i -= matvec_i;
         sgp_real_t eigenval_est = u_i / u(i);
