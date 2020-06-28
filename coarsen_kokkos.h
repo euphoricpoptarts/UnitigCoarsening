@@ -81,7 +81,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         }
     }
     else {
-        Kokkos::parallel_for(host_policy(n), KOKKOS_LAMBDA(sgp_vid_t i) {
+        Kokkos::parallel_for(host_policy(0, n), KOKKOS_LAMBDA(sgp_vid_t i) {
             sgp_vid_t hn_i = g.graph.entries(g.graph.row_map(i));
             sgp_wgt_t max_ewt = g.values(g.graph.row_map(i));
 

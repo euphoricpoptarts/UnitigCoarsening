@@ -53,10 +53,13 @@ SGPAR_API int sgp_vec_D_orthogonalize_kokkos(eigenview_t& u1, eigenview_t& u2,
     return EXIT_SUCCESS;
 }
 
-SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u, const matrix_type& g) {
+SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u, const matrix_type& g_device) {
     sgp_real_t eigenval = 0;
     sgp_real_t eigenval_max = 0;
     sgp_real_t eigenval_min = 2;
+
+    matrix_type::HostMirror g = Kokkos::create_mirror(g_device);
+
     for (sgp_vid_t i = 0; i < (g.numRows()); i++) {
         sgp_vid_t weighted_degree = g.graph.row_map(i + 1) - g.graph.row_map(i);
         sgp_real_t u_i = weighted_degree * u(i);
@@ -85,13 +88,11 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u, const matrix_type& 
         ceil(1.0 / (1.0 - eigenval * 1e-9)));
 }
 
-SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g_device, int normLap, int final
+SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, int final
 #ifdef EXPERIMENT
     , ExperimentLoggerUtil& experiment
 #endif
     ) {
-
-    matrix_type::HostMirror g = Kokkos::create_mirror(g_device);
 
     sgp_vid_t n = g.numRows();
 
