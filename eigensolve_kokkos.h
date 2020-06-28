@@ -63,7 +63,9 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u_device, const matrix
 
     eigenview_t::HostMirror u = Kokkos::create_mirror(u_device);
 
-    for (sgp_vid_t i = 0; i < (g.numRows()); i++) {
+    sgp_vid_t n = g_device.numRows();
+
+    for (sgp_vid_t i = 0; i < n; i++) {
         sgp_vid_t weighted_degree = graph.row_map(i + 1) - graph.row_map(i);
         sgp_real_t u_i = weighted_degree * u(i);
         sgp_real_t matvec_i = 0;
@@ -87,7 +89,7 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u_device, const matrix
         "gap ratio %.0lf\n",
         eigenval * 1e-9,
         eigenval_min, eigenval_max,
-        eigenval * 1e-9 * (g.numRows()) / 4,
+        eigenval * 1e-9 * n / 4,
         ceil(1.0 / (1.0 - eigenval * 1e-9)));
 }
 
