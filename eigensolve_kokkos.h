@@ -66,6 +66,7 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u_device, const matrix
     Kokkos::deep_copy(values, g_device.values);
 
     eigenview_t::HostMirror u = Kokkos::create_mirror(u_device);
+    Kokkos::deep_copy(u, u_device);
 
     sgp_vid_t n = g_device.numRows();
 
