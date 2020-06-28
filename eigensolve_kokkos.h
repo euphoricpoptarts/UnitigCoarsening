@@ -59,7 +59,9 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u_device, const matrix
     sgp_real_t eigenval_min = 2;
 
     matrix_type::staticcrsgraph_type::HostMirror graph = Kokkos::create_mirror(g_device.graph);
+    Kokkos::deep_copy(graph, g_device.graph);
     wgt_mirror_t values = Kokkos::create_mirror(g_device.values);
+    Kokkos::deep_copy(values, g_device.values);
 
     eigenview_t::HostMirror u = Kokkos::create_mirror(u_device);
 
@@ -234,6 +236,7 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
         ));
 
     eigenview_t::HostMirror eigenmirror = Kokkos::create_mirror(coarse_guess);
+    Kokkos::deep_copy(eigenmirror, coarse_guess);
 
     Kokkos::parallel_for(graph_iter->numRows(), KOKKOS_LAMBDA(sgp_vid_t i) {
         eigenvec[i] = eigenmirror(i);
