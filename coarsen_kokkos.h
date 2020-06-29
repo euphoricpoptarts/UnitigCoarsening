@@ -196,7 +196,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     
     KokkosSparse::spgemm_symbolic(
         kh,
-        midpoint
+        midpoint,
         false,
         interp_mtx,
         false,
@@ -205,7 +205,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
 
     KokkosSparse::spgemm_numeric(
         kh,
-        midpoint
+        midpoint,
         false,
         interp_mtx,
         false,
