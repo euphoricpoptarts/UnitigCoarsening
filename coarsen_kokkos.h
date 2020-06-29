@@ -163,83 +163,52 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     kh.set_team_work_size(16);
     kh.set_dynamic_scheduling(true);
 
-    // Select an spgemm algorithm, limited by configuration at compile-time and set via the handle
-    // Some options: {SPGEMM_KK_MEMORY, SPGEMM_KK_SPEED, SPGEMM_KK_MEMSPEED, /*SPGEMM_CUSPARSE, */ SPGEMM_MKL}
-    KokkosSparse::SPGEMMAlgorithm spgemm_algorithm = KokkosSparse::SPGEMM_KK_SPEED;
+    // Select an spgemm algorithm, limited by configuration at compile-time and
+        // set via the handle Some options: {SPGEMM_KK_MEMORY, SPGEMM_KK_SPEED,
+        // SPGEMM_KK_MEMSPEED, /*SPGEMM_CUSPARSE, */ SPGEMM_MKL}
+    std::string myalg("SPGEMM_KK_SPEED");
+    KokkosSparse::SPGEMMAlgorithm spgemm_algorithm =
+        KokkosSparse::StringToSPGEMMAlgorithm(myalg);
     kh.create_spgemm_handle(spgemm_algorithm);
 
-    Kokkos::View<sgp_eid_t*> row_map_p1("rows_partial", nc + 1);
-    KokkosSparse::Experimental::spgemm_symbolic(
-        &kh,
-        nc,
-        n,
-        n,
-        interp_transpose.graph.row_map,
-        interp_transpose.graph.entries,
+    matrix_type midpoint;
+
+    KokkosSparse::spgemm_symbolic(
+        kh
+        interp_transpose,
         false,
-        g.graph.row_map,
-        g.graph.entries,
+        g,
         false,
-        row_map_p1
+        midpoint
         );
 
-    //partial-result matrix
-    Kokkos::View<sgp_vid_t*> entries_p1("adjacencies_partial", kh.get_spgemm_handle()->get_c_nnz());
-    Kokkos::View<sgp_wgt_t*> values_p1("weights_partial", kh.get_spgemm_handle()->get_c_nnz());
-
-    KokkosSparse::Experimental::spgemm_numeric(
-        &kh,
-        nc,
-        n,
-        n,
-        interp_transpose.graph.row_map,
-        interp_transpose.graph.entries,
-        interp_transpose.values,
+    KokkosSparse::spgemm_numeric(
+        kh
+        interp_transpose,
         false,
-        g.graph.row_map,
-        g.graph.entries,
-        g.values,
+        g,
         false,
-        row_map_p1,
-        entries_p1,
-        values_p1
+        midpoint
         );
 
-
-    Kokkos::View<sgp_eid_t*> row_map_coarse("rows_coarse", nc + 1);
-    KokkosSparse::Experimental::spgemm_symbolic(
-        &kh,
-        nc,
-        n,
-        nc,
-        row_map_p1,
-        entries_p1,
+    matrix_type selfLoopy;
+    
+    KokkosSparse::spgemm_symbolic(
+        kh,
+        midpoint
         false,
-        interp_mtx.graph.row_map,
-        interp_mtx.graph.entries,
+        interp_mtx,
         false,
-        row_map_coarse
+        selfLoopy
         );
-    //coarse-graph adjacency matrix
-    Kokkos::View<sgp_vid_t*> adj_coarse("adjacencies_coarse", kh.get_spgemm_handle()->get_c_nnz());
-    Kokkos::View<sgp_wgt_t*> wgt_coarse("weights_coarse", kh.get_spgemm_handle()->get_c_nnz());
 
-    KokkosSparse::Experimental::spgemm_numeric(
-        &kh,
-        nc,
-        n,
-        nc,
-        row_map_p1,
-        entries_p1,
-        values_p1,
+    KokkosSparse::spgemm_numeric(
+        kh,
+        midpoint
         false,
-        interp_mtx.graph.row_map,
-        interp_mtx.graph.entries,
-        interp_mtx.values,
+        interp_mtx,
         false,
-        row_map_coarse,
-        adj_coarse,
-        wgt_coarse
+        selfLoopy
         );
 
     edge_view_t nonLoops("nonLoop", nc);
@@ -250,8 +219,8 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     });
 
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
-        for (sgp_eid_t j = row_map_coarse(u); j < row_map_coarse(u + 1); j++) {
-            if (adj_coarse(j) != u) {
+        for (sgp_eid_t j = selfLoopy.graph.row_map(u); j < selfLoopy.graph.row_map(u + 1); j++) {
+            if (selfLoopy.graph.entries(j) != u) {
                 nonLoops(u)++;
             }
         }
@@ -280,11 +249,11 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     });
 
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
-        for (sgp_eid_t j = row_map_coarse(u); j < row_map_coarse(u + 1); j++) {
-            if (adj_coarse(j) != u) {
+        for (sgp_eid_t j = selfLoopy.graph.row_map(u); j < selfLoopy.graph.row_map(u + 1); j++) {
+            if (selfLoopy.graph.entries(j) != u) {
                 sgp_eid_t offset = row_map_nonloop(u) + nonLoops[u]++;
-                entries_nonloop(offset) = adj_coarse(j);
-                values_nonloop(offset) = wgt_coarse(j);
+                entries_nonloop(offset) = selfLoopy.graph.entries(j);
+                values_nonloop(offset) = selfLoopy.values(j);
             }
         }
     });
