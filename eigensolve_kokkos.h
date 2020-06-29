@@ -3,7 +3,8 @@
 #include "definitions_kokkos.h"
 #include "KokkosBlas1_dot.hpp"
 
-namespace sgpar::sgpar_kokkos {
+namespace sgpar {
+namespace sgpar_kokkos {
 
 using eigenview_t = Kokkos::View<sgp_real_t*>;
 
@@ -248,4 +249,5 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     return EXIT_SUCCESS;
 }
 
+}
 }

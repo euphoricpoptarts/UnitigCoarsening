@@ -33,7 +33,8 @@
 
 #include "definitions_kokkos.h"
 
-namespace sgpar::sgpar_kokkos {
+namespace sgpar {
+namespace sgpar_kokkos {
 
 SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     sgp_vid_t* nvertices_coarse_ptr,
@@ -512,4 +513,5 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
     return EXIT_SUCCESS;
 }
 
+}
 }
