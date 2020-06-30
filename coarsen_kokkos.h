@@ -115,8 +115,6 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
             vcmap[u] = vcmap[v];
         }
     }
-
-    free(hn);
     free(vperm);
 
     *nvertices_coarse_ptr = nvertices_coarse;
