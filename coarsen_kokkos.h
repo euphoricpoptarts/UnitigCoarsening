@@ -263,7 +263,6 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     });
 
     Kokkos::View<sgp_eid_t*> row_map_nonloop("nonloop row map", nc + 1);
-    row_map_nonloop(0) = 0;
 
     Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
         sgp_eid_t & update, const bool final) {
@@ -277,8 +276,12 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
         }
     });
 
-    Kokkos::View<sgp_vid_t*> entries_nonloop("nonloop entries", row_map_nonloop(nc));
-    Kokkos::View<sgp_wgt_t*> values_nonloop("nonloop values", row_map_nonloop(nc));
+    Kokkos::View<sgp_eid_t*> rmn_subview = Kokkos::subview(row_map_nonloop, std::make_pair(nc, nc + 1));
+    Kokkos::View<sgp_eid_t*> rmn_subview_m = Kokkos::create_mirror(rmn_subview);
+    Kokkos::deep_copy(rmn_subview_m, rmn_subview);
+
+    Kokkos::View<sgp_vid_t*> entries_nonloop("nonloop entries", rmn_subview_m(0));
+    Kokkos::View<sgp_wgt_t*> values_nonloop("nonloop values", rmn_subview_m(0));
 
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
         nonLoops(i) = 0;
