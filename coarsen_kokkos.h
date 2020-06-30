@@ -277,7 +277,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     });
 
     Kokkos::View<sgp_eid_t*> rmn_subview = Kokkos::subview(row_map_nonloop, std::make_pair(nc, nc + 1));
-    Kokkos::View<sgp_eid_t*> rmn_subview_m = Kokkos::create_mirror(rmn_subview);
+    Kokkos::View<sgp_eid_t*>::HostMirror rmn_subview_m = Kokkos::create_mirror(rmn_subview);
     Kokkos::deep_copy(rmn_subview_m, rmn_subview);
 
     Kokkos::View<sgp_vid_t*> entries_nonloop("nonloop entries", rmn_subview_m(0));
