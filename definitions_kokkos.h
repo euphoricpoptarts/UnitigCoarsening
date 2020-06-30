@@ -26,6 +26,7 @@ namespace sgpar {
 
     typedef struct { uint64_t state;  uint64_t inc; } sgp_pcg32_random_t;
 
+    KOKKOS_INLINE_FUNCTION
     uint32_t sgp_pcg32_random_r(sgp_pcg32_random_t* rng) {
         uint64_t oldstate = rng->state;
         // Advance internal state

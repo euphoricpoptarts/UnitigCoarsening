@@ -73,7 +73,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 
     if (coarsening_level == 1) {
         //all weights equal at this level so choose heaviest edge randomly
-        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        Kokkos::parallel_for("Random HN", n, KOKKOS_LAMBDA(sgp_vid_t i) {
             sgp_vid_t adj_size = g.graph.row_map(i + 1) - g.graph.row_map(i);
             sgp_pcg32_random_t copy;
             copy.state = rng->state + i;
@@ -83,7 +83,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         });
     }
     else {
-        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        Kokkos::parallel_for("Heaviest HN", n, KOKKOS_LAMBDA(sgp_vid_t i) {
             sgp_vid_t hn_i = g.graph.entries(g.graph.row_map(i));
             sgp_wgt_t max_ewt = g.values(g.graph.row_map(i));
 
