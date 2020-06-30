@@ -47,15 +47,13 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     sgp_vid_t* vperm = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
     SGPAR_ASSERT(vperm != NULL);
 
-    sgp_vid_t* hn = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
-    SGPAR_ASSERT(hn != NULL);
+    vtx_view_t hn("heavies", n);
 
     sgp_vid_t* vcmap = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
 
     Kokkos::parallel_for(host_policy(0, n), KOKKOS_LAMBDA(int i) {
         vcmap[i] = SGP_INFTY;
         vperm[i] = i;
-        hn[i] = SGP_INFTY;
     });
 
 
@@ -75,14 +73,17 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 
     if (coarsening_level == 1) {
         //all weights equal at this level so choose heaviest edge randomly
-        for (sgp_vid_t i = 0; i < n; i++) {
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
             sgp_vid_t adj_size = g.graph.row_map(i + 1) - g.graph.row_map(i);
-            sgp_vid_t offset = g.graph.row_map(i) + ((sgp_pcg32_random_r(rng)) % adj_size);
-            hn[i] = g.graph.entries(offset);
-        }
+            sgp_pcg32_random_t copy;
+            copy.state = rng->state + i;
+            copy.inc = rng->inc;
+            sgp_vid_t offset = g.graph.row_map(i) + ((sgp_pcg32_random_r(&copy)) % adj_size);
+            hn(i) = g.graph.entries(offset);
+        });
     }
     else {
-        Kokkos::parallel_for(host_policy(0, n), KOKKOS_LAMBDA(sgp_vid_t i) {
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
             sgp_vid_t hn_i = g.graph.entries(g.graph.row_map(i));
             sgp_wgt_t max_ewt = g.values(g.graph.row_map(i));
 
@@ -95,15 +96,18 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
                 }
 
             }
-            hn[i] = hn_i;
+            hn(i) = hn_i;
         });
     }
+
+    vtx_mirror_t hn_m = Kokkos::create_mirror(hn);
+    Kokkos::deep_copy(hn_m, hn);
 
     sgp_vid_t nvertices_coarse = 0;
 
     for (sgp_vid_t i = 0; i < n; i++) {
         sgp_vid_t u = vperm[i];
-        sgp_vid_t v = hn[u];
+        sgp_vid_t v = hn_m(u);
         if (vcmap[u] == SGP_INFTY) {
             if (vcmap[v] == SGP_INFTY) {
                 vcmap[v] = nvertices_coarse++;
