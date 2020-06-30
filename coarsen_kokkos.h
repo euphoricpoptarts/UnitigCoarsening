@@ -72,12 +72,14 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     }
 
     if (coarsening_level == 1) {
+        uint64_t state = rng->state;
+        uint64_t inc = rng->inc;
         //all weights equal at this level so choose heaviest edge randomly
         Kokkos::parallel_for("Random HN", n, KOKKOS_LAMBDA(sgp_vid_t i) {
             sgp_vid_t adj_size = g.graph.row_map(i + 1) - g.graph.row_map(i);
             sgp_pcg32_random_t copy;
-            copy.state = rng->state + i;
-            copy.inc = rng->inc;
+            copy.state = state + i;
+            copy.inc = inc;
             sgp_vid_t offset = g.graph.row_map(i) + ((sgp_pcg32_random_r(&copy)) % adj_size);
             hn(i) = g.graph.entries(offset);
         });
@@ -266,7 +268,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
         sgp_eid_t & update, const bool final) {
         // Load old value in case we update it before accumulating
-        const sgp_eid_t val_i = nonLoops[i];
+        const sgp_eid_t val_i = nonLoops(i);
         // For inclusive scan,
         // change the update value before updating array.
         update += val_i;
