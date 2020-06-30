@@ -51,7 +51,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 
     sgp_vid_t* vcmap = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
 
-    Kokkos::parallel_for(host_policy(0, n), KOKKOS_LAMBDA(int i) {
+    Kokkos::parallel_for("host initialize mapping", host_policy(0, n), KOKKOS_LAMBDA(int i) {
         vcmap[i] = SGP_INFTY;
         vperm[i] = i;
     });
