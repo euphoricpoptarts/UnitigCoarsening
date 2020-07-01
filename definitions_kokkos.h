@@ -116,7 +116,7 @@ namespace sgpar {
 
     namespace sgpar_kokkos {
         typedef Kokkos::Device<Kokkos::DefaultExecutionSpace, typename Kokkos::DefaultExecutionSpace::memory_space> Device;
-        using matrix_type = typename KokkosSparse::CrsMatrix<sgp_wgt_t, sgp_eid_t, Device, void, sgp_eid_t>;
+        using matrix_type = typename KokkosSparse::CrsMatrix<sgp_wgt_t, sgp_vid_t, Device, void, sgp_eid_t>;
         using graph_type = typename matrix_type::staticcrsgraph_type;
 
         using host_policy = Kokkos::RangePolicy<Kokkos::OpenMP>;

@@ -51,7 +51,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 
     sgp_vid_t* vcmap = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
 
-    Kokkos::parallel_for("host initialize mapping", host_policy(0, n), KOKKOS_LAMBDA(int i) {
+    Kokkos::parallel_for("host initialize mapping", host_policy(0, n), KOKKOS_LAMBDA(sgp_vid_t i) {
         vcmap[i] = SGP_INFTY;
         vperm[i] = i;
     });
@@ -130,7 +130,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 
     vtx_view_t entries("interpolate entries", n);
     vtx_mirror_t entries_mirror = Kokkos::create_mirror(entries);
-    wgt_view_t values("interpolate entries", n);
+    wgt_view_t values("interpolate values", n);
     wgt_mirror_t values_mirror = Kokkos::create_mirror(values);
     //compute the interpolation weights
     for (sgp_vid_t u = 0; u < n; u++) {
@@ -161,7 +161,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     matrix_type interp_transpose = KokkosKernels::Impl::transpose_matrix(interp_mtx);
 
     typedef KokkosKernels::Experimental::KokkosKernelsHandle
-        <sgp_eid_t, sgp_eid_t, sgp_wgt_t,
+        <sgp_eid_t, sgp_vid_t, sgp_wgt_t,
         typename Device::execution_space, typename Device::memory_space, typename Device::memory_space > KernelHandle;
 
     KernelHandle kh;
@@ -170,7 +170,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
 
     // Select an spgemm algorithm, limited by configuration at compile-time and set via the handle
     // Some options: {SPGEMM_KK_MEMORY, SPGEMM_KK_SPEED, SPGEMM_KK_MEMSPEED, /*SPGEMM_CUSPARSE, */ SPGEMM_MKL}
-    KokkosSparse::SPGEMMAlgorithm spgemm_algorithm = KokkosSparse::SPGEMM_KK_SPEED;
+    KokkosSparse::SPGEMMAlgorithm spgemm_algorithm = KokkosSparse::SPGEMM_KK_MEMORY;
     kh.create_spgemm_handle(spgemm_algorithm);
 
     Kokkos::View<sgp_eid_t*> row_map_p1("rows_partial", nc + 1);
