@@ -112,7 +112,7 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
         vec1(i) = 1.0;
     });
 
-    Kokkos::View<sgp_wgt_t*> weighted_degree("weighted degree",n);
+    wgt_view_t weighted_degree("weighted degree",n);
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
         sgp_wgt_t degree_wt_i = 0;
         sgp_eid_t end_offset = g.graph.row_map(i + 1);
@@ -124,11 +124,11 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
 
     sgp_wgt_t gb = 2.0;
     if (!normLap) {
-        gb = 2 * weighted_degree(0);
-        for (sgp_vid_t i = 1; i < n; i++) {
-            if (gb < 2 * weighted_degree(i)) {
-                gb = 2 * weighted_degree(i);
-            }
+        Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(sgp_vid_t i, sgp_wgt_t local_max){
+            local_max = 2 * weighted_degree(i);
+        }, Kokkos::Max(gb));
+        if (gb < 2.0) {
+            gb = 2.0;
         }
     }
 
@@ -206,10 +206,12 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
 
     sgp_vid_t gc_n = graphs.rbegin()->numRows();
     eigenview_t coarse_guess("coarse_guess", gc_n);
+    eigenview_t::HostMirror cg_m = Kokkos::create_mirror(coarse_guess);
     //randomly initialize guess eigenvector for coarsest graph
     for (sgp_vid_t i = 0; i < gc_n; i++) {
-        coarse_guess(i) = ((double)sgp_pcg32_random_r(rng)) / UINT32_MAX;
+        cg_m(i) = ((double)sgp_pcg32_random_r(rng)) / UINT32_MAX;
     }
+    Kokkos::deep_copy(cg, cg_m);
     sgp_vec_normalize_kokkos(coarse_guess, gc_n);
 
     auto graph_iter = graphs.rbegin(), interp_iter = interpolates.rbegin();
