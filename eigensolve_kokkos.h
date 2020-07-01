@@ -124,9 +124,9 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
 
     sgp_wgt_t gb = 2.0;
     if (!normLap) {
-        Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(sgp_vid_t i, sgp_wgt_t local_max){
+        Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(sgp_vid_t i, sgp_wgt_t& local_max){
             local_max = 2 * weighted_degree(i);
-        }, Kokkos::Max(gb));
+        }, Kokkos::Max<sgp_wgt_t, Kokkos::DefaultExecutionSpace>(gb));
         if (gb < 2.0) {
             gb = 2.0;
         }
@@ -211,7 +211,7 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     for (sgp_vid_t i = 0; i < gc_n; i++) {
         cg_m(i) = ((double)sgp_pcg32_random_r(rng)) / UINT32_MAX;
     }
-    Kokkos::deep_copy(cg, cg_m);
+    Kokkos::deep_copy(coarse_guess, cg_m);
     sgp_vec_normalize_kokkos(coarse_guess, gc_n);
 
     auto graph_iter = graphs.rbegin(), interp_iter = interpolates.rbegin();
