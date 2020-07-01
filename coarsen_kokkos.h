@@ -536,7 +536,7 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
             rng, time_ptrs));
 
 #ifdef DEBUG
-        sgp_real_t coarsen_ratio = (sgp_real_t) coarse_graphs.rbegin()->nvertices / (sgp_real_t) (++coarse_graphs.rbegin())->nvertices;
+        sgp_real_t coarsen_ratio = (sgp_real_t) coarse_graphs.rbegin()->numRows() / (sgp_real_t) (++coarse_graphs.rbegin())->numRows();
         printf("Coarsening ratio: %.8f\n", coarsen_ratio);
 #endif
     }
