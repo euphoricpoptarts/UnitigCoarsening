@@ -290,7 +290,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
         for (sgp_eid_t j = row_map_coarse(u); j < row_map_coarse(u + 1); j++) {
             if (adj_coarse(j) != u) {
-                sgp_eid_t offset = row_map_nonloop(u) + nonLoops[u]++;
+                sgp_eid_t offset = row_map_nonloop(u) + nonLoops(u)++;
                 entries_nonloop(offset) = adj_coarse(j);
                 values_nonloop(offset) = wgt_coarse(j);
             }
