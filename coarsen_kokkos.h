@@ -44,8 +44,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 
     sgp_vid_t n = g.numRows();
 
-    sgp_vid_t* vperm = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
-    SGPAR_ASSERT(vperm != NULL);
+    vtx_mirror_t vperm("permutation", n);
 
     vtx_view_t hn("heavies", n);
 
@@ -53,12 +52,12 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 
     Kokkos::parallel_for("host initialize mapping", host_policy(0, n), KOKKOS_LAMBDA(sgp_vid_t i) {
         vcmap[i] = SGP_INFTY;
-        vperm[i] = i;
+        vperm(i) = i;
     });
 
 
     for (sgp_vid_t i = n - 1; i > 0; i--) {
-        sgp_vid_t v_i = vperm[i];
+        sgp_vid_t v_i = vperm(i);
 #ifndef SGPAR_HUGEGRAPHS
         uint32_t j = (sgp_pcg32_random_r(rng)) % (i + 1);
 #else
@@ -66,9 +65,9 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         uint64_t j2 = (sgp_pcg32_random_r(rng)) % (i + 1);
         uint64_t j = ((j1 << 32) + j2) % (i + 1);
 #endif 
-        sgp_vid_t v_j = vperm[j];
-        vperm[i] = v_j;
-        vperm[j] = v_i;
+        sgp_vid_t v_j = vperm(j);
+        vperm(i) = v_j;
+        vperm(j) = v_i;
     }
 
     if (coarsening_level == 1) {
@@ -104,20 +103,52 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 
     vtx_mirror_t hn_m = Kokkos::create_mirror(hn);
     Kokkos::deep_copy(hn_m, hn);
+    vtx_mirror_t match("match", n);
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+        match(i) = SGP_INFTY;
+    });
+
+    sgp_vid_t perm_length = n;
 
     sgp_vid_t nvertices_coarse = 0;
+    sgp_vid_t* nvc_p = &nvertices_coarse;
 
-    for (sgp_vid_t i = 0; i < n; i++) {
-        sgp_vid_t u = vperm[i];
-        sgp_vid_t v = hn_m(u);
-        if (vcmap[u] == SGP_INFTY) {
-            if (vcmap[v] == SGP_INFTY) {
-                vcmap[v] = nvertices_coarse++;
+    while (perm_length > 0) {
+        vtx_mirror_t next_perm("next perm", perm_length);
+        sgp_vid_t next_length = 0;
+        sgp_vid_t* nl_p = &next_length;
+        
+        Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
+            sgp_vid_t u = vperm(i);
+            sgp_vid_t v = hn_m(u);
+            if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
+                if (Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
+                    sgp_vid_t cv = Kokkos::atomic_fetch_add(nvc_p, 1);
+                    vcmap[u] = cv;
+                    vcmap[v] = cv;
+                }
+                else {
+                    if (vcmap[v] != SGP_INFTY) {
+                        vcmap[u] = vcmap[v];
+                    }
+                    else {
+                        match(u) = SGP_INFTY;
+                    }
             }
-            vcmap[u] = vcmap[v];
-        }
+        });
+        Kokkos::fence();
+        Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
+            sgp_vid_t u = vperm(i);
+            if (vcmap[u] == SGP_INFTY) {
+                sgp_vid_t add_next = Kokkos::atomic_fetch_add(nl_p, 1);
+                next_perm(add_next) = u;
+            }
+        });
+        Kokkos::fence();
+
+        perm_length = next_length;
+        vperm = next_perm;
     }
-    free(vperm);
 
     *nvertices_coarse_ptr = nvertices_coarse;
 
