@@ -125,7 +125,10 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
     sgp_wgt_t gb = 2.0;
     if (!normLap) {
         Kokkos::parallel_reduce("max weighted degree", n, KOKKOS_LAMBDA(sgp_vid_t i, sgp_wgt_t& local_max){
-            local_max = 2 * weighted_degree(i);
+            sgp_wgt_t swap = 2.0 * weighted_degree(i);
+            if (local_max < swap) {
+                local_max = swap;
+            }
         }, Kokkos::Max<sgp_wgt_t, Kokkos::HostSpace>(gb));
         if (gb < 2.0) {
             gb = 2.0;
