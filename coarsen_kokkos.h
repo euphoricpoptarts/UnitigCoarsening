@@ -75,6 +75,11 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     }
     Kokkos::deep_copy(vperm, perm_m);
 
+    vtx_view_t reverse_map("reversed", n);
+    Kokkos::parallel_for("construct reverse map", n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        reverse_map(vcmap(i)) = i;
+    });
+
     if (coarsening_level == 1) {
         uint64_t state = rng->state;
         uint64_t inc = rng->inc;
@@ -115,6 +120,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     Kokkos::View<sgp_vid_t> nvertices_coarse("nvertices");
 
     //construct mapping using heaviest edges
+    int swap = 1;
     while (perm_length > 0) {
         vtx_view_t next_perm("next perm", perm_length);
         Kokkos::View<sgp_vid_t> next_length("next_length");
@@ -122,18 +128,22 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
             sgp_vid_t u = vperm(i);
             sgp_vid_t v = hn(u);
-            if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
-                if (Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
-                    sgp_vid_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
-                    vcmap(u) = cv;
-                    vcmap(v) = cv;
-                }
-                else {
-                    if (vcmap(v) != SGP_INFTY) {
-                        vcmap(u) = vcmap(v);
+            int condition = reverse_map(u) < reverse_map(v);
+            //need to enforce an ordering condition to allow hard-stall conditions to be broken
+            if (condition ^ swap) {
+                if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
+                    if (Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
+                        sgp_vid_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
+                        vcmap(u) = cv;
+                        vcmap(v) = cv;
                     }
                     else {
-                        match(u) = SGP_INFTY;
+                        if (vcmap(v) != SGP_INFTY) {
+                            vcmap(u) = vcmap(v);
+                        }
+                        else {
+                            match(u) = SGP_INFTY;
+                        }
                     }
                 }
             }
@@ -149,16 +159,13 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
             }
         });
         Kokkos::fence();
-
-        Kokkos::View<sgp_vid_t>::HostMirror nl_m = Kokkos::create_mirror(next_length);
-        Kokkos::deep_copy(nl_m, next_length);
-        perm_length = nl_m();
+        swap = swap ^ 1;
+        Kokkos::deep_copy(perm_length, next_length);
         vperm = next_perm;
     }
 
-    Kokkos::View<sgp_vid_t>::HostMirror nvc_m = Kokkos::create_mirror(nvertices_coarse);
-    Kokkos::deep_copy(nvc_m, nvertices_coarse);
-    sgp_vid_t nc = nvc_m();
+    sgp_vid_t nc = 0;
+    Kokkos::deep_copy(nc, nvertices_coarse);
     *nvertices_coarse_ptr = nc;
 
     edge_view_t row_map("interpolate row map", n + 1);
