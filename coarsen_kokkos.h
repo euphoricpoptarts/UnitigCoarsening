@@ -77,7 +77,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 
     vtx_view_t reverse_map("reversed", n);
     Kokkos::parallel_for("construct reverse map", n, KOKKOS_LAMBDA(sgp_vid_t i) {
-        reverse_map(vcmap(i)) = i;
+        reverse_map(vperm(i)) = i;
     });
 
     if (coarsening_level == 1) {
