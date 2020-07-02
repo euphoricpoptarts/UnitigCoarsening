@@ -134,6 +134,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
                     else {
                         match(u) = SGP_INFTY;
                     }
+                }
             }
         });
         Kokkos::fence();
