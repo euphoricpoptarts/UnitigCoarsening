@@ -112,21 +112,19 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 
     sgp_vid_t perm_length = n;
 
-    sgp_vid_t nvertices_coarse = 0;
-    sgp_vid_t* nvc_p = &nvertices_coarse;
+    Kokkos::View<sgp_vid_t> nvertices_coarse("nvertices");
 
     //construct mapping using heaviest edges
     while (perm_length > 0) {
         vtx_view_t next_perm("next perm", perm_length);
-        sgp_vid_t next_length = 0;
-        sgp_vid_t* nl_p = &next_length;
+        Kokkos::View<sgp_vid_t> next_length("next_length");
         
         Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
             sgp_vid_t u = vperm(i);
             sgp_vid_t v = hn(u);
             if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
                 if (Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
-                    sgp_vid_t cv = Kokkos::atomic_fetch_add(nvc_p, 1);
+                    sgp_vid_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
                     vcmap(u) = cv;
                     vcmap(v) = cv;
                 }
@@ -146,17 +144,22 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
             sgp_vid_t u = vperm(i);
             if (vcmap(u) == SGP_INFTY) {
-                sgp_vid_t add_next = Kokkos::atomic_fetch_add(nl_p, 1);
+                sgp_vid_t add_next = Kokkos::atomic_fetch_add(&next_length(), 1);
                 next_perm(add_next) = u;
             }
         });
         Kokkos::fence();
 
-        perm_length = next_length;
+        Kokkos::View<sgp_vid_t>::HostMirror nl_m = Kokkos::create_mirror(next_length);
+        Kokkos::deep_copy(nl_m, next_length);
+        perm_length = nl_m();
         vperm = next_perm;
     }
 
-    *nvertices_coarse_ptr = nvertices_coarse;
+    Kokkos::View<sgp_vid_t>::HostMirror nvc_m = Kokkos::create_mirror(nvertices_coarse);
+    Kokkos::deep_copy(nvc_m, nvertices_coarse);
+    sgp_vid_t nc = nvc_m();
+    *nvertices_coarse_ptr = nc;
 
     edge_view_t row_map("interpolate row map", n + 1);
 
@@ -173,7 +176,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     });
 
     graph_type graph(entries, row_map);
-    interp = matrix_type("interpolate", nvertices_coarse, values, graph);
+    interp = matrix_type("interpolate", nc, values, graph);
 
     return EXIT_SUCCESS;
 }
