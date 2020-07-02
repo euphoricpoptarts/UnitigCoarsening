@@ -44,20 +44,24 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 
     sgp_vid_t n = g.numRows();
 
-    vtx_mirror_t vperm("permutation", n);
+    vtx_view_t vperm("permutation", n);
+    vtx_mirror_t perm_m = Kokkos::create_mirror(vperm);
 
     vtx_view_t hn("heavies", n);
 
-    sgp_vid_t* vcmap = (sgp_vid_t*)malloc(n * sizeof(sgp_vid_t));
+    vtx_view_t vcmap("vcmap", n);
 
-    Kokkos::parallel_for("host initialize mapping", host_policy(0, n), KOKKOS_LAMBDA(sgp_vid_t i) {
-        vcmap[i] = SGP_INFTY;
-        vperm(i) = i;
+    Kokkos::parallel_for("initialize vcmap", n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        vcmap(i) = SGP_INFTY;
+    });
+
+    Kokkos::parallel_for("host initialize permutation", host_policy(0, n), KOKKOS_LAMBDA(sgp_vid_t i) {
+        perm_m(i) = i;
     });
 
 
     for (sgp_vid_t i = n - 1; i > 0; i--) {
-        sgp_vid_t v_i = vperm(i);
+        sgp_vid_t v_i = perm_m(i);
 #ifndef SGPAR_HUGEGRAPHS
         uint32_t j = (sgp_pcg32_random_r(rng)) % (i + 1);
 #else
@@ -65,10 +69,11 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         uint64_t j2 = (sgp_pcg32_random_r(rng)) % (i + 1);
         uint64_t j = ((j1 << 32) + j2) % (i + 1);
 #endif 
-        sgp_vid_t v_j = vperm(j);
-        vperm(i) = v_j;
-        vperm(j) = v_i;
+        sgp_vid_t v_j = perm_m(j);
+        perm_m(i) = v_j;
+        perm_m(j) = v_i;
     }
+    Kokkos::deep_copy(vperm, perm_m);
 
     if (coarsening_level == 1) {
         uint64_t state = rng->state;
@@ -100,10 +105,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
             hn(i) = hn_i;
         });
     }
-
-    vtx_mirror_t hn_m = Kokkos::create_mirror(hn);
-    Kokkos::deep_copy(hn_m, hn);
-    vtx_mirror_t match("match", n);
+    vtx_view_t match("match", n);
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
         match(i) = SGP_INFTY;
     });
@@ -113,23 +115,24 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     sgp_vid_t nvertices_coarse = 0;
     sgp_vid_t* nvc_p = &nvertices_coarse;
 
+    //construct mapping using heaviest edges
     while (perm_length > 0) {
-        vtx_mirror_t next_perm("next perm", perm_length);
+        vtx_view_t next_perm("next perm", perm_length);
         sgp_vid_t next_length = 0;
         sgp_vid_t* nl_p = &next_length;
         
         Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
             sgp_vid_t u = vperm(i);
-            sgp_vid_t v = hn_m(u);
+            sgp_vid_t v = hn(u);
             if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
                 if (Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
                     sgp_vid_t cv = Kokkos::atomic_fetch_add(nvc_p, 1);
-                    vcmap[u] = cv;
-                    vcmap[v] = cv;
+                    vcmap(u) = cv;
+                    vcmap(v) = cv;
                 }
                 else {
-                    if (vcmap[v] != SGP_INFTY) {
-                        vcmap[u] = vcmap[v];
+                    if (vcmap(v) != SGP_INFTY) {
+                        vcmap(u) = vcmap(v);
                     }
                     else {
                         match(u) = SGP_INFTY;
@@ -138,9 +141,11 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
             }
         });
         Kokkos::fence();
+        //add the ones that failed to be reprocessed next round
+        //maybe count these then create next_perm to save memory?
         Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
             sgp_vid_t u = vperm(i);
-            if (vcmap[u] == SGP_INFTY) {
+            if (vcmap(u) == SGP_INFTY) {
                 sgp_vid_t add_next = Kokkos::atomic_fetch_add(nl_p, 1);
                 next_perm(add_next) = u;
             }
@@ -154,26 +159,18 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     *nvertices_coarse_ptr = nvertices_coarse;
 
     edge_view_t row_map("interpolate row map", n + 1);
-    edge_mirror_t row_mirror = Kokkos::create_mirror(row_map);
 
-    for (sgp_vid_t u = 0; u < n + 1; u++) {
-        row_mirror(u) = u;
-    }
+    Kokkos::parallel_for(n + 1, KOKKOS_LAMBDA(sgp_vid_t u){
+        row_map(u) = u;
+    });
 
     vtx_view_t entries("interpolate entries", n);
-    vtx_mirror_t entries_mirror = Kokkos::create_mirror(entries);
     wgt_view_t values("interpolate values", n);
-    wgt_mirror_t values_mirror = Kokkos::create_mirror(values);
     //compute the interpolation weights
-    for (sgp_vid_t u = 0; u < n; u++) {
-        entries_mirror(u) = vcmap[u];
-        values_mirror(u) = 1.0;
-    }
-    free(vcmap);
-
-    Kokkos::deep_copy(row_map, row_mirror);
-    Kokkos::deep_copy(entries, entries_mirror);
-    Kokkos::deep_copy(values, values_mirror);
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t u){
+        entries(u) = vcmap(u);
+        values(u) = 1.0;
+    });
 
     graph_type graph(entries, row_map);
     interp = matrix_type("interpolate", nvertices_coarse, values, graph);
