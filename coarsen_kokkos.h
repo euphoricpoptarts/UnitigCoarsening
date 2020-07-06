@@ -480,7 +480,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
 
             sgp_vid_t v = dest_by_source(i);
 
-            if (map.exist(v)) {
+            if (map.exists(v)) {
                 uint32_t key = map.find(v);
                 sgp_eid_t idx = map.value_at(key);
 
