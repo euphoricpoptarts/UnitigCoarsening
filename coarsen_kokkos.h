@@ -189,7 +189,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 }
 
 //assumes that matrix has one entry-per row, not valid for general matrices
-SGPAR_API int compute_transpose(matrix_type& mtx,
+SGPAR_API int compute_transpose(const matrix_type& mtx,
     matrix_type& transpose) {
     sgp_vid_t n = mtx.numRows();
     sgp_vid_t nc = mtx.numCols();
