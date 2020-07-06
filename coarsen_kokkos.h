@@ -443,7 +443,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     time_ptrs[3] = sgp_timer() - start_prefix;
     double start_bucket = sgp_timer();
 
-    Kokkos::View<sgp_eid_t> sbo_subview = Kokkos::subview(source_bucket_offset, std::make_pair(nc, nc + 1));
+    Kokkos::View<sgp_eid_t> sbo_subview = Kokkos::subview(source_bucket_offset, nc);
     sgp_eid_t size_one = 0;
     Kokkos::deep_copy(size_one, sbo_subview);
 
@@ -490,7 +490,6 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
                 dest_by_source(next_offset) = dest_by_source(i);
                 wgt_by_source(next_offset) = wgt_by_source(i);
                 next_offset++;
-                (*gc_nedges)++;
             }
         }
 
