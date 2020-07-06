@@ -188,6 +188,47 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     return EXIT_SUCCESS;
 }
 
+//assumes that matrix has one entry-per row, not valid for general matrices
+SGPAR_API int compute_transpose(matrix_type& mtx,
+    matrix_type& transpose) {
+    sgp_vid_t n = mtx.numRows();
+    sgp_vid_t nc = mtx.numCols();
+
+    vtx_view_t fine_per_coarse("fine_per_coarse", nc);
+    //transpose interpolation matrix
+    vtx_view_t adj_transpose("adj_transpose", n);
+    wgt_view_t wgt_transpose("weights_transpose", n);
+    edge_view_t row_map_transpose("rows_transpose", nc + 1);
+
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        sgp_vid_t v = mtx.graph.entries(i);
+        Kokkos::atomic_increment(&fine_per_coarse(v));
+    });
+    Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
+        sgp_vid_t & update, const bool final) {
+        // Load old value in case we update it before accumulating
+        const sgp_vid_t val_i = fine_per_coarse(i);
+        // For inclusive scan,
+        // change the update value before updating array.
+        update += val_i;
+        if (final) {
+            row_map_transpose(i + 1) = update; // only update array on final pass
+        }
+    });
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
+        fine_per_coarse(i) = 0;
+    });
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        sgp_vid_t v = mtx.graph.entries(i);
+        sgp_eid_t offset = row_map_transpose[v] + Kokkos::atomic_fetch_add(&fine_per_coarse(v), 1);
+        adj_transpose(offset) = i;
+        wgt_transpose(offset) = 1;
+    });
+
+    graph_type transpose_graph(adj_transpose, row_map_transpose);
+    transpose = matrix_type("transpose", n, wgt_transpose, transpose_graph);
+}
+
 SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     const matrix_type& interp_mtx,
     const matrix_type& g,
@@ -197,7 +238,8 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     sgp_vid_t n = g.numRows();
     sgp_vid_t nc = interp_mtx.numCols();
 
-    matrix_type interp_transpose = KokkosKernels::Impl::transpose_matrix(interp_mtx);
+    matrix_type interp_transpose;// = KokkosKernels::Impl::transpose_matrix(interp_mtx);
+    compute_transpose(interp_mtx, interp_transpose);
 
     typedef KokkosKernels::Experimental::KokkosKernelsHandle
         <sgp_eid_t, sgp_vid_t, sgp_wgt_t,
