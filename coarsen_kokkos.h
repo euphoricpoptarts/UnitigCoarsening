@@ -388,179 +388,150 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     return EXIT_SUCCESS;
 }
 
-#if 0
-SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
-    sgp_vid_t* vcmap,
-    const sgp_graph_t g,
+SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
+    const matrix_type& vcmap,
+    const matrix_type& g,
     const int coarsening_level,
     double* time_ptrs) {
-    sgp_vid_t n = g.nvertices;
-    sgp_vid_t nc = gc->nvertices;
+    sgp_vid_t n = g.numRows();
+    sgp_vid_t nc = vcmap.numCols();
+
+    //radix sort source vertices, then sort edges
 
 
+    vtx_view_t mapped_edges("mapped edges", g.graph.row_map(n));
 
-    Kokkos::initialize();
-    {
-        //radix sort source vertices, then sort edges
+    edge_view_t source_bucket_offset("source_bucket_offsets", nc + 1);
 
+    sgp_eid_t gc_nedges = 0;
 
-        sgp_vid_t* mapped_edges = (sgp_vid_t*)malloc(g.source_offsets[n] * sizeof(sgp_vid_t));
+    vtx_view_t edges_per_source("edges_per_source", nc);
 
-        sgp_eid_t* source_bucket_offset = (sgp_eid_t*)malloc((nc + 1) * sizeof(sgp_eid_t));
-        SGPAR_ASSERT(source_bucket_offset != NULL);
-        source_bucket_offset[0] = 0;
+    double start_count = sgp_timer();
 
-        sgp_vid_t* dest_by_source;
-        sgp_wgt_t* wgt_by_source;
-        sgp_eid_t gc_nedges = 0;
-        sgp_eid_t* gcnp = &gc_nedges;
-
-        sgp_vid_t* edges_per_source = (sgp_vid_t*)malloc(nc * sizeof(sgp_vid_t));
-
-        double start_count = sgp_timer();
-
-        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
-            edges_per_source[i] = 0;
-        });
-
-        //count edges per vertex
-        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
-            sgp_vid_t u = vcmap[i];
-            sgp_eid_t end_offset = g.source_offsets[i + 1];
-            if (coarsening_level != 1) {
-                end_offset = g.source_offsets[i] + g.edges_per_source[i];
+    //count edges per vertex
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        sgp_vid_t u = vcmap.graph.entries(i);
+        for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+            sgp_vid_t v = vcmap.graph.entries(g.graph.entries(j));
+            mapped_edges(j) = v;
+            if (u != v) {
+                Kokkos::atomic_increment(&edges_per_source(u));
             }
-            for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
-                sgp_vid_t v = vcmap[g.destination_indices[j]];
-                mapped_edges[j] = v;
-                if (u != v) {
-                    Kokkos::atomic_increment(edges_per_source + u);
-                }
+        }
+    });
+
+    time_ptrs[2] = sgp_timer() - start_count;
+    double start_prefix = sgp_timer();
+
+    Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
+        sgp_eid_t & update, const bool final) {
+        // Load old value in case we update it before accumulating
+        const sgp_eid_t val_i = edges_per_source(i);
+        // For inclusive scan,
+        // change the update value before updating array.
+        update += val_i;
+        if (final) {
+            source_bucket_offset(i + 1) = update; // only update array on final pass
+        }
+    });
+
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
+        edges_per_source(i) = 0; // will use as counter again
+    });
+
+    time_ptrs[3] = sgp_timer() - start_prefix;
+    double start_bucket = sgp_timer();
+
+    Kokkos::View<sgp_eid_t> sbo_subview = Kokkos::subview(source_bucket_offset, std::make_pair(nc, nc + 1));
+    sgp_eid_t size_one = 0;
+    Kokkos::deep_copy(size_one, sbo_subview);
+
+    vtx_view_t dest_by_source("dest_by_source", size_one);
+    wgt_view_t wgt_by_source("wgt_by_source", size_one);
+
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        sgp_vid_t u = vcmap.graph.entries(i);
+        for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+            sgp_vid_t v = mapped_edges(j);
+            if (u != v) {
+                sgp_eid_t offset = Kokkos::atomic_fetch_add(&edges_per_source(u), 1);
+
+                offset += source_bucket_offset(u);
+
+                dest_by_source(offset) = v;
+                wgt_by_source(offset) = g.values[j];
             }
-        });
+        }
+    });
 
-        time_ptrs[2] = sgp_timer() - start_count;
-        double start_prefix = sgp_timer();
+    time_ptrs[4] = sgp_timer() - start_bucket;
+    double start_dedupe = sgp_timer();
 
-        Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
-            sgp_eid_t & update, const bool final) {
-            // Load old value in case we update it before accumulating
-            const sgp_eid_t val_i = edges_per_source[i];
-            // For inclusive scan,
-            // change the update value before updating array.
-            update += val_i;
-            if (final) {
-                source_bucket_offset[i + 1] = update; // only update array on final pass
+    //sort by dest and deduplicate
+    Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const sgp_vid_t u, sgp_eid_t & thread_sum) {
+        sgp_eid_t bottom = source_bucket_offset(u);
+        sgp_eid_t top = source_bucket_offset(u + 1);
+        sgp_eid_t next_offset = bottom;
+        std::unordered_map<sgp_vid_t, sgp_eid_t> map;
+        map.reserve(top - bottom);
+        //hashing sort
+        for (sgp_eid_t i = bottom; i < top; i++) {
+
+            sgp_vid_t v = dest_by_source(i);
+
+            if (map.count(v) > 0) {
+                sgp_eid_t idx = map.at(v);
+
+                wgt_by_source[idx] += wgt_by_source(i);
             }
-        });
-
-        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
-            edges_per_source[i] = 0; // will use as counter again
-        });
-
-        time_ptrs[3] = sgp_timer() - start_prefix;
-        double start_bucket = sgp_timer();
-
-        dest_by_source = (sgp_vid_t*)malloc(source_bucket_offset[nc] * sizeof(sgp_vid_t));
-        SGPAR_ASSERT(dest_by_source != NULL);
-        wgt_by_source = (sgp_wgt_t*)malloc(source_bucket_offset[nc] * sizeof(sgp_wgt_t));
-        SGPAR_ASSERT(wgt_by_source != NULL);
-
-        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
-            sgp_vid_t u = vcmap[i];
-            sgp_eid_t end_offset = g.source_offsets[i + 1];
-            if (coarsening_level != 1) {
-                end_offset = g.source_offsets[i] + g.edges_per_source[i];
+            else {
+                map.insert({ v, next_offset });
+                dest_by_source(next_offset) = dest_by_source(i);
+                wgt_by_source(next_offset) = wgt_by_source(i);
+                next_offset++;
+                (*gc_nedges)++;
             }
-            for (sgp_eid_t j = g.source_offsets[i]; j < end_offset; j++) {
-                sgp_vid_t v = mapped_edges[j];
-                if (u != v) {
-                    sgp_eid_t offset = Kokkos::atomic_fetch_add(edges_per_source + u, 1);
+        }
 
-                    offset += source_bucket_offset[u];
+        edges_per_source(u) = next_offset - bottom;
+        thread_sum += edges_per_source(u);
+    }, gc_nedges);
 
-                    dest_by_source[offset] = v;
-                    if (coarsening_level != 1) {
-                        wgt_by_source[offset] = g.eweights[j];
-                    }
-                    else {
-                        wgt_by_source[offset] = 1;
-                    }
-                }
-            }
-        });
-        free(mapped_edges);
+    time_ptrs[5] = sgp_timer() - start_dedupe;
 
-        time_ptrs[4] = sgp_timer() - start_bucket;
-        double start_dedupe = sgp_timer();
+    edge_view_t source_offsets("source_offsets", nc + 1);
 
-        //sort by dest and deduplicate
-        Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const sgp_vid_t u, sgp_eid_t & thread_sum) {
-            hashmap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, &thread_sum);
-            thread_sum += edges_per_source[u];
-        }, gc_nedges);
+    Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
+        sgp_eid_t & update, const bool final) {
+        // Load old value in case we update it before accumulating
+        const sgp_eid_t val_i = edges_per_source(i);
+        // For inclusive scan,
+        // change the update value before updating array.
+        update += val_i;
+        if (final) {
+            source_offsets(i + 1) = update; // only update array on final pass
+        }
+    });
 
-        time_ptrs[5] = sgp_timer() - start_dedupe;
+    vtx_view_t dest_idx("dest_idx", gc_nedges);
+    wgt_view_t wgts("wgts", gc_nedges);
 
-        sgp_eid_t* source_offsets = (sgp_eid_t*)malloc((nc + 1) * sizeof(sgp_eid_t));
-        SGPAR_ASSERT(source_offsets != NULL);
-        source_offsets[0] = 0;
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
+        sgp_eid_t end_offset = source_bucket_offset(u) + edges_per_source(u);
+        sgp_vid_t dest_offset = source_offsets(u);
+        for (sgp_eid_t j = source_bucket_offset(u); j < end_offset; j++) {
+            dest_idx(dest_offset) = dest_by_source(j);
+            wgts(dest_offset) = wgt_by_source(j);
+            dest_offset++;
+        }
+    });
 
-        Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
-            sgp_eid_t & update, const bool final) {
-            // Load old value in case we update it before accumulating
-            const sgp_eid_t val_i = edges_per_source[i];
-            // For inclusive scan,
-            // change the update value before updating array.
-            update += val_i;
-            if (final) {
-                source_offsets[i + 1] = update; // only update array on final pass
-            }
-        });
-
-        sgp_vid_t* dest_idx = (sgp_vid_t*)malloc(source_offsets[nc] * sizeof(sgp_vid_t));
-        SGPAR_ASSERT(dest_idx != NULL);
-        sgp_wgt_t* wgts = (sgp_wgt_t*)malloc(source_offsets[nc] * sizeof(sgp_wgt_t));
-        SGPAR_ASSERT(wgts != NULL);
-
-        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
-            sgp_eid_t end_offset = source_bucket_offset[u] + edges_per_source[u];
-            sgp_vid_t dest_offset = source_offsets[u];
-            for (sgp_eid_t j = source_bucket_offset[u]; j < end_offset; j++) {
-                dest_idx[dest_offset] = dest_by_source[j];
-                wgts[dest_offset] = wgt_by_source[j];
-                dest_offset++;
-            }
-        });
-        free(dest_by_source);
-        free(wgt_by_source);
-        free(source_bucket_offset);
-
-        gc_nedges = gc_nedges / 2;
-
-        gc->nedges = gc_nedges;
-        gc->destination_indices = dest_idx;
-        gc->source_offsets = source_offsets;
-        gc->eweights = wgts;
-        gc->edges_per_source = edges_per_source;
-
-        gc->weighted_degree = (sgp_wgt_t*)malloc(nc * sizeof(sgp_wgt_t));
-        assert(gc->weighted_degree != NULL);
-
-        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
-            sgp_wgt_t degree_wt_i = 0;
-            sgp_eid_t end_offset = gc->source_offsets[i] + gc->edges_per_source[i];
-            for (sgp_eid_t j = gc->source_offsets[i]; j < end_offset; j++) {
-                degree_wt_i += gc->eweights[j];
-            }
-            gc->weighted_degree[i] = degree_wt_i;
-        });
-    }
-    Kokkos::finalize();
+    graph_type gc_graph(dest_idx, source_offsets);
+    gc = matrix_type("gc", nc, wgts, gc_graph);
 
     return EXIT_SUCCESS;
 }
-#endif
 
 SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_graph,
     const matrix_type& g,
@@ -574,7 +545,7 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
     time_ptrs[0] += (sgp_timer() - start_map);
 
     double start_build = sgp_timer();
-    sgp_build_coarse_graph_spgemm(gc, interpolation_graph, g, coarsening_level, time_ptrs);
+    sgp_build_coarse_graph_msd(gc, interpolation_graph, g, coarsening_level, time_ptrs);
     time_ptrs[1] += (sgp_timer() - start_build);
 
     return EXIT_SUCCESS;
