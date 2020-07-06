@@ -227,6 +227,8 @@ SGPAR_API int compute_transpose(const matrix_type& mtx,
 
     graph_type transpose_graph(adj_transpose, row_map_transpose);
     transpose = matrix_type("transpose", n, wgt_transpose, transpose_graph);
+
+    return EXIT_SUCCESS;
 }
 
 SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
