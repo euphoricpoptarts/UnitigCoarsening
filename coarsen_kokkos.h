@@ -220,7 +220,7 @@ SGPAR_API int compute_transpose(const matrix_type& mtx,
     });
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
         sgp_vid_t v = mtx.graph.entries(i);
-        sgp_eid_t offset = row_map_transpose[v] + Kokkos::atomic_fetch_add(&fine_per_coarse(v), 1);
+        sgp_eid_t offset = row_map_transpose(v) + Kokkos::atomic_fetch_add(&fine_per_coarse(v), 1);
         adj_transpose(offset) = i;
         wgt_transpose(offset) = 1;
     });
