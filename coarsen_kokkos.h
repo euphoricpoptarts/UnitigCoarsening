@@ -14,6 +14,7 @@
 
 #include <Kokkos_Core.hpp>
 #include <Kokkos_Atomic.hpp>
+#include <Kokkos_UnorderedMap.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "KokkosSparse_spmv.hpp"
 #include "KokkosSparse_spgemm.hpp"
@@ -473,20 +474,20 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         sgp_eid_t bottom = source_bucket_offset(u);
         sgp_eid_t top = source_bucket_offset(u + 1);
         sgp_eid_t next_offset = bottom;
-        std::unordered_map<sgp_vid_t, sgp_eid_t> map;
-        map.reserve(top - bottom);
+        Kokkos::UnorderedMap<sgp_vid_t, sgp_eid_t> map(top - bottom);
         //hashing sort
         for (sgp_eid_t i = bottom; i < top; i++) {
 
             sgp_vid_t v = dest_by_source(i);
 
-            if (map.count(v) > 0) {
-                sgp_eid_t idx = map.at(v);
+            if (map.exist(v)) {
+                uint32_t key = map.find(v);
+                sgp_eid_t idx = map.value_at(key);
 
-                wgt_by_source[idx] += wgt_by_source(i);
+                wgt_by_source(idx) += wgt_by_source(i);
             }
             else {
-                map.insert({ v, next_offset });
+                map.insert( v, next_offset );
                 dest_by_source(next_offset) = dest_by_source(i);
                 wgt_by_source(next_offset) = wgt_by_source(i);
                 next_offset++;
