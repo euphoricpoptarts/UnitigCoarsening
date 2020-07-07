@@ -645,14 +645,14 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
     sgp_pcg32_random_t* rng,
     double* time_ptrs) {
 
-    double start_map = sgp_timer();
+    Kokkos::Timer timer;
     sgp_vid_t nvertices_coarse;
     sgp_coarsen_HEC(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, time_ptrs);
-    time_ptrs[0] += (sgp_timer() - start_map);
+    time_ptrs[0] += timer.seconds();
 
-    double start_build = sgp_timer();
+    timer.reset();
     sgp_build_coarse_graph_msd(gc, interpolation_graph, g, coarsening_level, time_ptrs);
-    time_ptrs[1] += (sgp_timer() - start_build);
+    time_ptrs[1] += timer.seconds();
 
     return EXIT_SUCCESS;
 }
