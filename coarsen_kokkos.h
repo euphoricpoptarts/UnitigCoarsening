@@ -83,6 +83,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     });
     time_ptrs[6] += timer.seconds();
 
+    timer.reset();
     if (coarsening_level == 1) {
         uint64_t state = rng->state;
         uint64_t inc = rng->inc;
@@ -113,6 +114,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
             hn(i) = hn_i;
         });
     }
+    time_ptrs[7] += timer.seconds();
     vtx_view_t match("match", n);
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
         match(i) = SGP_INFTY;
@@ -167,7 +169,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         Kokkos::deep_copy(perm_length, next_length);
         vperm = next_perm;
     }
-    time_ptrs[7] += timer.seconds();
+    time_ptrs[8] += timer.seconds();
 
     sgp_vid_t nc = 0;
     Kokkos::deep_copy(nc, nvertices_coarse);
