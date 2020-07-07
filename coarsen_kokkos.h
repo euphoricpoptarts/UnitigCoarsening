@@ -494,7 +494,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     sgp_vid_t nc = vcmap.numCols();
 
     //radix sort source vertices, then sort edges
-    Kokkos::View<sgp_eid_t> rm_subview = Kokkos::subview(g.graph.row_map, n);
+    Kokkos::View<const sgp_eid_t> rm_subview = Kokkos::subview(g.graph.row_map, n);
     sgp_eid_t size_rm = 0;
     Kokkos::deep_copy(size_rm, rm_subview);
     vtx_view_t mapped_edges("mapped edges", size_rm);
