@@ -207,7 +207,7 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
 
 SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graphs, std::list<matrix_type>& interpolates, sgp_pcg32_random_t* rng, int refine_alg
 #ifdef EXPERIMENT
-    , experiment
+    , ExperimentLoggerUtil& experiment
 #endif
 ) {
 
