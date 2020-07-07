@@ -658,6 +658,8 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
 }
 
 SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<matrix_type>& coarse_graphs, std::list<matrix_type>& interp_mtxs, sgp_pcg32_random_t* rng, double* time_ptrs) {
+
+    Kokkos::Timer timer;
     sgp_vid_t fine_n = fine_g->nvertices;
     edge_view_t row_map("row map", fine_n + 1);
     edge_mirror_t row_mirror = Kokkos::create_mirror(row_map);
@@ -680,6 +682,8 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
 
     graph_type fine_graph(entries, row_map);
     coarse_graphs.push_back(matrix_type("interpolate", fine_g->nvertices, values, fine_graph));
+
+    printf("Fine graph copy to device time: %.8f\n", timer.seconds());
 
     int coarsening_level = 0;
     while (coarse_graphs.rbegin()->numRows() > SGPAR_COARSENING_VTX_CUTOFF) {
