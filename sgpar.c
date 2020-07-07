@@ -44,7 +44,9 @@ int main(int argc, char **argv) {
     sgp_pcg32_random_t rng;
     rng.state = time(NULL);
     rng.inc   = 1;
-    
+#ifdef _KOKKOS
+    Kokkos::initialize();
+#endif
     for (int i=0; i < config.num_iter; i++) {
         sgp_eid_t edgecut = 0;
 #ifdef EXPERIMENT
@@ -118,6 +120,9 @@ int main(int argc, char **argv) {
         experiment.log(metrics, first, last);
 #endif
     }
+#ifdef _KOKKOS
+    Kokkos::finalize();
+#endif
     printf("graph %s, min edgecut found is %ld\n", 
                     filename, edgecut_min);
 
