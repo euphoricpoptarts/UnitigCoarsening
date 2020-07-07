@@ -390,7 +390,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
 }
 
 KOKKOS_INLINE_FUNCTION
-void heap_deduplicate(const sgp_eid_t bottom, const sgp_eid_t top, vtx_view_t& dest_by_source, wgt_view_t& wgt_by_source, sgp_vid_t& edges_per_source) {
+void heap_deduplicate(const sgp_eid_t bottom, const sgp_eid_t top, vtx_view_t dest_by_source, wgt_view_t wgt_by_source, sgp_vid_t& edges_per_source) {
 
     sgp_vid_t size = top - bottom;
     sgp_eid_t offset = bottom;
