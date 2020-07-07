@@ -666,13 +666,13 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
     wgt_view_t values("values", fine_g->source_offsets[fine_n]);
     wgt_mirror_t values_mirror = Kokkos::create_mirror(values);
 
-    for (sgp_vid_t u = 0; u < fine_g->nvertices + 1; u++) {
+    Kokkos::parallel_for(host_policy(0, fine_n + 1), KOKKOS_LAMBDA(sgp_vid_t u) {
         row_mirror(u) = fine_g->source_offsets[u];
-    }
-    for (sgp_vid_t i = 0; i < fine_g->source_offsets[fine_n]; i++) {
+    });
+    Kokkos::parallel_for(host_policy(0, fine_g->source_offsets[fine_n]), KOKKOS_LAMBDA(sgp_vid_t i) {
         entries_mirror(i) = fine_g->destination_indices[i];
         values_mirror(i) = 1.0;
-    }
+    });
 
     Kokkos::deep_copy(row_map, row_mirror);
     Kokkos::deep_copy(entries, entries_mirror);
