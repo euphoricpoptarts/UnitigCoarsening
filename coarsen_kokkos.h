@@ -494,9 +494,10 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     sgp_vid_t nc = vcmap.numCols();
 
     //radix sort source vertices, then sort edges
-
-
-    vtx_view_t mapped_edges("mapped edges", g.graph.row_map(n));
+    Kokkos::View<sgp_eid_t> rm_subview = Kokkos::subview(g.graph.row_map, n);
+    sgp_eid_t size_rm = 0;
+    Kokkos::deep_copy(size_rm, rm_subview);
+    vtx_view_t mapped_edges("mapped edges", size_rm);
 
     edge_view_t source_bucket_offset("source_bucket_offsets", nc + 1);
 
@@ -541,11 +542,11 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     double start_bucket = sgp_timer();
 
     Kokkos::View<sgp_eid_t> sbo_subview = Kokkos::subview(source_bucket_offset, nc);
-    sgp_eid_t size_one = 0;
-    Kokkos::deep_copy(size_one, sbo_subview);
+    sgp_eid_t size_sbo = 0;
+    Kokkos::deep_copy(size_sbo, sbo_subview);
 
-    vtx_view_t dest_by_source("dest_by_source", size_one);
-    wgt_view_t wgt_by_source("wgt_by_source", size_one);
+    vtx_view_t dest_by_source("dest_by_source", size_sbo);
+    wgt_view_t wgt_by_source("wgt_by_source", size_sbo);
 
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
         sgp_vid_t u = vcmap.graph.entries(i);
