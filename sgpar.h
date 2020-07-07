@@ -2371,7 +2371,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
 
 #ifdef _KOKKOS
     double start_time = sgp_timer();
-    double time_counters[6] = { 0, 0, 0, 0, 0, 0 };
+    double time_counters[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 
     Kokkos::initialize();
     std::list<sgpar_kokkos::matrix_type> coarse_graphs, interp_mtxs;
@@ -2396,6 +2396,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
 
     free(eigenvec);
 
+    printf("Coarsening permutation time: %.8f\n", time_counters[6]);
+    printf("Coarsening map construction time: %.8f\n", time_counters[7]);
     printf("Total: %3.3lf s, coarsening %3.3lf %3.0lf%% "
         "(sort %3.3lf %3.0lf%%), "
         "refine %3.3lf s (%3.3lf s, %3.0lf%% + %3.3lf, %3.0lf%%)\n",

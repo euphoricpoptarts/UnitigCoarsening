@@ -41,7 +41,8 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     sgp_vid_t* nvertices_coarse_ptr,
     const matrix_type& g,
     const int coarsening_level,
-    sgp_pcg32_random_t* rng) {
+    sgp_pcg32_random_t* rng,
+    double* time_ptrs) {
 
     sgp_vid_t n = g.numRows();
 
@@ -60,7 +61,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         perm_m(i) = i;
     });
 
-
+    Kokkos::Timer timer;
     for (sgp_vid_t i = n - 1; i > 0; i--) {
         sgp_vid_t v_i = perm_m(i);
 #ifndef SGPAR_HUGEGRAPHS
@@ -80,6 +81,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     Kokkos::parallel_for("construct reverse map", n, KOKKOS_LAMBDA(sgp_vid_t i) {
         reverse_map(vperm(i)) = i;
     });
+    time_ptrs[6] += timer.seconds();
 
     if (coarsening_level == 1) {
         uint64_t state = rng->state;
@@ -122,6 +124,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 
     //construct mapping using heaviest edges
     int swap = 1;
+    timer.reset();
     while (perm_length > 0) {
         vtx_view_t next_perm("next perm", perm_length);
         Kokkos::View<sgp_vid_t> next_length("next_length");
@@ -164,6 +167,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         Kokkos::deep_copy(perm_length, next_length);
         vperm = next_perm;
     }
+    time_ptrs[7] += timer.seconds();
 
     sgp_vid_t nc = 0;
     Kokkos::deep_copy(nc, nvertices_coarse);
@@ -641,7 +645,7 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
 
     double start_map = sgp_timer();
     sgp_vid_t nvertices_coarse;
-    sgp_coarsen_HEC(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng);
+    sgp_coarsen_HEC(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, time_ptrs);
     time_ptrs[0] += (sgp_timer() - start_map);
 
     double start_build = sgp_timer();
