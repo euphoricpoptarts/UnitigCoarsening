@@ -247,7 +247,7 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     eigenview_t::HostMirror eigenmirror = Kokkos::create_mirror(coarse_guess);
     Kokkos::deep_copy(eigenmirror, coarse_guess);
 
-    Kokkos::parallel_for(graph_iter->numRows(), KOKKOS_LAMBDA(sgp_vid_t i) {
+    Kokkos::parallel_for(host_policy(0, graph_iter->numRows()), KOKKOS_LAMBDA(sgp_vid_t i) {
         eigenvec[i] = eigenmirror(i);
     });
 
