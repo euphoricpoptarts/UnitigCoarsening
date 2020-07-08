@@ -238,7 +238,7 @@ SGPAR_API int compute_transpose(const matrix_type& mtx,
     return EXIT_SUCCESS;
 }
 
-int dump_mtx(const matrix_type& mtx, char* filename) {
+int dump_mtx(const matrix_type& mtx, char* filename, bool symmetric) {
     vtx_mirror_t entry_m = Kokkos::create_mirror(mtx.graph.entries);
     Kokkos::deep_copy(entry_m, mtx.graph.entries);
     edge_mirror_t row_m = Kokkos::create_mirror(mtx.graph.row_map);
@@ -263,7 +263,10 @@ int dump_mtx(const matrix_type& mtx, char* filename) {
     FILE* ValsFile = fopen(filename_vals, "w");
     FILE* DescrFile = fopen(filename_descr, "w");
 
-    fprintf(DescrFile, "%% symmetric\n%i %i %i\n\n", mtx.numRows(), mtx.numCols(), mtx.nnz());
+    if (symmetric) {
+        fprintf(DescrFile, "%% symmetric\n");
+    }
+    fprintf(DescrFile, "%i %i %i\n\n", mtx.numRows(), mtx.numCols(), mtx.nnz());
     fclose(DescrFile);
     free(filename_descr);
 
@@ -292,9 +295,9 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     matrix_type interp_transpose;// = KokkosKernels::Impl::transpose_matrix(interp_mtx);
     compute_transpose(interp_mtx, interp_transpose);
 
-    dump_mtx(g, "dump/g_dump");
-    dump_mtx(interp_mtx, "dump/interp_dump");
-    dump_mtx(interp_transpose, "dump/interp_transpose_dump");
+    dump_mtx(g, "dump/g_dump", true);
+    dump_mtx(interp_mtx, "dump/interp_dump", false);
+    dump_mtx(interp_transpose, "dump/interp_transpose_dump", false);
     typedef KokkosKernels::Experimental::KokkosKernelsHandle
         <sgp_eid_t, sgp_vid_t, sgp_wgt_t,
         typename Device::execution_space, typename Device::memory_space, typename Device::memory_space > KernelHandle;
