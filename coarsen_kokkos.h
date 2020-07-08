@@ -696,7 +696,7 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
     time_ptrs[0] += timer.seconds();
 
     timer.reset();
-    sgp_build_coarse_graph_msd(gc, interpolation_graph, g, coarsening_level, time_ptrs);
+    sgp_build_coarse_graph_spgemm(gc, interpolation_graph, g, coarsening_level, time_ptrs);
     time_ptrs[1] += timer.seconds();
 
     return EXIT_SUCCESS;
