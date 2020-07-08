@@ -238,6 +238,48 @@ SGPAR_API int compute_transpose(const matrix_type& mtx,
     return EXIT_SUCCESS;
 }
 
+int dump_mtx(const matrix_type& mtx, char* filename) {
+    vtx_mirror_t entry_m = Kokkos::create_mirror(mtx.graph.entries);
+    Kokkos::deep_copy(entry_m, mtx.graph.entries);
+    edge_mirror_t row_m = Kokkos::create_mirror(mtx.graph.row_map);
+    Kokkos::deep_copy(row_m, mtx.graph.row_map);
+    wgt_mirror_t value_m = Kokkos::create_mirror(mtx.values);
+    Kokkos::deep_copy(value_m, mtx.values);
+
+    char* filename_row = new char[strlen(filename) + 5];
+    char* filename_col = new char[strlen(filename) + 5];
+    char* filename_vals = new char[strlen(filename) + 6];
+    char* filename_descr = new char[strlen(filename) + 7];
+    strcpy(filename_row, filename);
+    strcpy(filename_col, filename);
+    strcpy(filename_vals, filename);
+    strcpy(filename_descr, filename);
+    strcat(filename_row, "_row");
+    strcat(filename_col, "_col");
+    strcat(filename_vals, "_vals");
+    strcat(filename_descr, "_descr");
+    FILE* RowFile = fopen(filename_row, "w");
+    FILE* ColFile = fopen(filename_col, "w");
+    FILE* ValsFile = fopen(filename_vals, "w");
+    FILE* DescrFile = fopen(filename_descr, "w");
+
+    fprintf(DescrFile, "\% symmetric\n%i %i %i\n\n", mtx.numRows(), mtx.numCols(), mtx.nnz());
+    fclose(DescrFile);
+    free(filename_descr);
+
+    fwrite(row_m.data(), sizeof(sgp_eid_t), mtx.numRows() + 1, RowFile);
+    fwrite(entry_m.data(), sizeof(sgp_vid_t), mtx.nnz(), ColFile);
+    fwrite(value_m.data(), sizeof(sgp_wgt_t), mtx.nnz(), ValsFile);
+    fclose(RowFile);
+    fclose(ColFile);
+    fclose(ValsFile);
+    free(filename_row);
+    free(filename_col);
+    free(filename_vals);
+
+    return EXIT_SUCCESS;
+}
+
 SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     const matrix_type& interp_mtx,
     const matrix_type& g,
@@ -250,6 +292,9 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     matrix_type interp_transpose;// = KokkosKernels::Impl::transpose_matrix(interp_mtx);
     compute_transpose(interp_mtx, interp_transpose);
 
+    dump_mtx(g, "dump/g_dump");
+    dump_mtx(interp_mtx, "dump/interp_dump");
+    dump_mtx(interp_transpose, "dump/interp_transpose_dump");
     typedef KokkosKernels::Experimental::KokkosKernelsHandle
         <sgp_eid_t, sgp_vid_t, sgp_wgt_t,
         typename Device::execution_space, typename Device::memory_space, typename Device::memory_space > KernelHandle;
