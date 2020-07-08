@@ -263,7 +263,7 @@ int dump_mtx(const matrix_type& mtx, char* filename) {
     FILE* ValsFile = fopen(filename_vals, "w");
     FILE* DescrFile = fopen(filename_descr, "w");
 
-    fprintf(DescrFile, "\% symmetric\n%i %i %i\n\n", mtx.numRows(), mtx.numCols(), mtx.nnz());
+    fprintf(DescrFile, "%% symmetric\n%i %i %i\n\n", mtx.numRows(), mtx.numCols(), mtx.nnz());
     fclose(DescrFile);
     free(filename_descr);
 
