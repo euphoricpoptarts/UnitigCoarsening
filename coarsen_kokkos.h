@@ -45,6 +45,7 @@ SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
     sgp_pcg32_random_t* rng,
     double* time_ptrs) {
 
+    sgp_vid_t n = g.numRows();
     typedef KokkosKernels::Experimental::KokkosKernelsHandle
         <sgp_eid_t, sgp_vid_t, sgp_wgt_t,
         typename Device::execution_space, typename Device::memory_space, typename Device::memory_space > KernelHandle;
@@ -54,11 +55,10 @@ SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
     kh.set_dynamic_scheduling(true);
 
     kh.create_distance2_graph_coloring_handle();
-    KokkosGraph::Experimental::graph_color_distance2(&kh, numVertices, g.graph.row_map, g.graph.entries);
-    auto colors = handle.get_distance2_graph_coloring_handle()->get_vertex_colors();
+    KokkosGraph::Experimental::graph_color_distance2(&kh, n, g.graph.row_map, g.graph.entries);
+    auto colors = kh.get_distance2_graph_coloring_handle()->get_vertex_colors();
     handle.destroy_distance2_graph_coloring_handle();
 
-    sgp_vid_t n = g.numRows();
     Kokkos::View<sgp_vid_t> nvc("nvertices_coarse");
     Kokkos::View<sgp_vid_t*> vcmap("vcmap", n);
 
