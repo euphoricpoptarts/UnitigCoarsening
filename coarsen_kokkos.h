@@ -18,6 +18,7 @@
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "KokkosSparse_spmv.hpp"
 #include "KokkosSparse_spgemm.hpp"
+#include "KokkosGraph_Distance2Color.hpp"
 #include "KokkosKernels_SparseUtils.hpp"
 
 #include <unordered_map>
@@ -36,6 +37,87 @@
 
 namespace sgpar {
 namespace sgpar_kokkos {
+
+SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
+    sgp_vid_t* nvertices_coarse_ptr,
+    const matrix_type& g,
+    const int coarsening_level,
+    sgp_pcg32_random_t* rng,
+    double* time_ptrs) {
+
+    typedef KokkosKernels::Experimental::KokkosKernelsHandle
+        <sgp_eid_t, sgp_vid_t, sgp_wgt_t,
+        typename Device::execution_space, typename Device::memory_space, typename Device::memory_space > KernelHandle;
+
+    KernelHandle kh;
+    kh.set_team_work_size(16);
+    kh.set_dynamic_scheduling(true);
+
+    kh.create_distance2_graph_coloring_handle();
+    KokkosGraph::Experimental::graph_color_distance2(&handle, numVertices, g.graph.row_map, g.graph.entries);
+    auto colors = handle.get_distance2_graph_coloring_handle()->get_vertex_colors();
+    handle.destroy_distance2_graph_coloring_handle();
+
+    sgp_vid_t n = g.numRows();
+    Kokkos::View<sgp_vid_t> nvc("nvertices_coarse");
+    Kokkos::View<sgp_vid_t*> vcmap("vcmap", n);
+
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+        if (colors(i) == 0) {
+            vcmap(i) = Kokkos::atomic_fetch_add(&nvc(), 1);
+        }
+        else {
+            vcmap(i) = SGP_INFTY;
+        }
+    });
+
+    //could also do this by checking neighbors of each un-aggregated vertex
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+        if (colors(i) == 0) {
+            //could use a thread team here
+            for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+                sgp_vid_t v = g.graph.entries(j);
+                vcmap(v) = vcmap(i);
+            }
+        }
+    });
+
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+        if (vcmap(i) == SGP_INFTY) {
+            //could use a thread team here
+            for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+                sgp_vid_t v = g.graph.entries(j);
+                if (vcmap(v) != SGP_INFTY) {
+                    vcmap(i) = vcmap(v);
+                    break;
+                }
+            }
+        }
+    });
+
+    sgp_vid_t nc = 0;
+    Kokkos::deep_copy(nc, nvc);
+    *nvertices_coarse_ptr = nc;
+
+    edge_view_t row_map("interpolate row map", n + 1);
+
+    Kokkos::parallel_for(n + 1, KOKKOS_LAMBDA(sgp_vid_t u){
+        row_map(u) = u;
+    });
+
+    vtx_view_t entries("interpolate entries", n);
+    wgt_view_t values("interpolate values", n);
+    //compute the interpolation weights
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t u){
+        entries(u) = vcmap(u);
+        values(u) = 1.0;
+    });
+
+    graph_type graph(entries, row_map);
+    interp = matrix_type("interpolate", nc, values, graph);
+
+    return EXIT_SUCCESS;
+}
 
 SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     sgp_vid_t* nvertices_coarse_ptr,
