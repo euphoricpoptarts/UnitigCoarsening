@@ -389,9 +389,9 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     Kokkos::View<sgp_eid_t*> row_map_p1("rows_partial", nc + 1);
     KokkosSparse::Experimental::spgemm_symbolic(
         &kh,
+        n,
+        n,
         nc,
-        n,
-        n,
         g.graph.row_map,
         g.graph.entries,
         false,
@@ -407,9 +407,9 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
 
     KokkosSparse::Experimental::spgemm_numeric(
         &kh,
+        n,
+        n,
         nc,
-        n,
-        n,
         g.graph.row_map,
         g.graph.entries,
         g.values,
