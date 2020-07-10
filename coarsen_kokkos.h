@@ -60,6 +60,7 @@ SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
     kh.destroy_distance2_graph_coloring_handle();
 
     Kokkos::View<sgp_vid_t> nvc("nvertices_coarse");
+    Kokkos::View<sgp_vid_t> unagg("unaggregated");
     Kokkos::View<sgp_vid_t*> vcmap("vcmap", n);
     
     sgp_vid_t first_color = 1;
@@ -96,9 +97,19 @@ SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
         }
     });
 
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+        if (vcmap(i) == SGP_INFTY) {
+            Kokkos::atomic_increment(&unagg());
+        }
+    });
+
     sgp_vid_t nc = 0;
     Kokkos::deep_copy(nc, nvc);
     *nvertices_coarse_ptr = nc;
+    
+    sgp_vid_t una = 0;
+    Kokkos::deep_copy(una, unagg);
+    printf("nc: %u, n: %u, unaggregated: %u\n", nc, n, una);
 
     edge_view_t row_map("interpolate row map", n + 1);
 
