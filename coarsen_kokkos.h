@@ -61,9 +61,11 @@ SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
 
     Kokkos::View<sgp_vid_t> nvc("nvertices_coarse");
     Kokkos::View<sgp_vid_t*> vcmap("vcmap", n);
+    
+    sgp_vid_t first_color = 1;
 
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
-        if (colors(i) == 0) {
+        if (colors(i) == first_color) {
             vcmap(i) = Kokkos::atomic_fetch_add(&nvc(), 1);
         }
         else {
@@ -73,7 +75,7 @@ SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
 
     //could also do this by checking neighbors of each un-aggregated vertex
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
-        if (colors(i) == 0) {
+        if (colors(i) == first_color) {
             //could use a thread team here
             for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
                 sgp_vid_t v = g.graph.entries(j);
@@ -83,13 +85,12 @@ SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
     });
 
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
-        if (vcmap(i) == SGP_INFTY) {
+        if (vcmap(i) != SGP_INFTY) {
             //could use a thread team here
             for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
                 sgp_vid_t v = g.graph.entries(j);
-                if (vcmap(v) != SGP_INFTY) {
-                    vcmap(i) = vcmap(v);
-                    break;
+                if (vcmap(v) == SGP_INFTY) {
+                    vcmap(v) = vcmap(i);
                 }
             }
         }
