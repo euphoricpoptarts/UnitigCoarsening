@@ -56,7 +56,7 @@ SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
 
     kh.create_distance2_graph_coloring_handle();
     KokkosGraph::Experimental::graph_color_distance2(&kh, n, g.graph.row_map, g.graph.entries);
-    auto colors = kh.get_distance2_graph_coloring_handle()->get_vertex_colors();
+    Kokkos::View<sgp_vid_t*> colors = kh.get_distance2_graph_coloring_handle()->get_vertex_colors();
     kh.destroy_distance2_graph_coloring_handle();
 
     Kokkos::View<sgp_vid_t> nvc("nvertices_coarse");
