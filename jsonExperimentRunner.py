@@ -85,7 +85,7 @@ def runExperiment(executable, filepath, metricDir, logFile, t_count):
         print("running {}".format(call_str), flush=True)
         process = subprocess.Popen(call, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=myenv)
         try:
-            returncode = process.wait(waitLimit=timeout)
+            returncode = process.wait(timeout = waitLimit)
         except TimeoutExpired:
             proc.kill()
             print("{} has timed out!".format(call_str), flush=True)
