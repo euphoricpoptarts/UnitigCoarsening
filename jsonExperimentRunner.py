@@ -16,6 +16,7 @@ bigParCall = "./sgpar_hg_exp"
 bigSerialCall = "./sgpar_hg_serial"
 
 rateLimit = BoundedSemaphore(value = 4)
+waitLimit = 300
 
 def printStat(fieldTitle, statList, outfile):
     min_s = min(statList)
@@ -82,10 +83,15 @@ def runExperiment(executable, filepath, metricDir, logFile, t_count):
     call_str = " ".join(call)
     with rateLimit:
         print("running {}".format(call_str), flush=True)
-        completed = subprocess.run(call, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=myenv)
+        process = subprocess.Popen(call, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=myenv)
+        try:
+            returncode = process.wait(waitLimit=timeout)
+        except TimeoutExpired:
+            proc.kill()
+            print("{} has timed out!".format(call_str), flush=True)
 
-    if(completed.returncode != 0):
-        print("error code: {}".format(completed.returncode))
+    if(returncode != 0):
+        print("error code: {}".format(returncode))
         print("error produced by:")
         print(call_str, flush=True)
     else:
