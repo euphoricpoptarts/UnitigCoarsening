@@ -88,7 +88,8 @@ def runExperiment(executable, filepath, metricDir, logFile, t_count):
             returncode = process.wait(timeout = waitLimit)
         except subprocess.TimeoutExpired:
             process.kill()
-            print("{} has timed out!".format(call_str), flush=True)
+            print("Timeout reach by {}".format(call_str), flush=True)
+            return
 
     if(returncode != 0):
         print("error code: {}".format(returncode))
