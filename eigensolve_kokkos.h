@@ -54,41 +54,38 @@ SGPAR_API int sgp_vec_D_orthogonalize_kokkos(eigenview_t& u1, eigenview_t& u2,
     return EXIT_SUCCESS;
 }
 
-SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u_device, const matrix_type& g_device) {
+SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u, const matrix_type& g) {
     sgp_real_t eigenval = 0;
     sgp_real_t eigenval_max = 0;
     sgp_real_t eigenval_min = 2;
 
-    edge_mirror_t row_map = Kokkos::create_mirror(g_device.graph.row_map);
-    Kokkos::deep_copy(row_map, g_device.graph.row_map);
-    vtx_mirror_t entries = Kokkos::create_mirror(g_device.graph.entries);
-    Kokkos::deep_copy(entries, g_device.graph.entries);
-    wgt_mirror_t values = Kokkos::create_mirror(g_device.values);
-    Kokkos::deep_copy(values, g_device.values);
+    sgp_vid_t n = g.numRows();
 
-    eigenview_t::HostMirror u = Kokkos::create_mirror(u_device);
-    Kokkos::deep_copy(u, u_device);
+    eigenview_t v("v", n);
+    KokkosSparse::spmv("N", 1.0, g, u, 0.0, v);
 
-    sgp_vid_t n = g_device.numRows();
-
-    for (sgp_vid_t i = 0; i < n; i++) {
-        sgp_vid_t weighted_degree = row_map(i + 1) - row_map(i);
+    Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(sgp_vid_t i, sgp_wgt_t local_sum) {
+        sgp_vid_t weighted_degree = g.graph.row_map(i + 1) - g.graph.row_map(i);
         sgp_real_t u_i = weighted_degree * u(i);
-        sgp_real_t matvec_i = 0;
-        for (sgp_eid_t j = row_map(i);
-            j < row_map(i + 1); j++) {
-            matvec_i += u(entries(j));
-        }
+        sgp_real_t matvec_i = v(i);
         u_i -= matvec_i;
-        sgp_real_t eigenval_est = u_i / u(i);
-        if (eigenval_est < eigenval_min) {
-            eigenval_min = eigenval_est;
+        v(i) = u_i;
+        local_sum += (u_i * u_i) * 1e9;
+    }, eigenval);
+
+    Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(sgp_vid_t i, sgp_wgt_t local_max) {
+        sgp_real_t eigenval_est = v(i) / u(i);
+        if (local_max < eigenval_est) {
+            local_max = eigenval_est;
         }
-        if (eigenval_est > eigenval_max) {
-            eigenval_max = eigenval_est;
+    }, Kokkos::Max<sgp_wgt_t, Kokkos::HostSpace>(eigenval_max));
+
+    Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(sgp_vid_t i, sgp_wgt_t local_min) {
+        sgp_real_t eigenval_est = v(i) / u(i);
+        if (local_min > eigenval_est) {
+            local_min = eigenval_est;
         }
-        eigenval += (u_i * u_i) * 1e9;
-    }
+    }, Kokkos::Min<sgp_wgt_t, Kokkos::HostSpace>(eigenval_min));
 
     printf("eigenvalue = %1.9lf (%1.9lf %1.9lf), "
         "edge cut lb %5.0lf "
