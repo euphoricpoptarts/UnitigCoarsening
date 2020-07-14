@@ -728,7 +728,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
 
     vtx_view_t edges_per_source("edges_per_source", nc);
 
-    double start_count = sgp_timer();
+    Kokkos::Timer timer;
 
     //count edges per vertex
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
@@ -742,8 +742,8 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         }
     });
 
-    time_ptrs[2] = sgp_timer() - start_count;
-    double start_prefix = sgp_timer();
+    time_ptrs[2] += timer.seconds();
+    timer.reset();
 
     Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
         sgp_eid_t & update, const bool final) {
@@ -761,8 +761,8 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         edges_per_source(i) = 0; // will use as counter again
     });
 
-    time_ptrs[3] = sgp_timer() - start_prefix;
-    double start_bucket = sgp_timer();
+    time_ptrs[3] += timer.seconds();
+    timer.reset();
 
     Kokkos::View<sgp_eid_t> sbo_subview = Kokkos::subview(source_bucket_offset, nc);
     sgp_eid_t size_sbo = 0;
@@ -786,8 +786,8 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         }
     });
 
-    time_ptrs[4] = sgp_timer() - start_bucket;
-    double start_dedupe = sgp_timer();
+    time_ptrs[4] += timer.seconds();
+    timer.reset();
 
     //sort by dest and deduplicate
     Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const sgp_vid_t u, sgp_eid_t & thread_sum) {
@@ -821,7 +821,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         thread_sum += edges_per_source(u);
     }, gc_nedges);
 
-    time_ptrs[5] = sgp_timer() - start_dedupe;
+    time_ptrs[5] += timer.seconds();
 
     edge_view_t source_offsets("source_offsets", nc + 1);
 
