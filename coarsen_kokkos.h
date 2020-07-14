@@ -731,7 +731,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     Kokkos::Timer timer;
 
     using policy = Kokkos::TeamPolicy<>;
-    using member = typename policy::team_member;
+    using member = typename policy::member_type;
 
     //count edges per vertex
     Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
