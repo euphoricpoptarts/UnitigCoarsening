@@ -730,16 +730,23 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
 
     Kokkos::Timer timer;
 
+    using policy = Kokkos::TeamPolicy<>;
+    using member = typename policy::team_member;
+
     //count edges per vertex
-    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
-        sgp_vid_t u = vcmap.graph.entries(i);
-        for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
-            sgp_vid_t v = vcmap.graph.entries(g.graph.entries(j));
-            mapped_edges(j) = v;
+    Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
+        sgp_vid_t u = vcmap.graph.entries(thread.league_rank());
+        sgp_eid_t start = g.graph.row_map(u);
+        sgp_eid_t end = g.graph.row_map(u + 1);
+        sgp_eid_t range = end - start;
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, range), KOKKOS_LAMBDA(const sgp_eid_t j) {
+            sgp_eid_t idx = j + start;
+            sgp_vid_t v = vcmap.graph.entries(g.graph.entries(idx));
+            mapped_edges(idx) = v;
             if (u != v) {
                 Kokkos::atomic_increment(&edges_per_source(u));
             }
-        }
+        });
     });
 
     time_ptrs[2] += timer.seconds();
