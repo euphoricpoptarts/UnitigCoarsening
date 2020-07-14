@@ -776,19 +776,21 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     vtx_view_t dest_by_source("dest_by_source", size_sbo);
     wgt_view_t wgt_by_source("wgt_by_source", size_sbo);
 
-    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
-        sgp_vid_t u = vcmap.graph.entries(i);
-        for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
-            sgp_vid_t v = mapped_edges(j);
+    Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
+        sgp_vid_t u = vcmap.graph.entries(thread.league_rank());
+        sgp_eid_t start = g.graph.row_map(thread.league_rank());
+        sgp_eid_t end = g.graph.row_map(thread.league_rank() + 1);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const sgp_eid_t idx) {
+            sgp_vid_t v = mapped_edges(idx);
             if (u != v) {
                 sgp_eid_t offset = Kokkos::atomic_fetch_add(&edges_per_source(u), 1);
 
                 offset += source_bucket_offset(u);
 
                 dest_by_source(offset) = v;
-                wgt_by_source(offset) = g.values[j];
+                wgt_by_source(offset) = g.values(j);
             }
-        }
+        });
     });
 
     time_ptrs[4] += timer.seconds();
