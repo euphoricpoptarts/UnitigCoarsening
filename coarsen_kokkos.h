@@ -738,9 +738,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         sgp_vid_t u = vcmap.graph.entries(thread.league_rank());
         sgp_eid_t start = g.graph.row_map(u);
         sgp_eid_t end = g.graph.row_map(u + 1);
-        sgp_eid_t range = end - start;
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, range), [&] (const sgp_eid_t j) {
-            sgp_eid_t idx = j + start;
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=] (const sgp_eid_t idx) {
             sgp_vid_t v = vcmap.graph.entries(g.graph.entries(idx));
             mapped_edges(idx) = v;
             if (u != v) {
