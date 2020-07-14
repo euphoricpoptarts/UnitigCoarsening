@@ -788,7 +788,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
                 offset += source_bucket_offset(u);
 
                 dest_by_source(offset) = v;
-                wgt_by_source(offset) = g.values(j);
+                wgt_by_source(offset) = g.values(idx);
             }
         });
     });
