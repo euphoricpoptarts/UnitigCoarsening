@@ -962,7 +962,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         }
 
         edges_per_source(u) = next_offset - bottom;
-#else
+#endif
         heap_deduplicate(bottom, top, dest_by_source, wgt_by_source, edges_per_source(u));
         thread_sum += edges_per_source(u);
     }, gc_nedges);
