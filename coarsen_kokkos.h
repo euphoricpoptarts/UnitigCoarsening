@@ -5,6 +5,7 @@
 #include <math.h>
 #include <time.h>
 #include <list>
+#include <ctime>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -15,6 +16,7 @@
 #include <Kokkos_Core.hpp>
 #include <Kokkos_Atomic.hpp>
 #include <Kokkos_UnorderedMap.hpp>
+#include <Kokkos_Random.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "KokkosSparse_spmv.hpp"
 #include "KokkosSparse_spgemm.hpp"
@@ -154,6 +156,9 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         perm_m(i) = i;
     });
 
+    using pool_t = Kokkos::Random_XorShift64_Pool<>;
+    using gen_t = typename pool_t::generator_type;
+    pool_t rand_pool(std::time(nullptr));
     Kokkos::Timer timer;
     for (sgp_vid_t i = n - 1; i > 0; i--) {
         sgp_vid_t v_i = perm_m(i);
@@ -178,16 +183,13 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 
     timer.reset();
     if (coarsening_level == 1) {
-        uint64_t state = rng->state;
-        uint64_t inc = rng->inc;
         //all weights equal at this level so choose heaviest edge randomly
         Kokkos::parallel_for("Random HN", n, KOKKOS_LAMBDA(sgp_vid_t i) {
+            gen_t generator = rand_pool.get_state();
             sgp_vid_t adj_size = g.graph.row_map(i + 1) - g.graph.row_map(i);
-            sgp_pcg32_random_t copy;
-            copy.state = state + i;
-            copy.inc = inc;
-            sgp_vid_t offset = g.graph.row_map(i) + ((sgp_pcg32_random_r(&copy)) % adj_size);
+            sgp_vid_t offset = g.graph.row_map(i) + (generator.urand64() % adj_size);
             hn(i) = g.graph.entries(offset);
+            rand_pool.free_state(generator);
         });
     }
     else {
@@ -708,6 +710,132 @@ void heap_deduplicate(const sgp_eid_t bottom, const sgp_eid_t top, vtx_view_t de
     edges_per_source = offset - bottom;
 }
 
+/*
+template<typename ExecutionSpace, typename uniform_memory_pool_t>
+struct functorTestHashmapAccumulator
+{
+    typedef ExecutionSpace execution_space;
+
+    edge_view_t row_map;
+    vtx_view_t entries;
+    wgt_view_t wgts;
+    uniform_memory_pool_t _memory_pool;
+    const sgp_vid_t _hash_size;
+    const sgp_vid_t _max_hash_entries;
+
+    typedef Kokkos::Experimental::UniqueToken<execution_space, Kokkos::Experimental::UniqueTokenScope::Global> unique_token_t;
+    unique_token_t tokens;
+
+    functorTestHashmapAccumulator(edge_view_t row_map,
+        vtx_view_t entries,
+        wgt_view_t wgts,
+        uniform_memory_pool_t memory_pool,
+        const size_t hash_size,
+        const size_t max_hash_entries)
+        : row_map(row_map)
+        , entries(entries)
+        , wgts(wgts)
+        , _memory_pool(memory_pool)
+        , _hash_size(hash_size)
+        , _max_hash_entries(max_hash_entries)
+        , tokens(ExecutionSpace()){}
+
+    KOKKOS_INLINE_FUNCTION
+        void operator()(const scalar_t idx) const
+    {
+        typedef sgp_vid_t hash_size_type;
+        typedef sgp_vid_t hash_key_type;
+        typedef sgp_wgt_t hash_value_type;
+
+        // Alternative to team_policy thread id
+        auto tid = tokens.acquire();
+
+        // Acquire a chunk from the memory pool using a spin-loop.
+        volatile sgp_vid_t* ptr_temp = nullptr;
+        while (nullptr == ptr_temp)
+        {
+            ptr_temp = (volatile sgp_vid_t*)(_memory_pool.allocate_chunk(tid));
+        }
+        sgp_vid_t* ptr_memory_pool_chunk = (sgp_vid_t*)(ptr_temp);
+
+        KokkosKernels::Experimental::HashmapAccumulator<hash_size_type, hash_key_type, hash_value_type> hash_map;
+
+        // Set pointer to hash indices
+        sgp_vid_t* used_hash_indices = (sgp_vid_t*)(ptr_temp);
+        ptr_temp += _hash_size;
+
+        // Set pointer to hash begins
+        hash_map.hash_begins = (sgp_vid_t*)(ptr_temp);
+        ptr_temp += _hash_size;
+
+        // Set pointer to hash nexts
+        hash_map.hash_nexts = (sgp_vid_t*)(ptr_temp);
+        ptr_temp += _max_hash_entries;
+
+        // Set pointer to hash keys
+        hash_map.keys = (sgp_vid_t*)(ptr_temp);
+        ptr_temp += _max_hash_entries;
+
+        // Set pointer to hash values
+        hash_map.values = (sgp_wgt_t*)(ptr_temp);
+
+        // Set up limits in Hashmap_Accumulator
+        hash_map.hash_key_size = _max_hash_entries;
+        hash_map.max_value_size = _max_hash_entries;
+
+        // hash function is hash_size-1 (note: hash_size must be a power of 2)
+        scalar_t hash_func_pow2 = _hash_size - 1;
+
+        // These are updated by Hashmap_Accumulator insert functions.
+        sgp_view_t used_hash_size = 0;
+        sgp_view_t used_hash_count = 0;
+
+        // Loop over stuff
+        for (sgp_eid_t i = row_map(idx); i < row_map(idx + 1); i++)
+        {
+            sgp_vid_t key = entries(i);
+            sgp_wgt_t value = wgts(i);
+
+            // Compute the hash index using & instead of % (modulus is slower).
+            sgp_vid_t hash = key & hash_func_pow2;
+
+            int r = hash_map.sequential_insert_into_hash_mergeAdd_TrackHashes(hash,
+                key,
+                value,
+                &used_hash_size,
+                hash_map.max_value_size,
+                &used_hash_count,
+                used_hash_indices);
+
+            // Check return code
+            if (r)
+            {
+                // insert should return nonzero if the insert failed, but for sequential_insert_into_hash_TrackHashes
+                // the 'full' case is currently ignored, so r will always be 0.
+            }
+        }
+
+        // TODO: Get the # of unique values inserted and return that out of the functor.
+
+        // Reset the Begins values to -1 before releasing the memory pool chunk.
+        // If you don't do this the next thread that grabs this memory chunk will not work properly.
+        for (scalar_t i = 0; i < used_hash_count; i++)
+        {
+            scalar_t dirty_hash = used_hash_indices[i];
+            hash_map.hash_begins[dirty_hash] = -1;
+        }
+
+        // Release the memory pool chunk back to the pool
+        _memory_pool.release_chunk(ptr_memory_pool_chunk);
+
+        // Release the UniqueToken
+        tokens.release(tid);
+
+    }   // operator()
+
+};  // functorTestHashmapAccumulator
+*/
+
 SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     const matrix_type& vcmap,
     const matrix_type& g,
@@ -761,6 +889,17 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
             source_bucket_offset(i + 1) = update; // only update array on final pass
         }
     });
+
+    /*
+    //figure out max size for hashmap
+    sgp_vid_t size_hint = 0;
+    Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const sgp_vid_t u, sgp_vid_t& thread_max){
+        sgp_vid_t degree = edges_per_source(u);
+        if (thread_max < degree) {
+            thread_max = degree;
+        }
+    }, Kokkos::Max<sgp_vid_t, Kokkos::HostSpace>(size_hint));
+    */
 
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
         edges_per_source(i) = 0; // will use as counter again
@@ -823,7 +962,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         }
 
         edges_per_source(u) = next_offset - bottom;
-#endif
+#else
         heap_deduplicate(bottom, top, dest_by_source, wgt_by_source, edges_per_source(u));
         thread_sum += edges_per_source(u);
     }, gc_nedges);
