@@ -127,5 +127,7 @@ namespace sgpar {
         using vtx_mirror_t = typename vtx_view_t::HostMirror;
         using wgt_view_t = Kokkos::View<sgp_wgt_t*>;
         using wgt_mirror_t = typename wgt_view_t::HostMirror;
+        using policy = Kokkos::TeamPolicy<>;
+        using member = typename policy::member_type;
     }
 }

@@ -867,9 +867,6 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
 
     Kokkos::Timer timer;
 
-    using policy = Kokkos::TeamPolicy<>;
-    using member = typename policy::member_type;
-
     //count edges per vertex
     Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
         sgp_vid_t u = vcmap.graph.entries(thread.league_rank());
@@ -1026,14 +1023,14 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     vtx_view_t dest_idx("dest_idx", gc_nedges);
     wgt_view_t wgts("wgts", gc_nedges);
 
-    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t u) {
-        sgp_eid_t end_offset = source_bucket_offset(u) + edges_per_source(u);
-        sgp_vid_t dest_offset = source_offsets(u);
-        for (sgp_eid_t j = source_bucket_offset(u); j < end_offset; j++) {
-            dest_idx(dest_offset) = dest_by_source(j);
-            wgts(dest_offset) = wgt_by_source(j);
-            dest_offset++;
-        }
+    Kokkos::parallel_for(policy(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
+        sgp_vid_t u = thread.league_rank();
+        sgp_eid_t start_origin = source_bucket_offset(u);
+        sgp_eid_t start_dest = source_offsets(u);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, edges_per_source(u)), [=](const sgp_eid_t idx) {
+            dest_idx(start_dest + idx) = dest_by_source(start_origin + idx);
+            wgts(start_dest + idx) = wgt_by_source(start_origin + idx);
+        });
     });
 
     graph_type gc_graph(dest_idx, source_offsets);
