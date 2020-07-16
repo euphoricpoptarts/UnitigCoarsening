@@ -729,7 +729,7 @@ struct functorHashmapAccumulator
     typedef Kokkos::Experimental::UniqueToken<execution_space, Kokkos::Experimental::UniqueTokenScope::Global> unique_token_t;
     unique_token_t tokens;
 
-    functorTestHashmapAccumulator(edge_view_t row_map,
+    functorHashmapAccumulator(edge_view_t row_map,
         vtx_view_t entries,
         wgt_view_t wgts,
         edge_view_t dedupe_edge_count,
