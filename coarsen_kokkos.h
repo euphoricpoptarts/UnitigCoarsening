@@ -968,7 +968,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         hashmapAccumulator(source_bucket_offset, dest_by_source, wgt_by_source, edges_per_source, memory_pool, size_hint, size_hint);
 
 #ifdef HASHMAP
-    Kokkos::parallel_for("hashmap time", nc, functorHashmapAccumulator);
+    Kokkos::parallel_for("hashmap time", nc, hashmapAccumulator);
 #else
     //sort by dest and deduplicate
     Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const sgp_vid_t u, sgp_eid_t & thread_sum) {
