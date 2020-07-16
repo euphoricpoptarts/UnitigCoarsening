@@ -828,7 +828,7 @@ struct functorHashmapAccumulator
         {
             sgp_vid_t dirty_hash = used_hash_indices[i];
             entries(insert_at) = hash_map.keys[dirty_hash];
-            values(insert_at) = hash_map.values[dirty_hash];
+            wgts(insert_at) = hash_map.values[dirty_hash];
 
             hash_map.hash_begins[dirty_hash] = -1;
             insert_at++;
