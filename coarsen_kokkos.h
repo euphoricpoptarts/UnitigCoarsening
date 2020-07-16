@@ -832,7 +832,8 @@ struct functorHashmapAccumulator
             //insert_at++;
         }
 
-        dedupe_edge_count(idx) = used_hash_count;//insert_at - row_map(idx);
+        //used_hash_size gives the number of entries, used_hash_count gives the number of dirty hash values (I think)
+        dedupe_edge_count(idx) = used_hash_size;//insert_at - row_map(idx);
 
         // Release the memory pool chunk back to the pool
         _memory_pool.release_chunk(ptr_memory_pool_chunk);
