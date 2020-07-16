@@ -967,7 +967,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     uniform_memory_pool_t memory_pool(mem_chunk_count, mem_chunk_size, -1, pool_type);
 
     functorHashmapAccumulator<Kokkos::DefaultExecutionSpace, uniform_memory_pool_t>
-        hashmapAccumulator(source_bucket_offset, dest_by_source, wgt_by_source, edges_per_source, memory_pool, size_hint, size_hint);
+        hashmapAccumulator(source_bucket_offset, dest_by_source, wgt_by_source, edges_per_source, memory_pool, hash_size, size_hint);
 
 #ifdef HASHMAP
     Kokkos::parallel_for("hashmap time", nc, hashmapAccumulator);
