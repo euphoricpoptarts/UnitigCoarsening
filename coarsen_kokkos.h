@@ -775,14 +775,12 @@ struct functorHashmapAccumulator
 
         // Set pointer to hash nexts
         hash_map.hash_nexts = (sgp_vid_t*)(ptr_temp);
-        ptr_temp += _max_hash_entries;
 
         // Set pointer to hash keys
-        hash_map.keys = (sgp_vid_t*)(ptr_temp);
-        ptr_temp += _max_hash_entries;
+        hash_map.keys = (sgp_vid_t*) entries.data() + row_map(idx);
 
         // Set pointer to hash values
-        hash_map.values = (sgp_wgt_t*)(ptr_temp);
+        hash_map.values = (sgp_wgt_t*) wgts.data() + row_map(idx);
 
         // Set up limits in Hashmap_Accumulator
         hash_map.hash_key_size = _max_hash_entries;
@@ -820,21 +818,21 @@ struct functorHashmapAccumulator
             }
         }
 
-        sgp_vid_t insert_at = row_map(idx);
+        //sgp_vid_t insert_at = row_map(idx);
 
         // Reset the Begins values to -1 before releasing the memory pool chunk.
         // If you don't do this the next thread that grabs this memory chunk will not work properly.
         for (sgp_vid_t i = 0; i < used_hash_count; i++)
         {
             sgp_vid_t dirty_hash = used_hash_indices[i];
-            entries(insert_at) = hash_map.keys[i];
-            wgts(insert_at) = hash_map.values[i];
+            //entries(insert_at) = hash_map.keys[i];
+            //wgts(insert_at) = hash_map.values[i];
 
             hash_map.hash_begins[dirty_hash] = -1;
-            insert_at++;
+            //insert_at++;
         }
 
-        dedupe_edge_count(idx) = insert_at - row_map(idx);
+        dedupe_edge_count(idx) = used_hash_count;//insert_at - row_map(idx);
 
         // Release the memory pool chunk back to the pool
         _memory_pool.release_chunk(ptr_memory_pool_chunk);
@@ -901,13 +899,13 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     });
 
     //figure out max size for hashmap
-    sgp_vid_t size_hint = 0;
+    sgp_vid_t max_entries = 0;
     Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const sgp_vid_t u, sgp_vid_t& thread_max){
         sgp_vid_t degree = edges_per_source(u);
         if (thread_max < degree) {
             thread_max = degree;
         }
-    }, Kokkos::Max<sgp_vid_t, Kokkos::HostSpace>(size_hint));
+    }, Kokkos::Max<sgp_vid_t, Kokkos::HostSpace>(max_entries));
 
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
         edges_per_source(i) = 0; // will use as counter again
@@ -948,7 +946,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     // - hash_size must be a power of two since we use & rather than % (which is slower) for
     // computing the hash value for HashmapAccumulator.
     sgp_vid_t hash_size = 1;
-    while (hash_size < size_hint) { hash_size *= 2; }
+    while (hash_size < max_entries) { hash_size *= 2; }
 
     // Create Uniform Initialized Memory Pool
     KokkosKernels::Impl::PoolType pool_type = KokkosKernels::Impl::OneThread2OneChunk;
@@ -956,9 +954,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     // Determine memory chunk size for UniformMemoryPool
     sgp_vid_t mem_chunk_size = hash_size;      // for hash indices
     mem_chunk_size += hash_size;            // for hash begins
-    mem_chunk_size += size_hint;     // for hash nexts
-    mem_chunk_size += size_hint;     // for hash keys
-    mem_chunk_size += size_hint;          // for hash values
+    mem_chunk_size += max_entries;     // for hash nexts
     // Set a cap on # of chunks to 32.  In application something else should be done
     // here differently if we're OpenMP vs. GPU but for this example we can just cap
     // our number of chunks at 32.
@@ -967,7 +963,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     uniform_memory_pool_t memory_pool(mem_chunk_count, mem_chunk_size, -1, pool_type);
 
     functorHashmapAccumulator<Kokkos::DefaultExecutionSpace, uniform_memory_pool_t>
-        hashmapAccumulator(source_bucket_offset, dest_by_source, wgt_by_source, edges_per_source, memory_pool, hash_size, size_hint);
+        hashmapAccumulator(source_bucket_offset, dest_by_source, wgt_by_source, edges_per_source, memory_pool, hash_size, max_entries);
 
 #ifdef HASHMAP
     Kokkos::parallel_for("hashmap time", nc, hashmapAccumulator);
