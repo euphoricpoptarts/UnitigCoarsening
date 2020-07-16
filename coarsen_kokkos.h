@@ -746,7 +746,7 @@ struct functorHashmapAccumulator
         , tokens(ExecutionSpace()){}
 
     KOKKOS_INLINE_FUNCTION
-        void operator()(const scalar_t idx) const
+        void operator()(const sgp_vid_t idx) const
     {
         typedef sgp_vid_t hash_size_type;
         typedef sgp_vid_t hash_key_type;
@@ -960,11 +960,11 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     // Set a cap on # of chunks to 32.  In application something else should be done
     // here differently if we're OpenMP vs. GPU but for this example we can just cap
     // our number of chunks at 32.
-    sgp_vid_t mem_chunk_count = KOKKOSKERNELS_MACRO_MIN(32, concurrency);
+    sgp_vid_t mem_chunk_count = Kokkos::DefaultExecutionSpace::concurrency();
 
     uniform_memory_pool_t memory_pool(mem_chunk_count, mem_chunk_size, -1, pool_type);
 
-    functorHashmapAccumulator<execution_space, uniform_memory_pool_t, scalar_t> hashmapAccumulator(source_bucket_offset, dest_by_source, wgt_by_source, edges_per_source, memory_pool, size_hint, size_hint);
+    functorHashmapAccumulator<Kokkos::DefaultExecutionSpace, uniform_memory_pool_t, scalar_t> hashmapAccumulator(source_bucket_offset, dest_by_source, wgt_by_source, edges_per_source, memory_pool, size_hint, size_hint);
 
 #ifdef HASHMAP
     Kokkos::parallel_for("hashmap time", nc, functorHashmapAccumulator);
