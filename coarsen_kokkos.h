@@ -734,8 +734,8 @@ struct functorHashmapAccumulator
         wgt_view_t wgts,
         edge_view_t dedupe_edge_count,
         uniform_memory_pool_t memory_pool,
-        const size_t hash_size,
-        const size_t max_hash_entries)
+        const sgp_vid_t hash_size,
+        const sgp_vid_t max_hash_entries)
         : row_map(row_map)
         , entries(entries)
         , wgts(wgts)
