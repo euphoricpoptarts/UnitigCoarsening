@@ -834,6 +834,8 @@ struct functorHashmapAccumulator
             insert_at++;
         }
 
+        dedupe_edge_count(idx) = insert_at - row_map(idx);
+
         // Release the memory pool chunk back to the pool
         _memory_pool.release_chunk(ptr_memory_pool_chunk);
 
