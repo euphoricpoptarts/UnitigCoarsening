@@ -986,7 +986,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
                 wgt_by_source(offset - 1) += wgt_by_source(i);
             }
         }
-        edges_per_source(u) = offset;
+        edges_per_source(u) = offset - source_bucket_offset(u);
         thread_sum += offset - source_bucket_offset(u);
     }, gc_nedges);
 #else
