@@ -21,6 +21,7 @@
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "KokkosSparse_spmv.hpp"
 #include "KokkosSparse_spgemm.hpp"
+#include "KokkosSparse_spadd.hpp"
 #include "KokkosGraph_Distance2Color.hpp"
 #include "KokkosKernels_SparseUtils.hpp"
 #include "KokkosKernels_HashmapAccumulator.hpp"
@@ -939,6 +940,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     time_ptrs[4] += timer.seconds();
     timer.reset();
 
+#ifdef HASHMAP
     typedef typename KokkosKernels::Impl::UniformMemoryPool<Kokkos::DefaultExecutionSpace, sgp_vid_t> uniform_memory_pool_t;
     // Set the hash_size as the next power of 2 bigger than hash_size_hint.
     // - hash_size must be a power of two since we use & rather than % (which is slower) for
@@ -963,8 +965,28 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     functorHashmapAccumulator<Kokkos::DefaultExecutionSpace, uniform_memory_pool_t>
         hashmapAccumulator(source_bucket_offset, dest_by_source, wgt_by_source, edges_per_source, memory_pool, hash_size, max_entries);
 
-#ifdef HASHMAP
     Kokkos::parallel_for("hashmap time", nc, hashmapAccumulator);
+#elif defined(RADIX)
+    KokkosSparse::Experimental::SortEntriesFunctor<Kokkos::DefaultExecutionSpace, sgp_eid_t, sgp_vid_t, edge_view_t, vtx_view_t>
+        sortEntries(source_bucket_offset, dest_by_source, wgt_by_source);
+    Kokkos::parallel_for("radix sort time", nc, sortEntries);
+
+    Kokkos::parallel_for("deduplicated sorted", nc, KOKKOS_LAMBDA(sgp_vid_t u){
+        sgp_vid_t offset = 0;
+        sgp_vid_t last = SGP_INFTY;
+        for (sgp_eid_t i = source_bucket_offset(u); i < source_bucket_offset(u + 1); i++) {
+            if (last != dest_by_source(i)) {
+                dest_by_source(offset) = dest_by_source(i);
+                wgt_by_source(offset) = wgt_by_source(i);
+                offset++;
+            }
+            else {
+                dest_by_source(offset - 1) += dest_by_source(i);
+                wgt_by_source(offset - 1) += wgt_by_source(i);
+            }
+        }
+        edges_per_source(u) = offset;
+    });
 #else
     //sort by dest and deduplicate
     Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const sgp_vid_t u, sgp_eid_t & thread_sum) {
@@ -1000,6 +1022,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
 #endif
 
     time_ptrs[5] += timer.seconds();
+    timer.reset();
 
     edge_view_t source_offsets("source_offsets", nc + 1);
 
