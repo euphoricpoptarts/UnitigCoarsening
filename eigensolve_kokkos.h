@@ -78,14 +78,14 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u, const matrix_type& 
         if (local_max < eigenval_est) {
             local_max = eigenval_est;
         }
-    }, Kokkos::Max<sgp_wgt_t, Kokkos::HostSpace>(eigenval_max));
+    }, Kokkos::Max<sgp_real_t, Kokkos::HostSpace>(eigenval_max));
 
     Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(sgp_vid_t i, sgp_wgt_t& local_min) {
         sgp_real_t eigenval_est = v(i) / u(i);
         if (local_min > eigenval_est) {
             local_min = eigenval_est;
         }
-    }, Kokkos::Min<sgp_wgt_t, Kokkos::HostSpace>(eigenval_min));
+    }, Kokkos::Min<sgp_real_t, Kokkos::HostSpace>(eigenval_min));
 
     printf("eigenvalue = %1.9lf (%1.9lf %1.9lf), "
         "edge cut lb %5.0lf "
