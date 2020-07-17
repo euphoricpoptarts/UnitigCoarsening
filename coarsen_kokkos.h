@@ -969,7 +969,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
 #elif defined(RADIX)
     KokkosSparse::Experimental::SortEntriesFunctor<Kokkos::DefaultExecutionSpace, sgp_eid_t, sgp_vid_t, edge_view_t, vtx_view_t>
         sortEntries(source_bucket_offset, dest_by_source, wgt_by_source);
-    Kokkos::parallel_for("radix sort time", nc, sortEntries);
+    Kokkos::parallel_for("radix sort time", policy(nc, KOKKOS::AUTO), sortEntries);
 
     Kokkos::parallel_for("deduplicated sorted", nc, KOKKOS_LAMBDA(sgp_vid_t u){
         sgp_vid_t offset = 0;
