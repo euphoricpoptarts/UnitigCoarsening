@@ -972,7 +972,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     Kokkos::parallel_for("radix sort time", policy(nc, Kokkos::AUTO), sortEntries);
 
     Kokkos::parallel_reduce("deduplicated sorted", nc, KOKKOS_LAMBDA(sgp_vid_t u, sgp_eid_t & thread_sum){
-        sgp_vid_t offset = 0;
+        sgp_vid_t offset = source_bucket_offset(u);
         sgp_vid_t last = SGP_INFTY;
         for (sgp_eid_t i = source_bucket_offset(u); i < source_bucket_offset(u + 1); i++) {
             if (last != dest_by_source(i)) {
@@ -987,7 +987,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
             }
         }
         edges_per_source(u) = offset;
-        thread_sum += offset;
+        thread_sum += offset - source_bucket_offset(u);
     }, gc_nedges);
 #else
     //sort by dest and deduplicate
