@@ -978,6 +978,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
             if (last != dest_by_source(i)) {
                 dest_by_source(offset) = dest_by_source(i);
                 wgt_by_source(offset) = wgt_by_source(i);
+                last = dest_by_source(offset);
                 offset++;
             }
             else {
