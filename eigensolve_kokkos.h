@@ -64,7 +64,7 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u, const matrix_type& 
     eigenview_t v("v", n);
     KokkosSparse::spmv("N", 1.0, g, u, 0.0, v);
 
-    Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(sgp_vid_t i, sgp_wgt_t& local_sum) {
+    Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(sgp_vid_t i, sgp_real_t& local_sum) {
         sgp_vid_t weighted_degree = g.graph.row_map(i + 1) - g.graph.row_map(i);
         sgp_real_t u_i = weighted_degree * u(i);
         sgp_real_t matvec_i = v(i);
@@ -73,14 +73,14 @@ SGPAR_API void sgp_power_iter_eigenvalue_log(eigenview_t& u, const matrix_type& 
         local_sum += (u_i * u_i) * 1e9;
     }, eigenval);
 
-    Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(sgp_vid_t i, sgp_wgt_t& local_max) {
+    Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(sgp_vid_t i, sgp_real_t& local_max) {
         sgp_real_t eigenval_est = v(i) / u(i);
         if (local_max < eigenval_est) {
             local_max = eigenval_est;
         }
     }, Kokkos::Max<sgp_real_t, Kokkos::HostSpace>(eigenval_max));
 
-    Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(sgp_vid_t i, sgp_wgt_t& local_min) {
+    Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(sgp_vid_t i, sgp_real_t& local_min) {
         sgp_real_t eigenval_est = v(i) / u(i);
         if (local_min > eigenval_est) {
             local_min = eigenval_est;
