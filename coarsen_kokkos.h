@@ -714,6 +714,53 @@ void heap_deduplicate(const sgp_eid_t bottom, const sgp_eid_t top, vtx_view_t de
     edges_per_source = offset - bottom;
 }
 
+template<typename ExecutionSpace>
+struct functorDedupeAfterSort
+{
+    typedef ExecutionSpace execution_space;
+
+    edge_view_t row_map;
+    vtx_view_t entries;
+    wgt_view_t wgts;
+    wgt_view_t wgtsOut;
+    edge_view_t dedupe_edge_count;
+
+    functorDedupeAfterSort(edge_view_t row_map,
+        vtx_view_t entries,
+        wgt_view_t wgts,
+        wgt_view_t wgtsOut,
+        edge_view_t dedupe_edge_count)
+        : row_map(row_map)
+        , entries(entries)
+        , wgts(wgts)
+        , wgtsOut(wgtsOut)
+        , dedupe_edge_count(dedupe_edge_count) {}
+
+    KOKKOS_INLINE_FUNCTION
+        void operator()(const member& thread, sgp_eid_t& thread_sum) const
+    {
+        sgp_vid_t u = thread.league_rank();
+        sgp_eid_t start = row_map(u);
+        sgp_eid_t end = row_map(u + 1);
+        Kokkos::parallel_scan(Kokkos::TeamThreadRange(thread, start, end), [=](const sgp_eid_t& i, sgp_eid_t& update, const bool final) {
+            if (i == start) {
+                update += 1;
+            }
+            else if (entries(i) != entries(i - 1)) {
+                update += 1;
+            }
+            if (final) {
+                entries(start + update - 1) = entries(i);
+                Kokkos::atomic_add(&wgtsOut(start + update - 1), wgts(i));
+                if (i + 1 == end) {
+                    dedupe_edge_count(u) == update;
+                }
+            }
+            });
+        thread_sum += dedupe_edge_count(u);
+    }
+};
+
 template<typename ExecutionSpace, typename uniform_memory_pool_t>
 struct functorHashmapAccumulator
 {
@@ -971,23 +1018,11 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         sortEntries(source_bucket_offset, dest_by_source, wgt_by_source);
     Kokkos::parallel_for("radix sort time", policy(nc, Kokkos::AUTO), sortEntries);
 
-    Kokkos::parallel_reduce("deduplicated sorted", nc, KOKKOS_LAMBDA(sgp_vid_t u, sgp_eid_t & thread_sum){
-        sgp_vid_t offset = source_bucket_offset(u);
-        sgp_vid_t last = SGP_INFTY;
-        for (sgp_eid_t i = source_bucket_offset(u); i < source_bucket_offset(u + 1); i++) {
-            if (last != dest_by_source(i)) {
-                dest_by_source(offset) = dest_by_source(i);
-                wgt_by_source(offset) = wgt_by_source(i);
-                last = dest_by_source(offset);
-                offset++;
-            }
-            else {
-                wgt_by_source(offset - 1) += wgt_by_source(i);
-            }
-        }
-        edges_per_source(u) = offset - source_bucket_offset(u);
-        thread_sum += offset - source_bucket_offset(u);
-    }, gc_nedges);
+    edge_view_t wgt_by_source2("wgts replacement", size_sbo);
+    functorDedupeAfterSort<Kokkos::DefaultExecutionSpace>
+        deduper(source_bucket_offset, dest_by_source, wgt_by_source, wgt_by_source2, edges_per_source);
+    Kokkos::parallel_reduce("deduplicated sorted", policy(nc, Kokkos::AUTO), deduper, gc_nedges);
+    wgt_by_source = wgt_by_source2;
 #else
     //sort by dest and deduplicate
     Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const sgp_vid_t u, sgp_eid_t & thread_sum) {
