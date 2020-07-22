@@ -35,9 +35,7 @@
 #include <algorithm>          // for STL sort
 #endif
 
-#ifdef EXPERIMENT
 #include "ExperimentLoggerUtil.cpp"
-#endif
 
 #include "definitions_kokkos.h"
 
@@ -49,7 +47,7 @@ SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
     const matrix_type& g,
     const int coarsening_level,
     sgp_pcg32_random_t* rng,
-    double* time_ptrs) {
+    ExperimentLoggerUtil& experiment) {
 
     sgp_vid_t n = g.numRows();
     typedef KokkosKernels::Experimental::KokkosKernelsHandle
@@ -141,7 +139,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     const matrix_type& g,
     const int coarsening_level,
     sgp_pcg32_random_t* rng,
-    double* time_ptrs) {
+    ExperimentLoggerUtil& experiment) {
 
     sgp_vid_t n = g.numRows();
 
@@ -183,8 +181,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     Kokkos::parallel_for("construct reverse map", n, KOKKOS_LAMBDA(sgp_vid_t i) {
         reverse_map(vperm(i)) = i;
     });
-    time_ptrs[6] += timer.seconds();
-
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Permute, timer.seconds());
     timer.reset();
     if (coarsening_level == 1) {
         //all weights equal at this level so choose heaviest edge randomly
@@ -213,7 +210,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
             hn(i) = hn_i;
         });
     }
-    time_ptrs[7] += timer.seconds();
+    timer.reset();
     vtx_view_t match("match", n);
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
         match(i) = SGP_INFTY;
@@ -268,7 +265,8 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         Kokkos::deep_copy(perm_length, next_length);
         vperm = next_perm;
     }
-    time_ptrs[8] += timer.seconds();
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct, timer.seconds());
+    timer.reset();
 
     sgp_vid_t nc = 0;
     Kokkos::deep_copy(nc, nvertices_coarse);
@@ -385,8 +383,7 @@ int dump_mtx(const matrix_type& mtx, char* filename, bool symmetric) {
 SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     const matrix_type& interp_mtx,
     const matrix_type& g,
-    const int coarsening_level,
-    double* time_ptrs) {
+    const int coarsening_level) {
 
     sgp_vid_t n = g.numRows();
     sgp_vid_t nc = interp_mtx.numCols();
@@ -897,7 +894,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     const matrix_type& vcmap,
     const matrix_type& g,
     const int coarsening_level,
-    double* time_ptrs) {
+    ExperimentLoggerUtil& experiment) {
     sgp_vid_t n = g.numRows();
     sgp_vid_t nc = vcmap.numCols();
 
@@ -929,7 +926,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         });
     });
 
-    time_ptrs[2] += timer.seconds();
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Count, timer.seconds());
     timer.reset();
 
     Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
@@ -957,7 +954,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         edges_per_source(i) = 0; // will use as counter again
     });
 
-    time_ptrs[3] += timer.seconds();
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Prefix, timer.seconds());
     timer.reset();
 
     Kokkos::View<sgp_eid_t> sbo_subview = Kokkos::subview(source_bucket_offset, nc);
@@ -984,7 +981,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         });
     });
 
-    time_ptrs[4] += timer.seconds();
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
     timer.reset();
 
 #ifdef HASHMAP
@@ -1014,15 +1011,20 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
 
     Kokkos::parallel_for("hashmap time", nc, hashmapAccumulator);
 #elif defined(RADIX)
+    Kokkos::Timer radix;
     KokkosSparse::Experimental::SortEntriesFunctor<Kokkos::DefaultExecutionSpace, sgp_eid_t, sgp_vid_t, edge_view_t, vtx_view_t>
         sortEntries(source_bucket_offset, dest_by_source, wgt_by_source);
     Kokkos::parallel_for("radix sort time", policy(nc, Kokkos::AUTO), sortEntries);
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixSort, radix.seconds());
+    radix.reset();
 
     edge_view_t wgt_by_source2("wgts replacement", size_sbo);
     functorDedupeAfterSort<Kokkos::DefaultExecutionSpace>
         deduper(source_bucket_offset, dest_by_source, wgt_by_source, wgt_by_source2, edges_per_source);
     Kokkos::parallel_reduce("deduplicated sorted", policy(nc, Kokkos::AUTO), deduper, gc_nedges);
     wgt_by_source = wgt_by_source2;
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixDedupe, radix.seconds());
+    radix.reset();
 #else
     //sort by dest and deduplicate
     Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const sgp_vid_t u, sgp_eid_t & thread_sum) {
@@ -1057,7 +1059,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     }, gc_nedges);
 #endif
 
-    time_ptrs[5] += timer.seconds();
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Dedupe, timer.seconds());
     timer.reset();
 
     edge_view_t source_offsets("source_offsets", nc + 1);
@@ -1102,21 +1104,26 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
     const matrix_type& g,
     const int coarsening_level,
     sgp_pcg32_random_t* rng,
-    double* time_ptrs) {
+    ExperimentLoggerUtil& experiment) {
 
     Kokkos::Timer timer;
     sgp_vid_t nvertices_coarse;
-    sgp_coarsen_HEC(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, time_ptrs);
-    time_ptrs[0] += timer.seconds();
+    sgp_coarsen_HEC(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
 
     timer.reset();
-    sgp_build_coarse_graph_spgemm(gc, interpolation_graph, g, coarsening_level, time_ptrs);
-    time_ptrs[1] += timer.seconds();
+#ifdef SPGEMM
+    sgp_build_coarse_graph_spgemm(gc, interpolation_graph, g, coarsening_level);
+#else
+    sgp_build_coarse_graph_msd(gc, interpolation_graph, g, coarsening_level, experiment);
+#endif
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Build, timer.seconds());
+    timer.reset();
 
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<matrix_type>& coarse_graphs, std::list<matrix_type>& interp_mtxs, sgp_pcg32_random_t* rng, double* time_ptrs) {
+SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<matrix_type>& coarse_graphs, std::list<matrix_type>& interp_mtxs, sgp_pcg32_random_t* rng, ExperimentLoggerUtil& experiment) {
 
     Kokkos::Timer timer;
     sgp_vid_t fine_n = fine_g->nvertices;
@@ -1156,7 +1163,7 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
             *interp_mtxs.rbegin(),
             *(++coarse_graphs.rbegin()),
             ++coarsening_level,
-            rng, time_ptrs));
+            rng, experiment));
 
 #ifdef DEBUG
         sgp_real_t coarsen_ratio = (sgp_real_t) coarse_graphs.rbegin()->numRows() / (sgp_real_t) (++coarse_graphs.rbegin())->numRows();

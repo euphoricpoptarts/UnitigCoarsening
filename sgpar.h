@@ -2380,9 +2380,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     sgp_real_t* eigenvec = (sgp_real_t*)malloc(g.nvertices * sizeof(sgp_real_t));
 
     CHECK_SGPAR(sgpar_kokkos::sgp_eigensolve(eigenvec, coarse_graphs, interp_mtxs, rng, config->refine_alg
-#ifdef EXPERIMENT
         , experiment
-#endif
         ));
 
     coarse_graphs.clear();
@@ -2397,19 +2395,11 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
         eigenvec, g);
 
     free(eigenvec);
-#ifdef EXPERIMENT
     experiment.setTotalDurationSeconds(fin_final_level_time - start_time);
     experiment.setCoarsenDurationSeconds(fin_coarsening_time - start_time);
     experiment.setRefineDurationSeconds(fin_final_level_time - fin_coarsening_time);
-    experiment.setCoarsenMapDurationSeconds(time_counters[0]);
-    experiment.setCoarsenBuildDurationSeconds(time_counters[1]);
-    experiment.setCoarsenCountDurationSeconds(time_counters[2]);
-    experiment.setCoarsenPrefixSumDurationSeconds(time_counters[3]);
-    experiment.setCoarsenBucketDurationSeconds(time_counters[4]);
-    experiment.setCoarsenDedupeDurationSeconds(time_counters[5]);
     experiment.setFinestEdgeCut(*edge_cut);
     experiment.modifyCoarseLevelEC(0, *edge_cut);
-#endif
 
     printf("Coarsening permutation time: %.8f\n", time_counters[6]);
     printf("Coarsening heavy edge search time: %.8f\n", time_counters[7]);
@@ -2594,12 +2584,12 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     experiment.setTotalDurationSeconds(fin_final_level_time - start_time);
     experiment.setCoarsenDurationSeconds(fin_coarsening_time - start_time);
     experiment.setRefineDurationSeconds(fin_final_level_time - fin_coarsening_time);
-    experiment.setCoarsenMapDurationSeconds(time_counters[0]);
-    experiment.setCoarsenBuildDurationSeconds(time_counters[1]);
-    experiment.setCoarsenCountDurationSeconds(time_counters[2]);
-    experiment.setCoarsenPrefixSumDurationSeconds(time_counters[3]);
-    experiment.setCoarsenBucketDurationSeconds(time_counters[4]);
-    experiment.setCoarsenDedupeDurationSeconds(time_counters[5]);
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurment::Map, time_counters[0]);
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurment::Build, time_counters[1]);
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurment::Count, time_counters[2]);
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurment::Prefix, time_counters[3]);
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurment::Bucket, time_counters[4]);
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurment::Dedupe, time_counters[5]);
 #endif
 
 

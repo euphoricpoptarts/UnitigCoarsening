@@ -49,13 +49,9 @@ int main(int argc, char **argv) {
 #endif
     for (int i=0; i < config.num_iter; i++) {
         sgp_eid_t edgecut = 0;
-#ifdef EXPERIMENT
         ExperimentLoggerUtil experiment;
-#endif
         CHECK_SGPAR( sgp_partition_graph(part, &edgecut, &config, 0, g,
-#ifdef EXPERIMENT
             experiment,
-#endif
                                         &rng) );
 
         sgp_vid_t part_diff = 0;
@@ -77,39 +73,26 @@ int main(int argc, char **argv) {
 
             sgp_eid_t ec1 = 0, ec2 = 0;
 
-#ifdef EXPERIMENT
             ExperimentLoggerUtil experiment1;
-#endif
             CHECK_SGPAR(sgp_partition_graph(part1, &ec1, &config, 0, g1,
-#ifdef EXPERIMENT
                 experiment1,
-#endif
                 &rng));
 
-#ifdef EXPERIMENT
             ExperimentLoggerUtil experiment2;
-#endif
             CHECK_SGPAR(sgp_partition_graph(part2, &ec2, &config, 0, g2,
-#ifdef EXPERIMENT
                 experiment2,
-#endif
                 &rng));
 
-#ifdef EXPERIMENT
             experiment.setEdgeCut4Way(edgecut + ec1 + ec2);
-#endif
             sgp_free_graph(&g1);
             sgp_free_graph(&g2);
         }
 
-#ifdef EXPERIMENT
         experiment.setPartitionDiff(part_diff);
-#endif
         
         if (edgecut < edgecut_min) {
             edgecut_min = edgecut;
         }
-#ifdef EXPERIMENT
         bool first = true, last = true;
         if (i > 0) {
             first = false;
@@ -118,7 +101,6 @@ int main(int argc, char **argv) {
             last = false;
         }
         experiment.log(metrics, first, last);
-#endif
     }
 #ifdef _KOKKOS
     Kokkos::finalize();

@@ -3,8 +3,38 @@
 #include <stdlib.h>
 #include <iostream>
 #include <fstream>
+#include <string>
+#include <map>
 
 class ExperimentLoggerUtil {
+
+public:
+	enum class Measurement : int {
+		Map,
+		Build,
+		Count,
+		Prefix,
+		Bucket,
+		Dedupe,
+		RadixSort,
+		RadixDedupe,
+		Permute,
+		MapConstruct,
+		END
+	};
+	std::vector<std::string> measurementNames{
+		"coarsen-map",
+		"coarsen-build",
+		"coarsen-count",
+		"coarsen-prefix",
+		"coarsen-bucket",
+		"coarsen-dedupe",
+		"coarsen-radix-sort",
+		"coarsen-radix-dedupe",
+		"coarsen-permute",
+		"coarsen-map-construct",
+	};
+	std::vector<double> measurements(Measurement.END, 0.0);
 
 private:
 	class CoarseLevel {
@@ -80,28 +110,8 @@ public:
 		this->refineDurationSeconds = refineDurationSeconds;
 	}
 
-	void setCoarsenDedupeDurationSeconds(double coarsenDedupeDurationSeconds) {
-		this->coarsenDedupeDurationSeconds = coarsenDedupeDurationSeconds;
-	}
-
-	void setCoarsenCountDurationSeconds(double coarsenCountDurationSeconds) {
-		this->coarsenCountDurationSeconds = coarsenCountDurationSeconds;
-	}
-
-	void setCoarsenPrefixSumDurationSeconds(double coarsenPrefixSumDurationSeconds) {
-		this->coarsenPrefixSumDurationSeconds = coarsenPrefixSumDurationSeconds;
-	}
-
-	void setCoarsenBucketDurationSeconds(double coarsenBucketDurationSeconds) {
-		this->coarsenBucketDurationSeconds = coarsenBucketDurationSeconds;
-	}
-
-	void setCoarsenMapDurationSeconds(double coarsenMapDurationSeconds) {
-		this->coarsenMapDurationSeconds = coarsenMapDurationSeconds;
-	}
-
-	void setCoarsenBuildDurationSeconds(double coarsenBuildDurationSeconds) {
-		this->coarsenBuildDurationSeconds = coarsenBuildDurationSeconds;
+	void addMeasurement(Measurement m, double val) {
+		measurements[m] += val;
 	}
 
 	void log(char* filename, bool first, bool last) {
@@ -119,13 +129,10 @@ public:
 			f << "\"total-duration-seconds\":" << totalDurationSeconds << ',';
 			f << "\"coarsen-duration-seconds\":" << coarsenDurationSeconds << ',';
 			f << "\"refine-duration-seconds\":" << refineDurationSeconds << ',';
-			f << "\"coarsen-dedupe-duration-seconds\":" << coarsenDedupeDurationSeconds << ',';
-			f << "\"coarsen-count-duration-seconds\":" << coarsenCountDurationSeconds << ',';
-			f << "\"coarsen-prefix-sum-duration-seconds\":" << coarsenPrefixSumDurationSeconds << ',';
-			f << "\"coarsen-bucket-duration-seconds\":" << coarsenBucketDurationSeconds << ',';
-			f << "\"coarsen-map-duration-seconds\":" << coarsenMapDurationSeconds << ',';
-			f << "\"coarsen-build-duration-seconds\":" << coarsenBuildDurationSeconds << ',';
 			f << "\"number-coarse-levels\":" << numCoarseLevels << ',';
+			for (int i = 0; i < Measurement.END; i++) {
+				f << "\"" << measurementNames[i] << "-duration-seconds\":" << measurements[i] << ",";
+			}
 			f << "\"coarse-levels\":[";
 
 			bool firstLog = true;
