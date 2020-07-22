@@ -756,6 +756,26 @@ struct functorDedupeAfterSort
             });
         thread_sum += dedupe_edge_count(u);
     }
+
+    KOKKOS_INLINE_FUNCTION
+        void operator()(const sgp_vid_t& u, sgp_eid_t& thread_sum) const
+    {
+        sgp_vid_t offset = row_map(u);
+        sgp_vid_t last = SGP_INFTY;
+        for (sgp_eid_t i = row_map(u); i < row_map(u + 1); i++) {
+            if (last != entries(i)) {
+                entries(offset) = entries(i);
+                wgtsOut(offset) = wgts(i);
+                last = entries(offset);
+                offset++;
+            }
+            else {
+                wgtsOut(offset - 1) += wgts(i);
+            }
+        }
+        dedupe_edge_count(u) = offset - row_map(u);
+        thread_sum += offset - row_map(u);
+    }
 };
 
 template<typename ExecutionSpace, typename uniform_memory_pool_t>
@@ -1021,7 +1041,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     edge_view_t wgt_by_source2("wgts replacement", size_sbo);
     functorDedupeAfterSort<Kokkos::DefaultExecutionSpace>
         deduper(source_bucket_offset, dest_by_source, wgt_by_source, wgt_by_source2, edges_per_source);
-    Kokkos::parallel_reduce("deduplicated sorted", policy(nc, Kokkos::AUTO), deduper, gc_nedges);
+    Kokkos::parallel_reduce("deduplicated sorted", nc, deduper, gc_nedges);
     wgt_by_source = wgt_by_source2;
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixDedupe, radix.seconds());
     radix.reset();
