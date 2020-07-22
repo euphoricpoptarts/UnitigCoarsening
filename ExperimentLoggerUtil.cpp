@@ -115,11 +115,11 @@ public:
 	}
 
 	void addMeasurement(Measurement m, double val) {
-		measurements[m] += val;
+		measurements[static_cast<int>(m)] += val;
 	}
 
 	double getMeasurement(Measurement m) {
-		return measurements[m];
+		return measurements[static_cast<int>(m)];
 	}
 
 	void log(char* filename, bool first, bool last) {
