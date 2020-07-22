@@ -34,7 +34,7 @@ public:
 		"coarsen-permute",
 		"coarsen-map-construct",
 	};
-	std::vector<double> measurements(Measurement.END, 0.0);
+	std::vector<double> measurements(Measurement::END, 0.0);
 
 private:
 	class CoarseLevel {
@@ -111,7 +111,7 @@ public:
 	}
 
 	void addMeasurement(Measurement m, double val) {
-		measurements[m] += val;
+		measurements[(int) m] += val;
 	}
 
 	void log(char* filename, bool first, bool last) {
@@ -130,7 +130,7 @@ public:
 			f << "\"coarsen-duration-seconds\":" << coarsenDurationSeconds << ',';
 			f << "\"refine-duration-seconds\":" << refineDurationSeconds << ',';
 			f << "\"number-coarse-levels\":" << numCoarseLevels << ',';
-			for (int i = 0; i < Measurement.END; i++) {
+			for (int i = 0; i < Measurement::END; i++) {
 				f << "\"" << measurementNames[i] << "-duration-seconds\":" << measurements[i] << ",";
 			}
 			f << "\"coarse-levels\":[";
