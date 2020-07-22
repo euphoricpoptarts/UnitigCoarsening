@@ -76,7 +76,7 @@ private:
 
 public:
 	ExperimentLoggerUtil() :
-		measurements(Measurement::END, 0.0)
+		measurements(static_cast<int>(Measurement::END), 0.0)
 	{}
 
 	void addCoarseLevel(int refineIterations, bool iterationMaxReached, uint64_t unrefinedEdgeCut) {
@@ -118,7 +118,7 @@ public:
 		measurements[m] += val;
 	}
 
-	void getMeasurment(Measurement m) {
+	double getMeasurement(Measurement m) {
 		return measurements[m];
 	}
 
