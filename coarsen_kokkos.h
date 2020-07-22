@@ -6,6 +6,7 @@
 #include <time.h>
 #include <list>
 #include <ctime>
+#include <limits>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -18,6 +19,7 @@
 #include <Kokkos_UnorderedMap.hpp>
 #include <Kokkos_Random.hpp>
 #include <Kokkos_UniqueToken.hpp>
+#include <Kokkos_Sort.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "KokkosSparse_spmv.hpp"
 #include "KokkosSparse_spgemm.hpp"
@@ -143,9 +145,6 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 
     sgp_vid_t n = g.numRows();
 
-    vtx_view_t vperm("permutation", n);
-    vtx_mirror_t perm_m = Kokkos::create_mirror(vperm);
-
     vtx_view_t hn("heavies", n);
 
     vtx_view_t vcmap("vcmap", n);
@@ -154,28 +153,27 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         vcmap(i) = SGP_INFTY;
     });
 
-    Kokkos::parallel_for("host initialize permutation", host_policy(0, n), KOKKOS_LAMBDA(sgp_vid_t i) {
-        perm_m(i) = i;
-    });
+    Kokkos::View<uint64_t*> randoms("randoms", n);
 
     using pool_t = Kokkos::Random_XorShift64_Pool<>;
     using gen_t = typename pool_t::generator_type;
     pool_t rand_pool(std::time(nullptr));
     Kokkos::Timer timer;
-    for (sgp_vid_t i = n - 1; i > 0; i--) {
-        sgp_vid_t v_i = perm_m(i);
-#ifndef SGPAR_HUGEGRAPHS
-        uint32_t j = (sgp_pcg32_random_r(rng)) % (i + 1);
-#else
-        uint64_t j1 = (sgp_pcg32_random_r(rng)) % (i + 1);
-        uint64_t j2 = (sgp_pcg32_random_r(rng)) % (i + 1);
-        uint64_t j = ((j1 << 32) + j2) % (i + 1);
-#endif 
-        sgp_vid_t v_j = perm_m(j);
-        perm_m(i) = v_j;
-        perm_m(j) = v_i;
-    }
-    Kokkos::deep_copy(vperm, perm_m);
+
+    Kokkos::parallel_for("create random entries", n, KOKKOS_LAMBDA(sgp_vid_t i){
+        gen_t generator = rand_pool.get_state();
+        randoms(i) = generator.urand64();
+        rand_pool.free_state(generator);
+    });
+
+    uint64_t max = std::numeric_limits<uint64_t>::max();
+    typedef Kokkos::BinOp1D< Kokkos::View<uint64_t*> > BinOp;
+    BinOp bin_op(n, 0, max);
+    //VERY important that final parameter is true
+    Kokkos::BinSort< Kokkos::View<uint64_t*>, BinOp, Kokkos::DefaultExecutionSpace, sgp_vid_t >
+        sorter(randoms, bin_op, true);
+    sorter.create_permute_vector();
+    Kokkos::View<sgp_vid_t*> vperm = sorter.get_permute_vector();
 
     vtx_view_t reverse_map("reversed", n);
     Kokkos::parallel_for("construct reverse map", n, KOKKOS_LAMBDA(sgp_vid_t i) {
@@ -183,6 +181,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     });
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Permute, timer.seconds());
     timer.reset();
+
     if (coarsening_level == 1) {
         //all weights equal at this level so choose heaviest edge randomly
         Kokkos::parallel_for("Random HN", n, KOKKOS_LAMBDA(sgp_vid_t i) {
