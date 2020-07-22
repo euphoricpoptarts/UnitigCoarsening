@@ -2400,9 +2400,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     experiment.setFinestEdgeCut(*edge_cut);
     experiment.modifyCoarseLevelEC(0, *edge_cut);
 
-    printf("Coarsening permutation time: %.8f\n", time_counters[6]);
-    printf("Coarsening heavy edge search time: %.8f\n", time_counters[7]);
-    printf("Coarsening map construction time: %.8f\n", time_counters[8]);
+    printf("Coarsening permutation time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Permute));
+    printf("Coarsening map construction time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct));
     printf("Total: %3.3lf s, coarsening %3.3lf %3.0lf%% "
         "(sort %3.3lf %3.0lf%%), "
         "refine %3.3lf s (%3.3lf s, %3.0lf%% + %3.3lf, %3.0lf%%)\n",

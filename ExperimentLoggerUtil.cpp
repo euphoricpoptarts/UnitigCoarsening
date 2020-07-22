@@ -34,7 +34,7 @@ public:
 		"coarsen-permute",
 		"coarsen-map-construct",
 	};
-	std::vector<double> measurements(Measurement::END, 0.0);
+	std::vector<double> measurements;
 
 private:
 	class CoarseLevel {
@@ -75,6 +75,10 @@ private:
 	double coarsenBuildDurationSeconds = 0;
 
 public:
+	ExperimentLoggerUtil() :
+		measurements(Measurement::END, 0.0)
+	{}
+
 	void addCoarseLevel(int refineIterations, bool iterationMaxReached, uint64_t unrefinedEdgeCut) {
 		coarseLevels.emplace_back(refineIterations, iterationMaxReached, unrefinedEdgeCut);
 		numCoarseLevels++;
@@ -111,7 +115,11 @@ public:
 	}
 
 	void addMeasurement(Measurement m, double val) {
-		measurements[(int) m] += val;
+		measurements[m] += val;
+	}
+
+	void getMeasurment(Measurement m) {
+		return measurements[m];
 	}
 
 	void log(char* filename, bool first, bool last) {
