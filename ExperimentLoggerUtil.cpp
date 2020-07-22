@@ -138,7 +138,7 @@ public:
 			f << "\"coarsen-duration-seconds\":" << coarsenDurationSeconds << ',';
 			f << "\"refine-duration-seconds\":" << refineDurationSeconds << ',';
 			f << "\"number-coarse-levels\":" << numCoarseLevels << ',';
-			for (int i = 0; i < Measurement::END; i++) {
+			for (int i = 0; i < static_cast<int>(Measurement::END); i++) {
 				f << "\"" << measurementNames[i] << "-duration-seconds\":" << measurements[i] << ",";
 			}
 			f << "\"coarse-levels\":[";
