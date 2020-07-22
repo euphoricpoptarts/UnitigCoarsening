@@ -55,7 +55,7 @@ namespace sgpar {
     typedef uint32_t sgp_eid_t;
 #endif
     typedef double sgp_real_t;
-    typedef sgp_real_t sgp_wgt_t;
+    typedef sgp_eid_t sgp_wgt_t;
 
 #ifndef SGPAR_COARSENING_VTX_CUTOFF
 #define SGPAR_COARSENING_VTX_CUTOFF 50
