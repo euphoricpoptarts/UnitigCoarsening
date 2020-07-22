@@ -26,7 +26,7 @@ public:
 		"coarsen-map",
 		"coarsen-build",
 		"coarsen-count",
-		"coarsen-prefix",
+		"coarsen-prefix-sum",
 		"coarsen-bucket",
 		"coarsen-dedupe",
 		"coarsen-radix-sort",
