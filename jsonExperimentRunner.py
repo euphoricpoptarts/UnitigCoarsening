@@ -40,6 +40,10 @@ def analyzeMetrics(metricsPath, logFile):
     coarsenDedupeTimes = [d['coarsen-dedupe-duration-seconds'] for d in data]
     coarsenMapTimes = [d['coarsen-map-duration-seconds'] for d in data]
     coarsenBuildTimes = [d['coarsen-build-duration-seconds'] for d in data]
+    coarsenPermuteTimes = [d['coarsen-permute-duration-seconds'] for d in data]
+    coarsenMapConstructTimes = [d['coarsen-map-construct-duration-seconds'] for d in data]
+    coarsenRadixSortTimes = [d['coarsen-radix-sort-duration-seconds'] for d in data]
+    coarsenRadixDedupeTimes = [d['coarsen-radix-dedupe-duration-seconds'] for d in data]
     refineTimes = [d['refine-duration-seconds'] for d in data]
     edgeCuts = [d['edge-cut'] for d in data]
     edgeCuts4way = [d['edge-cut-four-way'] for d in data]
@@ -56,6 +60,10 @@ def analyzeMetrics(metricsPath, logFile):
         printStat("Coarsening prefix sum duration", coarsenPrefixSumTimes, output)
         printStat("Coarsening bucketing duration", coarsenBucketTimes, output)
         printStat("Coarsening deduping duration", coarsenDedupeTimes, output)
+        printStat("Coarsening permuting duration", coarsenPermuteTimes, output)
+        printStat("Coarsening map constructing duration", coarsenMapConstructTimes, output)
+        printStat("Coarsening radix sorting duration", coarsenRadixSortTimes, output)
+        printStat("Coarsening radix deduping duration", coarsenRadixDedupeTimes, output)
         printStat("Refine duration", refineTimes, output)
         printStat("Edge cut", edgeCuts, output)
         printStat("Four partition edge cut", edgeCuts4way, output)
