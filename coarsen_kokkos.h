@@ -441,8 +441,8 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
     }
 
 #ifdef MTMETIS
-    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
-        if (vcmap(i) != SGP_INFTY) {
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t u){
+        if (vcmap(u) != SGP_INFTY) {
             sgp_vid_t lastLeaf = SGP_INFTY;
             for (sgp_eid_t j = g.graph.row_map(u); j < g.graph.row_map(u + 1); j++) {
                 sgp_vid_t v = g.graph.entries(j);
