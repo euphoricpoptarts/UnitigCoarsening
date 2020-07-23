@@ -394,7 +394,7 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
         Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
             sgp_vid_t u = vperm(i);
             if (vcmap(u) == SGP_INFTY) {
-                sgp_vid_t h = SPG_INFTY;
+                sgp_vid_t h = SGP_INFTY;
 
                 if (coarsening_level == 1) {
                     sgp_vid_t max_ewt = 0;
@@ -425,7 +425,7 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
                     }
                 }
 
-                if (h != SPG_INFTY) {
+                if (h != SGP_INFTY) {
                     sgp_vid_t add_next = Kokkos::atomic_fetch_add(&next_length(), 1);
                     next_perm(add_next) = u;
                     hn(u) = h;
