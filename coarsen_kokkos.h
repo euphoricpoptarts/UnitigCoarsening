@@ -440,6 +440,31 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
         vperm = next_perm;
     }
 
+#ifdef MTMETIS
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+        if (vcmap(i) != SGP_INFTY) {
+            sgp_vid_t lastLeaf = SGP_INFTY;
+            for (sgp_eid_t j = g.graph.row_map(u); j < g.graph.row_map(u + 1); j++) {
+                sgp_vid_t v = g.graph.entries(j);
+                //v must be unmatched to be considered
+                if (vcmap(v) == SGP_INFTY) {
+                    //must be degree 1 to be a leaf
+                    if (g.graph.row_map(v + 1) - g.graph.row_map(v) == 1) {
+                        if (lastLeaf == SGP_INFTY) {
+                            lastLeaf = v;
+                        }
+                        else {
+                            vcmap(lastLeaf) = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
+                            vcmap(v) = vcmap(lastLeaf);
+                            lastLeaf = SGP_INFTY;
+                        }
+                    }
+                }
+            }
+        }
+    });
+#endif
+
     //create singleton aggregates of remaining unmatched vertices
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
         if (vcmap(i) == SGP_INFTY) {
