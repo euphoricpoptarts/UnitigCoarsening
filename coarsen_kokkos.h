@@ -400,26 +400,28 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
                     sgp_vid_t max_ewt = 0;
                     //we have to iterate over the edges anyways because we need to check if any are unmatched!
                     //so instead of randomly choosing a heaviest edge, we instead use the reverse permutation order as the weight
-                    for (sgp_eid_t v = g.graph.row_map(u) + 1; v < g.graph.row_map(u + 1); v++) {
+                    for (sgp_eid_t j = g.graph.row_map(u); j < g.graph.row_map(u + 1); j++) {
+                        sgp_vid_t v = g.graph.entries(j);
                         //v must be unmatched to be considered
                         if (vcmap(v) == SGP_INFTY) {
                             //using <= so that zero weight edges may still be chosen
                             if (max_ewt <= reverse_map(v)) {
                                 max_ewt = reverse_map(v);
-                                h = g.graph.entries(v);
+                                h = v;
                             }
                         }
                     }
                 }
                 else {
                     sgp_wgt_t max_ewt = 0;
-                    for (sgp_eid_t v = g.graph.row_map(u) + 1; v < g.graph.row_map(u + 1); v++) {
+                    for (sgp_eid_t j = g.graph.row_map(u); j < g.graph.row_map(u + 1); j++) {
+                        sgp_vid_t v = g.graph.entries(j);
                         //v must be unmatched to be considered
                         if (vcmap(v) == SGP_INFTY) {
                             //using <= so that zero weight edges may still be chosen
-                            if (max_ewt <= g.values(v)) {
-                                max_ewt = g.values(v);
-                                h = g.graph.entries(v);
+                            if (max_ewt <= g.values(j)) {
+                                max_ewt = g.values(j);
+                                h = v;
                             }
                         }
                     }
