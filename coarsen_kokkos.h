@@ -136,6 +136,25 @@ SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
     return EXIT_SUCCESS;
 }
 
+vtx_view_t generate_permutation(sgp_vid_t n, pool_t rand_pool) {
+    Kokkos::View<uint64_t*> randoms("randoms", n);
+
+    Kokkos::parallel_for("create random entries", n, KOKKOS_LAMBDA(sgp_vid_t i){
+        gen_t generator = rand_pool.get_state();
+        randoms(i) = generator.urand64();
+        rand_pool.free_state(generator);
+    });
+
+    uint64_t max = std::numeric_limits<uint64_t>::max();
+    typedef Kokkos::BinOp1D< Kokkos::View<uint64_t*> > BinOp;
+    BinOp bin_op(n, 0, max);
+    //VERY important that final parameter is true
+    Kokkos::BinSort< Kokkos::View<uint64_t*>, BinOp, Kokkos::DefaultExecutionSpace, sgp_vid_t >
+        sorter(randoms, bin_op, true);
+    sorter.create_permute_vector();
+    return sorter.get_permute_vector();
+}
+
 SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     sgp_vid_t* nvertices_coarse_ptr,
     const matrix_type& g,
@@ -153,27 +172,10 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         vcmap(i) = SGP_INFTY;
     });
 
-    Kokkos::View<uint64_t*> randoms("randoms", n);
-
-    using pool_t = Kokkos::Random_XorShift64_Pool<>;
-    using gen_t = typename pool_t::generator_type;
     pool_t rand_pool(std::time(nullptr));
     Kokkos::Timer timer;
 
-    Kokkos::parallel_for("create random entries", n, KOKKOS_LAMBDA(sgp_vid_t i){
-        gen_t generator = rand_pool.get_state();
-        randoms(i) = generator.urand64();
-        rand_pool.free_state(generator);
-    });
-
-    uint64_t max = std::numeric_limits<uint64_t>::max();
-    typedef Kokkos::BinOp1D< Kokkos::View<uint64_t*> > BinOp;
-    BinOp bin_op(n, 0, max);
-    //VERY important that final parameter is true
-    Kokkos::BinSort< Kokkos::View<uint64_t*>, BinOp, Kokkos::DefaultExecutionSpace, sgp_vid_t >
-        sorter(randoms, bin_op, true);
-    sorter.create_permute_vector();
-    Kokkos::View<sgp_vid_t*> vperm = sorter.get_permute_vector();
+    vtx_view_t vperm = generate_permutation(n, rand_pool);
 
     vtx_view_t reverse_map("reversed", n);
     Kokkos::parallel_for("construct reverse map", n, KOKKOS_LAMBDA(sgp_vid_t i) {
@@ -264,6 +266,185 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         Kokkos::deep_copy(perm_length, next_length);
         vperm = next_perm;
     }
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct, timer.seconds());
+    timer.reset();
+
+    sgp_vid_t nc = 0;
+    Kokkos::deep_copy(nc, nvertices_coarse);
+    *nvertices_coarse_ptr = nc;
+
+    edge_view_t row_map("interpolate row map", n + 1);
+
+    Kokkos::parallel_for(n + 1, KOKKOS_LAMBDA(sgp_vid_t u){
+        row_map(u) = u;
+    });
+
+    vtx_view_t entries("interpolate entries", n);
+    wgt_view_t values("interpolate values", n);
+    //compute the interpolation weights
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t u){
+        entries(u) = vcmap(u);
+        values(u) = 1.0;
+    });
+
+    graph_type graph(entries, row_map);
+    interp = matrix_type("interpolate", nc, values, graph);
+
+    return EXIT_SUCCESS;
+}
+
+SGPAR_API int sgp_coarsen_match(matrix_type& interp,
+    sgp_vid_t* nvertices_coarse_ptr,
+    const matrix_type& g,
+    const int coarsening_level,
+    sgp_pcg32_random_t* rng,
+    ExperimentLoggerUtil& experiment) {
+
+    sgp_vid_t n = g.numRows();
+
+    vtx_view_t hn("heavies", n);
+
+    vtx_view_t vcmap("vcmap", n);
+
+    Kokkos::parallel_for("initialize vcmap", n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        vcmap(i) = SGP_INFTY;
+    });
+
+    Kokkos::View<uint64_t*> randoms("randoms", n);
+
+    pool_t rand_pool(std::time(nullptr));
+    Kokkos::Timer timer;
+
+    vtx_view_t vperm = generate_permutation(n, rand_pool);
+
+    vtx_view_t reverse_map("reversed", n);
+    Kokkos::parallel_for("construct reverse map", n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        reverse_map(vperm(i)) = i;
+    });
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Permute, timer.seconds());
+    timer.reset();
+
+    if (coarsening_level == 1) {
+        //all weights equal at this level so choose heaviest edge randomly
+        Kokkos::parallel_for("Random HN", n, KOKKOS_LAMBDA(sgp_vid_t i) {
+            gen_t generator = rand_pool.get_state();
+            sgp_vid_t adj_size = g.graph.row_map(i + 1) - g.graph.row_map(i);
+            sgp_vid_t offset = g.graph.row_map(i) + (generator.urand64() % adj_size);
+            hn(i) = g.graph.entries(offset);
+            rand_pool.free_state(generator);
+        });
+    }
+    else {
+        Kokkos::parallel_for("Heaviest HN", n, KOKKOS_LAMBDA(sgp_vid_t i) {
+            sgp_vid_t hn_i = g.graph.entries(g.graph.row_map(i));
+            sgp_wgt_t max_ewt = g.values(g.graph.row_map(i));
+
+            sgp_eid_t end_offset = g.graph.row_map(i + 1);// +g.edges_per_source[i];
+
+            for (sgp_eid_t j = g.graph.row_map(i) + 1; j < end_offset; j++) {
+                if (max_ewt < g.values(j)) {
+                    max_ewt = g.values(j);
+                    hn_i = g.graph.entries(j);
+                }
+
+            }
+            hn(i) = hn_i;
+        });
+    }
+    timer.reset();
+    vtx_view_t match("match", n);
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+        match(i) = SGP_INFTY;
+    });
+
+    sgp_vid_t perm_length = n;
+
+    Kokkos::View<sgp_vid_t> nvertices_coarse("nvertices");
+
+    //construct mapping using heaviest edges
+    int swap = 1;
+    timer.reset();
+    while (perm_length > 0) {
+        vtx_view_t next_perm("next perm", perm_length);
+        Kokkos::View<sgp_vid_t> next_length("next_length");
+
+        //match vertices with heaviest unmatched edge
+        Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
+            sgp_vid_t u = vperm(i);
+            sgp_vid_t v = hn(u);
+            int condition = reverse_map(u) < reverse_map(v);
+            //need to enforce an ordering condition to allow hard-stall conditions to be broken
+            if (condition ^ swap) {
+                if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
+                    if (Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
+                        sgp_vid_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
+                        vcmap(u) = cv;
+                        vcmap(v) = cv;
+                    }
+                    else {
+                        match(u) = SGP_INFTY;
+                    }
+                }
+            }
+        });
+        Kokkos::fence();
+
+        //add the ones that failed to be reprocessed next round
+        //maybe count these then create next_perm to save memory?
+        Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
+            sgp_vid_t u = vperm(i);
+            if (vcmap(u) == SGP_INFTY) {
+                sgp_vid_t h = SPG_INFTY;
+
+                if (coarsening_level == 1) {
+                    sgp_vid_t max_ewt = 0;
+                    //we have to iterate over the edges anyways because we need to check if any are unmatched!
+                    //so instead of randomly choosing a heaviest edge, we instead use the reverse permutation order as the weight
+                    for (sgp_eid_t v = g.graph.row_map(u) + 1; j < g.graph.row_map(u + 1); v++) {
+                        //v must be unmatched to be considered
+                        if (vcmap(v) == SGP_INFTY) {
+                            //using <= so that zero weight edges may still be chosen
+                            if (max_ewt <= reverse_map(v)) {
+                                max_ewt = reverse_map(v);
+                                h = g.graph.entries(v);
+                            }
+                        }
+                    }
+                }
+                else {
+                    sgp_wgt_t max_ewt = 0;
+                    for (sgp_eid_t v = g.graph.row_map(u) + 1; j < g.graph.row_map(u + 1); v++) {
+                        //v must be unmatched to be considered
+                        if (vcmap(v) == SGP_INFTY) {
+                            //using <= so that zero weight edges may still be chosen
+                            if (max_ewt <= g.values(v)) {
+                                max_ewt = g.values(v);
+                                h = g.graph.entries(v);
+                            }
+                        }
+                    }
+                }
+
+                if (h != SPG_INFTY) {
+                    sgp_vid_t add_next = Kokkos::atomic_fetch_add(&next_length(), 1);
+                    next_perm(add_next) = u;
+                    hn(u) = h;
+                }
+            }
+        });
+        Kokkos::fence();
+        swap = swap ^ 1;
+        Kokkos::deep_copy(perm_length, next_length);
+        vperm = next_perm;
+    }
+
+    //create singleton aggregates of remaining unmatched vertices
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+        if (vcmap(i) == SGP_INFTY) {
+            vcmap(i) = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
+        }
+    });
+
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct, timer.seconds());
     timer.reset();
 

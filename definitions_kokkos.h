@@ -129,5 +129,7 @@ namespace sgpar {
         using wgt_mirror_t = typename wgt_view_t::HostMirror;
         using policy = Kokkos::TeamPolicy<>;
         using member = typename policy::member_type;
+        using pool_t = Kokkos::Random_XorShift64_Pool<>;
+        using gen_t = typename pool_t::generator_type;
     }
 }
