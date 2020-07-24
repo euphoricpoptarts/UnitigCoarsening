@@ -290,6 +290,65 @@ sgp_vid_t countInf(vtx_view_t target) {
     return totalInf;
 }
 
+struct MatchByHashSorted {
+    vtx_view_t vcmap, unmapped;
+    Kokkos::View<uint32_t*> hashes;
+    sgp_vid_t unmapped_total;
+    Kokkos::View<sgp_vid_t> nvertices_coarse;
+    MatchByHashSorted(vtx_view_t vcmap,
+        vtx_view_t unmapped,
+        Kokkos::View<uint32_t*> hashes,
+        sgp_vid_t unmapped_total,
+        Kokkos::View<sgp_vid_t> nvertices_coarse) :
+        vcmap(vcmap),
+        unmapped(unmapped),
+        hashes(hashes),
+        unmapped_total(unmapped_total),
+        nvertices_coarse(nvertices_coarse) {}
+
+    KOKKOS_INLINE_FUNCTION
+    void operator()(const sgp_vid_t i, sgp_vid_t& update, const bool final) const {
+
+        sgp_vid_t u = unmapped(i);
+        sgp_vid_t tentative = 0;
+        if (i == 0) {
+            tentative = i;
+        }
+        else if (hashes(i - 1) != hashes(i)) {
+            tentative = i;
+        }
+
+        if (tentative > update) {
+            update = tentative;
+        }
+
+        if (final) {
+            //update should contain the index of the first hash that equals hash(i), could be i
+            //we want to determine if i is an odd offset from update
+            sgp_vid_t isOddOffset = (i - update) & 1;
+            //if even (0 counts as even) we match unmapped(i) with unmapped(i+1) if hash(i) == hash(i+1)
+            //if odd do nothing
+            if (isOddOffset == 0) {
+                if (i + 1 < unmapped) {
+                    if (hashes(i) == hashes(i + 1)) {
+                        sgp_vid_t v = unmapped(i + 1);
+                        vcmap(u) = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
+                        vcmap(v) = vcmap(u);
+                    }
+                }
+            }
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+    void join(volatile sgp_vid_t& update, volatile const sgp_vid_t& input) const {
+        if (input > update) update = input;
+    }
+
+
+};
+
+
 SGPAR_API int sgp_coarsen_match(matrix_type& interp,
     sgp_vid_t* nvertices_coarse_ptr,
     const matrix_type& g,
@@ -470,13 +529,15 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
     unmapped = countInf(vcmap);
     unmappedRatio = static_cast<double>(unmapped) / static_cast<double>(n);
 
+    //twin matches
     if (unmappedRatio > 0.25) {
         vtx_view_t unmappedVtx("unmapped vertices", unmapped);
         Kokkos::View<uint32_t*> hashes("hashes", unmapped);
 
         Kokkos::View<sgp_vid_t> unmappedIdx("unmapped index");
         hasher_t hasher;
-        Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
+        //compute digests of adjacency lists
+        Kokkos::parallel_for("create digests", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
             sgp_vid_t u = thread.league_rank();
             if (vcmap(u) == SGP_INFTY) {
                 uint32_t hash = 0;
@@ -499,6 +560,9 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
         sorter.create_permute_vector();
         sorter.template sort< Kokkos::View<uint32_t*> >(hashes);
         sorter.template sort< vtx_view_t >(unmappedVtx);
+
+        MatchByHashSorted matchTwinFunctor(vcmap, unmappedVtx, hashes, unmapped, nvertices_coarse);
+        Kokkos::parallel_scan("match twins", unmapped, matchTwinFunctor);
     }
 #endif
 
