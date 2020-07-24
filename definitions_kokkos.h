@@ -1,5 +1,21 @@
 #pragma once
 
+#include <Kokkos_Core.hpp>
+#include <Kokkos_Atomic.hpp>
+#include <Kokkos_UnorderedMap.hpp>
+#include <Kokkos_Random.hpp>
+#include <Kokkos_UniqueToken.hpp>
+#include <Kokkos_Sort.hpp>
+#include <Kokkos_Functional.hpp>
+#include "KokkosSparse_CrsMatrix.hpp"
+#include "KokkosSparse_spmv.hpp"
+#include "KokkosSparse_spgemm.hpp"
+#include "KokkosSparse_spadd.hpp"
+#include "KokkosGraph_Distance2Color.hpp"
+#include "KokkosKernels_SparseUtils.hpp"
+#include "KokkosKernels_HashmapAccumulator.hpp"
+#include "KokkosKernels_Uniform_Initialized_MemoryPool.hpp"
+
 namespace sgpar {
 
 #ifdef __cplusplus
@@ -131,5 +147,6 @@ namespace sgpar {
         using member = typename policy::member_type;
         using pool_t = Kokkos::Random_XorShift64_Pool<>;
         using gen_t = typename pool_t::generator_type;
+        using hasher_t = pod_hash<sgp_vid_t>;
     }
 }

@@ -14,21 +14,6 @@
 #include <sys/time.h>
 #endif
 
-#include <Kokkos_Core.hpp>
-#include <Kokkos_Atomic.hpp>
-#include <Kokkos_UnorderedMap.hpp>
-#include <Kokkos_Random.hpp>
-#include <Kokkos_UniqueToken.hpp>
-#include <Kokkos_Sort.hpp>
-#include "KokkosSparse_CrsMatrix.hpp"
-#include "KokkosSparse_spmv.hpp"
-#include "KokkosSparse_spgemm.hpp"
-#include "KokkosSparse_spadd.hpp"
-#include "KokkosGraph_Distance2Color.hpp"
-#include "KokkosKernels_SparseUtils.hpp"
-#include "KokkosKernels_HashmapAccumulator.hpp"
-#include "KokkosKernels_Uniform_Initialized_MemoryPool.hpp"
-
 #include <unordered_map>
 // #define USE_GNU_PARALLELMODE
 #ifdef USE_GNU_PARALLELMODE
@@ -293,6 +278,18 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     return EXIT_SUCCESS;
 }
 
+sgp_vid_t countInf(vtx_view_t target) {
+    sgp_vid_t totalInf = 0;
+
+    Kokkos::parallel_reduce(target.extend(0), KOKKOS_LAMBDA(sgp_vid_t i, sgp_vid_t& thread_sum) {
+        if (target(i) == SGP_INFTY) {
+            thread_sum++;
+        }
+    }, totalInf);
+
+    return totalInf;
+}
+
 SGPAR_API int sgp_coarsen_match(matrix_type& interp,
     sgp_vid_t* nvertices_coarse_ptr,
     const matrix_type& g,
@@ -441,29 +438,69 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
     }
 
 #ifdef MTMETIS
-    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t u){
-        if (vcmap(u) != SGP_INFTY) {
-            sgp_vid_t lastLeaf = SGP_INFTY;
-            for (sgp_eid_t j = g.graph.row_map(u); j < g.graph.row_map(u + 1); j++) {
-                sgp_vid_t v = g.graph.entries(j);
-                //v must be unmatched to be considered
-                if (vcmap(v) == SGP_INFTY) {
-                    //must be degree 1 to be a leaf
-                    if (g.graph.row_map(v + 1) - g.graph.row_map(v) == 1) {
-                        if (lastLeaf == SGP_INFTY) {
-                            lastLeaf = v;
-                        }
-                        else {
-                            vcmap(lastLeaf) = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
-                            vcmap(v) = vcmap(lastLeaf);
-                            lastLeaf = SGP_INFTY;
+    sgp_vid_t unmapped = countInf(vcmap);
+    double unmappedRatio = static_cast<double>(unmapped) / static_cast<double>(n);
+
+    //leaf matches
+    if (unmappedRatio > 0.25) {
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t u){
+            if (vcmap(u) != SGP_INFTY) {
+                sgp_vid_t lastLeaf = SGP_INFTY;
+                for (sgp_eid_t j = g.graph.row_map(u); j < g.graph.row_map(u + 1); j++) {
+                    sgp_vid_t v = g.graph.entries(j);
+                    //v must be unmatched to be considered
+                    if (vcmap(v) == SGP_INFTY) {
+                        //must be degree 1 to be a leaf
+                        if (g.graph.row_map(v + 1) - g.graph.row_map(v) == 1) {
+                            if (lastLeaf == SGP_INFTY) {
+                                lastLeaf = v;
+                            }
+                            else {
+                                vcmap(lastLeaf) = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
+                                vcmap(v) = vcmap(lastLeaf);
+                                lastLeaf = SGP_INFTY;
+                            }
                         }
                     }
                 }
             }
-        }
-    });
+        });
+    }
 #endif
+
+    sgp_vid_t unmapped = countInf(vcmap);
+    double unmappedRatio = static_cast<double>(unmapped) / static_cast<double>(n);
+
+    if (unmappedRatio > 0.25) {
+        vtx_view_t unmappedVtx("unmapped vertices", unmapped);
+        Kokkos::View<uint32_t*> hashes("hashes", unmapped);
+
+        Kokkos::View<sgp_vid_t> unmappedIdx("unmapped index");
+        hasher_t hasher;
+        Kokkos::parallel_for(policy(n), KOKKOS_LAMBDA(const member& thread){
+            sgp_vid_t u = thread.league_rank();
+            if (vcmap(u) == SGP_INFTY) {
+                uint32_t hash = 0;
+                Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g.graph.row_map(u), g.graph.row_map(u + 1)), [=](const sgp_eid_t j, uint32_t& thread_sum) {
+                    thread_sum += hasher(g.graph.entries(j));
+                }
+                Kokkos::single(Kokkos::PerTeam(thread), [=] () {
+                    sgp_vid_t idx = Kokkos::atomic_fetch_add(&unmappedIdx(), 1);
+                    unmappedVtx(idx) = u;
+                    hashes(idx) = hash;
+                });
+            });
+        });
+        uint32_t max = std::numeric_limits<uint32_t>::max();
+        typedef Kokkos::BinOp1D< Kokkos::View<uint32_t*> > BinOp;
+        BinOp bin_op(unmapped, 0, max);
+        //VERY important that final parameter is true
+        Kokkos::BinSort< Kokkos::View<uint32_t*>, BinOp, Kokkos::DefaultExecutionSpace, sgp_vid_t >
+            sorter(hashes, bin_op, true);
+        sorter.create_permute_vector();
+        sorter.template sort< Kokkos::View<uint32_t*> >(hashes);
+        sorter.template sort< vtx_view_t >(unmappedVtx);
+    }
 
     //create singleton aggregates of remaining unmatched vertices
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
