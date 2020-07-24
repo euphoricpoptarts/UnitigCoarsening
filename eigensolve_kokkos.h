@@ -212,8 +212,73 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     eigenview_t coarse_guess("coarse_guess", gc_n);
     eigenview_t::HostMirror cg_m = Kokkos::create_mirror(coarse_guess);
     //randomly initialize guess eigenvector for coarsest graph
-    for (sgp_vid_t i = 0; i < gc_n; i++) {
-        cg_m(i) = ((double)sgp_pcg32_random_r(rng)) / UINT32_MAX;
+    if (gc_n > 200) {
+        for (sgp_vid_t i = 0; i < gc_n; i++) {
+            cg_m(i) = ((double)sgp_pcg32_random_r(rng)) / UINT32_MAX;
+        }
+    }
+    else {
+        printf("Doing GGGP\n");
+        matrix_type cg = *graphs.rbegin();
+        edge_mirror_t row_map = Kokkos::create_mirror(cg.graph.row_map);
+        vtx_mirror_t entries = Kokkos::create_mirror(cg.graphentries);
+        wgt_mirror_t values = Kokkos::create_mirror(cg.values);
+
+        Kokkos::deep_copy(row_map, cg.graph.row_map);
+        Kokkos::deep_copy(entries, cg.graph.entries);
+        Kokkos::deep_copy(values, cg.graph.values);
+
+        eigenview_t::HostMirror best_cg_part = Kokkos::create_mirror(coarse_guess);
+        sgp_real_t cutmin = SGP_INFTY;
+        for (sgp_vid_t i = 0; i < gc_n; i++) {
+            //reset coarse partition
+            for (sgp_vid_t j = 0; j < gc_n; j++) {
+                cg_m(j) = 0;
+            }
+            cg_m(i) = 1;
+            sgp_vid_t count = 1;
+            //incrementally grow partition 1
+            while (count < gc_n / 2) {
+                sgp_vid_t argmin = i;
+                sgp_real_t min = SGP_INFTY;
+                //find minimum increase to cutsize
+                for (sgp_vid_t u = 0; u < gc_n;uj++) {
+                    if (u != i) {
+                        sgp_real_t cutLoss = 0;
+                        for (sgp_eid_t j = row_map(u); j < row_map(u + 1); j++) {
+                            sgp_vid_t v = entries(j);
+                            if (cg_m(v) == 0) {
+                                cutLoss += values(j);
+                            }
+                        }
+                        if (cutLoss < min) {
+                            min = cutLoss;
+                            argmin = u;
+                        }
+                    }
+                }
+                cg_m(min) = 1;
+                count++;
+            }
+            sgp_real_t edge_cut = 0;
+            //find total cutsize
+            for (sgp_vid_t u = 0; u < gc_n; uj++) {
+                for (sgp_eid_t j = row_map(u); j < row_map(u + 1); j++) {
+                    sgp_vid_t v = entries(j);
+                    if (cg_m(v) != cg_m(u)) {
+                        edge_cut += values(j);
+                    }
+                }
+            }
+            //if cutsize less than best, replace best with current
+            if (edge_cut < cutmin) {
+                cutmin = edge_cut;
+                for (sgp_vid_t j = 0; j < gc_n; j++) {
+                    best_cg_part(j) = cg_m(j);
+                }
+            }
+        }
+        cg_m = best_cg_part;
     }
     Kokkos::deep_copy(coarse_guess, cg_m);
     sgp_vec_normalize_kokkos(coarse_guess, gc_n);
