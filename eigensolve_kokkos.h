@@ -221,12 +221,12 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
         printf("Doing GGGP\n");
         matrix_type cg = *graphs.rbegin();
         edge_mirror_t row_map = Kokkos::create_mirror(cg.graph.row_map);
-        vtx_mirror_t entries = Kokkos::create_mirror(cg.graphentries);
+        vtx_mirror_t entries = Kokkos::create_mirror(cg.graph.entries);
         wgt_mirror_t values = Kokkos::create_mirror(cg.values);
 
         Kokkos::deep_copy(row_map, cg.graph.row_map);
         Kokkos::deep_copy(entries, cg.graph.entries);
-        Kokkos::deep_copy(values, cg.graph.values);
+        Kokkos::deep_copy(values, cg.values);
 
         eigenview_t::HostMirror best_cg_part = Kokkos::create_mirror(coarse_guess);
         sgp_real_t cutmin = SGP_INFTY;
@@ -242,7 +242,7 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
                 sgp_vid_t argmin = i;
                 sgp_real_t min = SGP_INFTY;
                 //find minimum increase to cutsize
-                for (sgp_vid_t u = 0; u < gc_n;uj++) {
+                for (sgp_vid_t u = 0; u < gc_n; u++) {
                     if (u != i) {
                         sgp_real_t cutLoss = 0;
                         for (sgp_eid_t j = row_map(u); j < row_map(u + 1); j++) {
@@ -257,12 +257,12 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
                         }
                     }
                 }
-                cg_m(min) = 1;
+                cg_m(argmin) = 1;
                 count++;
             }
             sgp_real_t edge_cut = 0;
             //find total cutsize
-            for (sgp_vid_t u = 0; u < gc_n; uj++) {
+            for (sgp_vid_t u = 0; u < gc_n; u++) {
                 for (sgp_eid_t j = row_map(u); j < row_map(u + 1); j++) {
                     sgp_vid_t v = entries(j);
                     if (cg_m(v) != cg_m(u)) {
