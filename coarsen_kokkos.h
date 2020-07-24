@@ -281,7 +281,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 sgp_vid_t countInf(vtx_view_t target) {
     sgp_vid_t totalInf = 0;
 
-    Kokkos::parallel_reduce(target.extend(0), KOKKOS_LAMBDA(sgp_vid_t i, sgp_vid_t& thread_sum) {
+    Kokkos::parallel_reduce(target.extent(0), KOKKOS_LAMBDA(sgp_vid_t i, sgp_vid_t& thread_sum) {
         if (target(i) == SGP_INFTY) {
             thread_sum++;
         }
@@ -466,10 +466,9 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
             }
         });
     }
-#endif
 
-    sgp_vid_t unmapped = countInf(vcmap);
-    double unmappedRatio = static_cast<double>(unmapped) / static_cast<double>(n);
+    unmapped = countInf(vcmap);
+    unmappedRatio = static_cast<double>(unmapped) / static_cast<double>(n);
 
     if (unmappedRatio > 0.25) {
         vtx_view_t unmappedVtx("unmapped vertices", unmapped);
@@ -477,18 +476,18 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
 
         Kokkos::View<sgp_vid_t> unmappedIdx("unmapped index");
         hasher_t hasher;
-        Kokkos::parallel_for(policy(n), KOKKOS_LAMBDA(const member& thread){
+        Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
             sgp_vid_t u = thread.league_rank();
             if (vcmap(u) == SGP_INFTY) {
                 uint32_t hash = 0;
                 Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g.graph.row_map(u), g.graph.row_map(u + 1)), [=](const sgp_eid_t j, uint32_t& thread_sum) {
                     thread_sum += hasher(g.graph.entries(j));
-                }
-                Kokkos::single(Kokkos::PerTeam(thread), [=] () {
-                    sgp_vid_t idx = Kokkos::atomic_fetch_add(&unmappedIdx(), 1);
-                    unmappedVtx(idx) = u;
-                    hashes(idx) = hash;
-                });
+                    }
+                    Kokkos::single(Kokkos::PerTeam(thread), [=]() {
+                        sgp_vid_t idx = Kokkos::atomic_fetch_add(&unmappedIdx(), 1);
+                        unmappedVtx(idx) = u;
+                        hashes(idx) = hash;
+                        });
             });
         });
         uint32_t max = std::numeric_limits<uint32_t>::max();
@@ -501,6 +500,7 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
         sorter.template sort< Kokkos::View<uint32_t*> >(hashes);
         sorter.template sort< vtx_view_t >(unmappedVtx);
     }
+#endif
 
     //create singleton aggregates of remaining unmatched vertices
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
