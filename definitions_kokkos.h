@@ -147,6 +147,6 @@ namespace sgpar {
         using member = typename policy::member_type;
         using pool_t = Kokkos::Random_XorShift64_Pool<>;
         using gen_t = typename pool_t::generator_type;
-        using hasher_t = pod_hash<sgp_vid_t>;
+        using hasher_t = Kokkos::pod_hash<sgp_vid_t>;
     }
 }

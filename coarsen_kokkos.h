@@ -487,7 +487,7 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
                         sgp_vid_t idx = Kokkos::atomic_fetch_add(&unmappedIdx(), 1);
                         unmappedVtx(idx) = u;
                         hashes(idx) = hash;
-                        });
+                    });
             });
         });
         uint32_t max = std::numeric_limits<uint32_t>::max();
