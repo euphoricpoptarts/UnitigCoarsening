@@ -482,12 +482,12 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
                 uint32_t hash = 0;
                 Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g.graph.row_map(u), g.graph.row_map(u + 1)), [=](const sgp_eid_t j, uint32_t& thread_sum) {
                     thread_sum += hasher(g.graph.entries(j));
-                    }
-                    Kokkos::single(Kokkos::PerTeam(thread), [=]() {
-                        sgp_vid_t idx = Kokkos::atomic_fetch_add(&unmappedIdx(), 1);
-                        unmappedVtx(idx) = u;
-                        hashes(idx) = hash;
-                    });
+                });
+                Kokkos::single(Kokkos::PerTeam(thread), [=]() {
+                    sgp_vid_t idx = Kokkos::atomic_fetch_add(&unmappedIdx(), 1);
+                    unmappedVtx(idx) = u;
+                    hashes(idx) = hash;
+                });
             });
         });
         uint32_t max = std::numeric_limits<uint32_t>::max();
