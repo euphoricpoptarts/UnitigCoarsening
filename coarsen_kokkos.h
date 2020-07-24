@@ -488,7 +488,7 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
                     unmappedVtx(idx) = u;
                     hashes(idx) = hash;
                 });
-            });
+            }
         });
         uint32_t max = std::numeric_limits<uint32_t>::max();
         typedef Kokkos::BinOp1D< Kokkos::View<uint32_t*> > BinOp;
