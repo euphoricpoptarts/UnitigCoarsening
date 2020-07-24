@@ -329,7 +329,7 @@ struct MatchByHashSorted {
             //if even (0 counts as even) we match unmapped(i) with unmapped(i+1) if hash(i) == hash(i+1)
             //if odd do nothing
             if (isOddOffset == 0) {
-                if (i + 1 < unmapped) {
+                if (i + 1 < unmapped_total) {
                     if (hashes(i) == hashes(i + 1)) {
                         sgp_vid_t v = unmapped(i + 1);
                         vcmap(u) = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
