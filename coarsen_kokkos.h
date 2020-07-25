@@ -1320,7 +1320,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     while (hash_size < max_entries) { hash_size *= 2; }
 
     // Create Uniform Initialized Memory Pool
-    KokkosKernels::Impl::PoolType pool_type = KokkosKernels::Impl::OneThread2OneChunk;
+    KokkosKernels::Impl::PoolType pool_type = KokkosKernels::Impl::ManyThread2OneChunk;
 
     // Determine memory chunk size for UniformMemoryPool
     sgp_vid_t mem_chunk_size = hash_size;      // for hash indices
