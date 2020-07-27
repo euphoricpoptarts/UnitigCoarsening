@@ -628,7 +628,7 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
                 sgp_vid_t u = mappableVtx(i);
                 if (hn(u) != SGP_INFTY) {
                     if (final) {
-                        nextMappable(update) = i;
+                        nextMappable(update) = u;
                     }
 
                     update++;
