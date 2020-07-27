@@ -563,6 +563,103 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
         MatchByHashSorted matchTwinFunctor(vcmap, unmappedVtx, hashes, unmapped, nvertices_coarse);
         Kokkos::parallel_scan("match twins", unmapped, matchTwinFunctor);
     }
+
+    unmapped = countInf(vcmap);
+    unmappedRatio = static_cast<double>(unmapped) / static_cast<double>(n);
+
+    //relative matches
+    if (unmappedRatio > 0.25) {
+
+        //get possibly mappable vertices of unmapped
+        vtx_view_t mappableVtx("mappable vertices", unmapped);
+        Kokkos::parallel_scan("get unmapped", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& update, const bool final){
+            if (vcmap(i) == SGP_INFTY) {
+                if (final) {
+                    mappableVtx(update) = i;
+                }
+
+                update++;
+            }
+        });
+
+
+        sgp_vid_t mappable_count = unmapped;
+        do {
+
+            Kokkos::parallel_for("reset hn", mappable_count, KOKKOS_LAMBDA(sgp_vid_t i){
+                sgp_vid_t u = mappableVtx(i);
+                hn(u) = SGP_INFTY;
+            });
+
+            //choose relatives for unmapped vertices
+            Kokkos::parallel_for("assign relatives", n, KOKKOS_LAMBDA(sgp_vid_t i){
+                if (vcmap(i) != SGP_INFTY) {
+                    sgp_vid_t last_free = SGP_INFTY;
+                    for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+                        sgp_vid_t v = g.graph.entries(j);
+                        if (vcmap(v) == SGP_INFTY) {
+                            if (last_free != SGP_INFTY) {
+                                //there can be multiple threads updating this but it doesn't matter as long as they have some value
+                                hn(last_free) = v;
+                                hn(v) = last_free;
+                            }
+                            else {
+                                last_free = SGP_INFTY;
+                            }
+                        }
+                    }
+                }
+            });
+
+            //create a list of all mappable vertices according to set entries of hn
+            sgp_vid_t old_mappable = mappable_count;
+            mappable_count = 0;
+            Kokkos::parallel_reduce("count mappable", old_mappable, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& thread_sum){
+                sgp_vid_t u = mappableVtx(i);
+                if (hn(u) != SGP_INFTY) {
+                    thread_sum++;
+                }
+            }, mappable_count);
+
+            vtx_view_t nextMappable("next mappable vertices", mappable_count);
+
+            Kokkos::parallel_scan("get next mappable", old_mappable, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& update, const bool final){
+                sgp_vid_t u = mappableVtx(i);
+                if (hn(u) != SGP_INFTY) {
+                    if (final) {
+                        nextMappable(update) = i;
+                    }
+
+                    update++;
+                }
+            });
+            mappableVtx = nextMappable;
+
+            //match vertices with chosen relative
+            if (mappable_count > 0) {
+                Kokkos::parallel_for(mappable_count, KOKKOS_LAMBDA(sgp_vid_t i){
+                    sgp_vid_t u = mappableVtx(i);
+                    sgp_vid_t v = hn(u);
+                    int condition = reverse_map(u) < reverse_map(v);
+                    //need to enforce an ordering condition to allow hard-stall conditions to be broken
+                    if (condition ^ swap) {
+                        if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
+                            if (Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
+                                sgp_vid_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
+                                vcmap(u) = cv;
+                                vcmap(v) = cv;
+                            }
+                            else {
+                                match(u) = SGP_INFTY;
+                            }
+                        }
+                    }
+                });
+            }
+            Kokkos::fence();
+            swap = swap ^ 1;
+        } while (mappable_count > 0);
+    }
 #endif
 
     //create singleton aggregates of remaining unmatched vertices
