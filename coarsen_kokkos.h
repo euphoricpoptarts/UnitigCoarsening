@@ -602,9 +602,10 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
                                 //there can be multiple threads updating this but it doesn't matter as long as they have some value
                                 hn(last_free) = v;
                                 hn(v) = last_free;
+                                last_free = SGP_INFTY;
                             }
                             else {
-                                last_free = SGP_INFTY;
+                                last_free = v;
                             }
                         }
                     }
