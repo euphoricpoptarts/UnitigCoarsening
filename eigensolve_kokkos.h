@@ -507,7 +507,7 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     while (graph_iter != end) {
         //refine
 #ifdef FM
-        fm_refine(coarse_guess, *graph_iter, graphs.begin()->nnz());
+        fm_refine(coarse_guess, *graph_iter);
 #else
         CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, refine_alg, 0
 #ifdef EXPERIMENT
