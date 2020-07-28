@@ -233,6 +233,7 @@ sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g) {
     vtx_view_t ll_next("linked list nexts", n), ll_prev("linked list prevs", n);
     Kokkos::View<int64_t*> gains("gains", n), balances("balances", n);
     vtx_view_t swap_order("swap order", n);
+    vtx_view_t free_vtx("free vertices", n);
     edge_view_t cutsizes("cutsizes", n);
 
     for (sgp_eid_t i = 0; i < 2 * maxE; i++) {
@@ -243,6 +244,7 @@ sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g) {
     for (sgp_vid_t i = 0; i < n; i++) {
         ll_next(i) = SGP_INFTY;
         ll_prev(i) = SGP_INFTY;
+        free_vtx(i) = 1;
     }
 
     sgp_eid_t cutsize = 0;
@@ -332,60 +334,64 @@ sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g) {
                 partition(swap) = 0.0;
                 balance++;
             }
+            free_vtx(swap) = 0;
             swap_order(total_swaps) = swap;
             cutsizes(total_swaps) = cutsize;
             balances(total_swaps) = balance;
             total_swaps++;
             for (sgp_eid_t j = g.graph.row_map(swap); j < g.graph.row_map(swap + 1); j++) {
                 sgp_vid_t v = g.graph.entries(j);
-                int64_t gain_change = g.values(j);
-                if (partition(swap) == partition(v)) {
-                    gain_change = -gain_change;
-                }
-                //connect previous and last nodes of ll together
-                sgp_vid_t v_next = ll_next(v);
-                sgp_vid_t v_prev = ll_prev(v);
-                if (v_next != SGP_INFTY) {
-                    ll_prev(v_next) = v_prev;
-                }
-                if (v_prev != SGP_INFTY) {
-                    ll_next(v_prev) = v_next;
-                }
+                if (free_vtx(v) == 1) {
+                    int64_t gain_change = g.values(j);
+                    if (partition(swap) == partition(v)) {
+                        gain_change = -gain_change;
+                    }
+                    //connect previous and last nodes of ll together
+                    sgp_vid_t v_next = ll_next(v);
+                    sgp_vid_t v_prev = ll_prev(v);
+                    if (v_next != SGP_INFTY) {
+                        ll_prev(v_next) = v_prev;
+                    }
+                    if (v_prev != SGP_INFTY) {
+                        ll_next(v_prev) = v_next;
+                    }
 
-                int64_t old_gain = gains(v);
-                int64_t next_gain = old_gain + gain_change;
-                gains(v) = next_gain;
-                //v_next becomes new head of ll if v was old head
-                if (v_prev == SGP_INFTY) {
+                    int64_t old_gain = gains(v);
+                    int64_t next_gain = old_gain + gain_change;
+                    gains(v) = next_gain;
+                    //v_next becomes new head of ll if v was old head
+                    if (v_prev == SGP_INFTY) {
+                        if (partition(v) == 0.0) {
+                            bucketsA(old_gain + maxE) = v_next;
+                        }
+                        else {
+                            bucketsB(old_gain + maxE) = v_next;
+                        }
+                    }
+
+                    //old head of ll that v will be inserted into
+                    sgp_vid_t swap_v = bucketsA(next_gain + maxE);
                     if (partition(v) == 0.0) {
-                        bucketsA(old_gain + maxE) = v_next;
+                        bucketsA(next_gain + maxE) = v;
+                        //need to move the seek head back if some entries are being moved up
+                        if (next_gain + maxE > bucket_offsetA) {
+                            bucket_offsetA = next_gain + maxE;
+                        }
                     }
                     else {
-                        bucketsB(old_gain + maxE) = v_next;
+                        swap_v = bucketsB(next_gain + maxE);
+                        bucketsB(next_gain + maxE) = v;
+                        if (next_gain + maxE > bucket_offsetB) {
+                            bucket_offsetB = next_gain + maxE;
+                        }
                     }
-                }
 
-                //old head of ll that v will be inserted into
-                sgp_vid_t swap_v = bucketsA(next_gain + maxE);
-                if (partition(v) == 0.0) {
-                    bucketsA(next_gain + maxE) = v;
-                    //need to move the seek head back if some entries are being moved up
-                    if (next_gain + maxE > bucket_offsetA) {
-                        bucket_offsetA = next_gain + maxE;
+                    if (swap_v != SGP_INFTY) {
+                        ll_prev(swap_v) = v;
                     }
-                } else {
-                    swap_v = bucketsB(next_gain + maxE);
-                    bucketsB(next_gain + maxE) = v;
-                    if (next_gain + maxE > bucket_offsetB) {
-                        bucket_offsetB = next_gain + maxE;
-                    }
+                    ll_next(v) = swap_v;
+                    ll_prev(v) = SGP_INFTY;
                 }
-                    
-                if (swap_v != SGP_INFTY) {
-                    ll_prev(swap_v) = v;
-                }
-                ll_next(v) = swap_v;
-                ll_prev(v) = SGP_INFTY;
             }
         }
     }
