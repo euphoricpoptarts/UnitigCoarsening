@@ -349,10 +349,10 @@ sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g) {
                     //connect previous and last nodes of ll together
                     sgp_vid_t old_ll_next = ll_next(v);
                     sgp_vid_t old_ll_prev = ll_prev(v);
-                    if (v_next != SGP_INFTY) {
+                    if (old_ll_next != SGP_INFTY) {
                         ll_prev(old_ll_next) = old_ll_prev;
                     }
-                    if (v_prev != SGP_INFTY) {
+                    if (old_ll_prev != SGP_INFTY) {
                         ll_next(old_ll_prev) = old_ll_next;
                     }
 
