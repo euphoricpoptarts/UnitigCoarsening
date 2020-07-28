@@ -484,8 +484,8 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
             , experiment
 #endif
             ));
-        graph_iter++;
 #endif
+        graph_iter++;
 
         //interpolate
         eigenview_t fine_vec("fine vec", graph_iter->numRows());
