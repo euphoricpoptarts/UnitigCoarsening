@@ -349,9 +349,16 @@ sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g, sgp_eid_t maxE) {
                 sgp_vid_t swap_v = bucketsA(next_gain + maxE);
                 if (partition(v) == 0.0) {
                     bucketsA(next_gain + maxE) = v;
+                    //need to move the seek head back if some entries are being moved up
+                    if (next_gain + maxE > bucket_offsetA) {
+                        bucket_offsetA = next_gain + maxE;
+                    }
                 } else {
                     swap_v = bucketsB(next_gain + maxE);
                     bucketsB(next_gain + maxE) = v;
+                    if (next_gain + maxE > bucket_offsetB) {
+                        bucket_offsetB = next_gain + maxE;
+                    }
                 }
                     
                 if (swap_v != SGP_INFTY) {
