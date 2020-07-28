@@ -428,14 +428,17 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
             while (count < gc_n / 2) {
                 sgp_vid_t argmin = i;
                 sgp_real_t min = SGP_INFTY;
-                //find minimum increase to cutsize
+                //find minimum increase to cutsize for moving a vertex from partition 0 to partition 1
                 for (sgp_vid_t u = 0; u < gc_n; u++) {
-                    if (u != i) {
+                    if (cg_m(u) == 0) {
                         sgp_real_t cutLoss = 0;
                         for (sgp_eid_t j = row_map(u); j < row_map(u + 1); j++) {
                             sgp_vid_t v = entries(j);
                             if (cg_m(v) == 0) {
                                 cutLoss += values(j);
+                            }
+                            else {
+                                cutLoss -= values(j);
                             }
                         }
                         if (cutLoss < min) {
