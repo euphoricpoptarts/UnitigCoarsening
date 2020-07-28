@@ -517,7 +517,8 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     while (graph_iter != end) {
         //refine
 #ifdef FM
-        fm_refine(coarse_guess, *graph_iter);
+        sgp_eid_t cutsize = fm_refine(coarse_guess, *graph_iter);
+        printf("cutsize = %u\n", cutsize);
 #else
         CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, refine_alg, 0
 #ifdef EXPERIMENT
@@ -534,12 +535,16 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
         interp_iter++;
     }
 
+#ifdef FM
+    fm_refine(coarse_guess, *graph_iter);
+#else
     //last refine
     CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, refine_alg, 1
 #ifdef EXPERIMENT
         , experiment
 #endif
         ));
+#endif
 
     eigenview_t::HostMirror eigenmirror = Kokkos::create_mirror(coarse_guess);
     Kokkos::deep_copy(eigenmirror, coarse_guess);
