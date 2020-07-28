@@ -328,11 +328,11 @@ sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g) {
             cutsize -= gains(swap);
             if (partition(swap) == 0.0) {
                 partition(swap) = 1.0;
-                balance--;
+                balance -= 2;
             }
             else {
                 partition(swap) = 0.0;
-                balance++;
+                balance += 2;
             }
             free_vtx(swap) = 0;
             swap_order(total_swaps) = swap;
@@ -505,7 +505,10 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
         cg_m = best_cg_part;
     }
     Kokkos::deep_copy(coarse_guess, cg_m);
+#ifndef FM
     sgp_vec_normalize_kokkos(coarse_guess, gc_n);
+#endif
+
 
     auto graph_iter = graphs.rbegin(), interp_iter = interpolates.rbegin();
     auto end = --graphs.rend();
