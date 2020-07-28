@@ -206,8 +206,28 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
 
 //edge cuts are bounded by |E| of finest graph (assuming unweighted edges for finest graph)
 //also we assume ALL coarse edge weights are integral
-sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g, sgp_eid_t maxE) {
+sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g) {
     sgp_vid_t n = g.numRows();
+
+    sgp_eid_t maxE = 0;
+
+    Kokkos::parallel_reduce("max e find", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread, sgp_eid_t & t_max){
+        sgp_vid_t i = thread.league_rank();
+        sgp_eid_t weighted_degree = 0;
+        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g.graph.row_map(i), g.graph.row_map(i + 1)), [=](const sgp_eid_t j, sgp_eid_t& local_sum) {
+            weighted_degree += g.values(j);
+        }, weighted_degree);
+        Kokkos::single(Kokkos::PerTeam(thread), [=]() {
+            if (t_max < weighted_degree) {
+                t_max = weighted_degree;
+            }
+        });
+    }, Kokkos::Max<sgp_eid_t, Kokkos::HostSpace>(maxE));
+
+#ifdef _DEBUG
+    printf("maxE: %u\n", maxE);
+#endif
+
     sgp_eid_t totalBuckets = 2 * maxE + 1;
     vtx_view_t bucketsA("buckets part 1", totalBuckets), bucketsB("buckets part 2", totalBuckets);
     vtx_view_t ll_next("linked list nexts", n), ll_prev("linked list prevs", n);
@@ -284,7 +304,7 @@ sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g, sgp_eid_t maxE) {
                 }
             }
         }
-        else {
+        else if(bucket_offsetA >= 0) {
             bucket_offsetA--;
         }
         if (swap_b != SGP_INFTY) {
@@ -297,7 +317,7 @@ sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g, sgp_eid_t maxE) {
                 }
             }
         }
-        else {
+        else if(bucket_offsetB >= 0) {
             bucket_offsetB--;
         }
 
