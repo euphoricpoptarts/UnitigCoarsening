@@ -2,6 +2,8 @@
 
 #include "definitions_kokkos.h"
 #include "KokkosBlas1_dot.hpp"
+#include <limits>
+#include <cstdlib>
 
 namespace sgpar {
 namespace sgpar_kokkos {
@@ -202,6 +204,191 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
     return EXIT_SUCCESS;
 }
 
+//edge cuts are bounded by |E| of finest graph (assuming unweighted edges for finest graph)
+//also we assume ALL coarse edge weights are integral
+sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g, sgp_eid_t maxE) {
+    sgp_vid_t n = g.numRows();
+    sgp_eid_t totalBuckets = 2 * maxE + 1;
+    vtx_view_t bucketsA("buckets part 1", totalBuckets), bucketsB("buckets part 2", totalBuckets);
+    vtx_view_t ll_next("linked list nexts", n), ll_prev("linked list prevs", n);
+    Kokkos::View<int64_t*> gains("gains", n), balances("balances", n);
+    vtx_view_t swap_order("swap order", n);
+    edge_view_t cutsizes("cutsizes", n);
+
+    for (sgp_eid_t i = 0; i < 2 * maxE; i++) {
+        bucketsA(i) = SGP_INFTY;
+        bucketsB(i) = SGP_INFTY;
+    }
+
+    for (sgp_vid_t i = 0; i < n; i++) {
+        ll_next(i) = SGP_INFTY;
+        ll_prev(i) = SGP_INFTY;
+    }
+
+    sgp_eid_t cutsize = 0;
+    //initialize gains datastructure
+    for (sgp_vid_t i = 0; i < n; i++) {
+        sgp_real_t gain = 0;
+        for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+            sgp_vid_t v = g.graph.entries(j);
+            if (partition(i) != partition(v)) {
+                gain += g.values(j);
+                cutsize += g.values(j);
+            }
+            else {
+                gain -= g.values(j);
+            }
+        }
+        gains(i) = gain;
+        sgp_eid_t bucket = gain + maxE;
+        vtx_view_t insert_into_bucket = bucketsA;
+        if (partition(i) == 1.0) {
+            insert_into_bucket = bucketsB;
+        }
+        sgp_vid_t bucket_first = insert_into_bucket(bucket);
+        if (bucket_first != SGP_INFTY) {
+            ll_prev(bucket_first) = i;
+        }
+        insert_into_bucket(bucket) = i;
+        ll_next(i) = bucket_first;
+    }
+
+    int64_t balance = 0;
+    for (sgp_vid_t i = 0; i < n; i++) {
+        if (partition(i) == 0) {
+            balance++;
+        }
+        else {
+            balance--;
+        }
+    }
+
+    int64_t bucket_offsetA = 2 * maxE;
+    int64_t bucket_offsetB = bucket_offsetA;
+    sgp_vid_t total_swaps = 0;
+    while (bucket_offsetA >= 0 || bucket_offsetB >= 0) {
+        sgp_vid_t swap_a = SGP_INFTY;
+        if (bucket_offsetA >= 0) swap_a = bucketsA(bucket_offsetA);
+        sgp_vid_t swap_b = SGP_INFTY; 
+        if (bucket_offsetB >= 0) swap_b = bucketsB(bucket_offsetB);
+        sgp_vid_t swap = SGP_INFTY;
+        
+        //select a vertex to swap and remove from datastructure
+        if (swap_a != SGP_INFTY) {
+            if (balance > 0 || bucket_offsetB < 0) {
+                swap = swap_a;
+                sgp_vid_t next = ll_next(swap);
+                bucketsA(bucket_offsetA) = next;
+                if (next != SGP_INFTY) {
+                    ll_prev(next) = SGP_INFTY;
+                }
+            }
+        }
+        else {
+            bucket_offsetA--;
+        }
+        if (swap_b != SGP_INFTY) {
+            if (balance <= 0 || bucket_offsetA < 0) {
+                swap = swap_b;
+                sgp_vid_t next = ll_next(swap);
+                bucketsB(bucket_offsetB) = next;
+                if (next != SGP_INFTY) {
+                    ll_prev(next) = SGP_INFTY;
+                }
+            }
+        }
+        else {
+            bucket_offsetB--;
+        }
+
+        //swap and modify datastructure
+        if (swap != SGP_INFTY) {
+            cutsize -= gains(swap);
+            if (partition(swap) == 0.0) {
+                partition(swap) = 1.0;
+                balance--;
+            }
+            else {
+                partition(swap) = 0.0;
+                balance++;
+            }
+            swap_order(total_swaps) = swap;
+            cutsizes(total_swaps) = cutsize;
+            balances(total_swaps) = balance;
+            total_swaps++;
+            for (sgp_eid_t j = g.graph.row_map(swap); j < g.graph.row_map(swap + 1); j++) {
+                sgp_vid_t v = g.graph.entries(j);
+                int64_t gain_change = g.values(j);
+                if (partition(swap) == partition(v)) {
+                    gain_change = -gain_change;
+                }
+                //connect previous and last nodes of ll together
+                sgp_vid_t v_next = ll_next(v);
+                sgp_vid_t v_prev = ll_prev(v);
+                if (v_next != SGP_INFTY) {
+                    ll_prev(v_next) = v_prev;
+                }
+                if (v_prev != SGP_INFTY) {
+                    ll_next(v_prev) = v_next;
+                }
+
+                int64_t old_gain = gains(v);
+                int64_t next_gain = old_gain + gain_change;
+                gains(v) = next_gain;
+                //v_next becomes new head of ll if v was old head
+                if (v_prev == SGP_INFTY) {
+                    if (partition(v) == 0.0) {
+                        bucketsA(old_gain + maxE) = v_next;
+                    }
+                    else {
+                        bucketsB(old_gain + maxE) = v_next;
+                    }
+                }
+
+                //old head of ll that v will be inserted into
+                sgp_vid_t swap_v = bucketsA(next_gain + maxE);
+                if (partition(v) == 0.0) {
+                    bucketsA(next_gain + maxE) = v;
+                } else {
+                    swap_v = bucketsB(next_gain + maxE);
+                    bucketsB(next_gain + maxE) = v;
+                }
+                    
+                if (swap_v != SGP_INFTY) {
+                    ll_prev(swap_v) = v;
+                }
+                ll_next(v) = swap_v;
+                ll_prev(v) = SGP_INFTY;
+            }
+        }
+    }
+
+    //select best cutsize which satisfies the balance condition
+    //undo all following swaps
+    sgp_eid_t min_cut = std::numeric_limits<sgp_eid_t>::max();
+    sgp_vid_t argmin = 0;
+    //1 if n is odd, 0 if n is even
+    int64_t max_imb = n - 2 * (n / 2);
+    for (sgp_vid_t i = 0; i < total_swaps; i++) {
+        if (abs(balances(i)) <= max_imb) {
+            if (min_cut > cutsizes(i)) {
+                min_cut = cutsizes(i);
+                argmin = i;
+            }
+        }
+    }
+    for (sgp_vid_t i = argmin + 1; i < total_swaps; i++) {
+        if (partition(i) == 0.0) {
+            partition(i) = 1.0;
+        }
+        else {
+            partition(i) = 0.0;
+        }
+    }
+
+    return min_cut;
+}
+
 SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graphs, std::list<matrix_type>& interpolates, sgp_pcg32_random_t* rng, int refine_alg
 #ifdef EXPERIMENT
     , ExperimentLoggerUtil& experiment
@@ -212,7 +399,7 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     eigenview_t coarse_guess("coarse_guess", gc_n);
     eigenview_t::HostMirror cg_m = Kokkos::create_mirror(coarse_guess);
     //randomly initialize guess eigenvector for coarsest graph
-    if (gc_n > 200) {
+    if (false && gc_n > 200) {
         for (sgp_vid_t i = 0; i < gc_n; i++) {
             cg_m(i) = ((double)sgp_pcg32_random_r(rng)) / UINT32_MAX;
         }
@@ -289,12 +476,16 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     //there is always one more refinement than interpolation
     while (graph_iter != end) {
         //refine
+#ifdef FM
+        fm_refine(coarse_guess, *graph_iter, graphs.begin()->nnz());
+#else
         CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, refine_alg, 0
 #ifdef EXPERIMENT
             , experiment
 #endif
             ));
         graph_iter++;
+#endif
 
         //interpolate
         eigenview_t fine_vec("fine vec", graph_iter->numRows());
