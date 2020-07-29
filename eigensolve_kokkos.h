@@ -468,8 +468,8 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
 
     sgp_vid_t vtx_w_total = 0;
 
+    printf("coarse vertex count: %u\n", gc_n);
     for (sgp_vid_t i = 0; i < c_vtx_w.extent(0); i++) {
-        printf("coarse vertex weight %lu: %lu\n", i, c_vtx_w(i));
         vtx_w_total += c_vtx_w(i);
     }
 
@@ -546,11 +546,19 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     auto vtx_w_iter = vtx_weights.rbegin();
     auto end = --graphs.rend();
 
+    int refine_layer = graphs.size();
     //there is always one more refinement than interpolation
     while (graph_iter != end) {
         //refine
 #ifdef FM
-        sgp_eid_t cutsize = fm_refine(coarse_guess, *graph_iter, *vtx_w_iter);
+        printf("Refining layer %i\n", refine_layer);
+        refine_layer--;
+        sgp_eid_t old_cutsize = SGP_INFTY;
+        sgp_eid_t cutsize = old_cutsize;
+        do {
+            old_cutsize = cutsize;
+            cutsize = fm_refine(coarse_guess, *graph_iter, *vtx_w_iter);
+        } while (cutsize != old_cutsize); //could be larger if the balance improved
 #else
         CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, refine_alg, 0
 #ifdef EXPERIMENT
@@ -569,7 +577,14 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     }
 
 #ifdef FM
-    fm_refine(coarse_guess, *graph_iter, *vtx_w_iter);
+    printf("Refining layer %i\n", refine_layer);
+    refine_layer--;
+    sgp_eid_t old_cutsize = SGP_INFTY;
+    sgp_eid_t cutsize = old_cutsize;
+    do {
+        old_cutsize = cutsize;
+        cutsize = fm_refine(coarse_guess, *graph_iter, *vtx_w_iter);
+    } while (cutsize != old_cutsize); //could be larger if the balance improved
 #else
     //last refine
     CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, refine_alg, 1
