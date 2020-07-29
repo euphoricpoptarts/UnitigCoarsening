@@ -1536,7 +1536,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
 
 SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_graph, vtx_view_t& c_vtx_w,
     const matrix_type& g,
-    const vtw_view_t& f_vtx_w,
+    const vtx_view_t& f_vtx_w,
     const int coarsening_level,
     sgp_pcg32_random_t* rng,
     ExperimentLoggerUtil& experiment) {
@@ -1605,7 +1605,7 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
             *interp_mtxs.rbegin(),
             coarse_vtx_weights,
             *(++coarse_graphs.rbegin()),
-            *(vtx_weights_list.rbegin())
+            *(vtx_weights_list.rbegin()),
             ++coarsening_level,
             rng, experiment));
 
