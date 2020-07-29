@@ -2373,12 +2373,13 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     double start_time = sgp_timer();
 
     std::list<sgpar_kokkos::matrix_type> coarse_graphs, interp_mtxs;
-    CHECK_SGPAR(sgpar_kokkos::sgp_generate_coarse_graphs(&g, coarse_graphs, interp_mtxs, rng, experiment));
+    std::list<sgpar_kokkos::vtx_view_t> vtx_weights;
+    CHECK_SGPAR(sgpar_kokkos::sgp_generate_coarse_graphs(&g, coarse_graphs, interp_mtxs, vtx_weights, rng, experiment));
 
     double fin_coarsening_time = sgp_timer();
     sgp_real_t* eigenvec = (sgp_real_t*)malloc(g.nvertices * sizeof(sgp_real_t));
 
-    CHECK_SGPAR(sgpar_kokkos::sgp_eigensolve(eigenvec, coarse_graphs, interp_mtxs, rng, config->refine_alg
+    CHECK_SGPAR(sgpar_kokkos::sgp_eigensolve(eigenvec, coarse_graphs, interp_mtxs, vtx_weights, rng, config->refine_alg
         , experiment
         ));
 

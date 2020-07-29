@@ -438,7 +438,7 @@ sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g) {
     return min_cut;
 }
 
-SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graphs, std::list<matrix_type>& interpolates, sgp_pcg32_random_t* rng, int refine_alg
+SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graphs, std::list<matrix_type>& interpolates, std::list<vtx_view_t>& vtx_weights, sgp_pcg32_random_t* rng, int refine_alg
 #ifdef EXPERIMENT
     , ExperimentLoggerUtil& experiment
 #endif
@@ -455,6 +455,12 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
 #else
     printf("Doing GGGP\n");
     matrix_type cg = *graphs.rbegin();
+    vtx_view_t c_vtx_w = *vtx_weights.rbegin();
+
+    for (sgp_vid_t i = 0; i < c_vtx_w.extent(0); i++) {
+        printf("coarse vertex weight %lu: %lu\n", i, c_vtx_w(i));
+    }
+
     edge_mirror_t row_map = Kokkos::create_mirror(cg.graph.row_map);
     vtx_mirror_t entries = Kokkos::create_mirror(cg.graph.entries);
     wgt_mirror_t values = Kokkos::create_mirror(cg.values);

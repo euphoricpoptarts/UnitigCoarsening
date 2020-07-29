@@ -1316,8 +1316,10 @@ struct functorHashmapAccumulator
 };  // functorHashmapAccumulator
 
 SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
+    vtx_view_t& c_vtx_w,
     const matrix_type& vcmap,
     const matrix_type& g,
+    const vtx_view_t& f_vtx_w,
     const int coarsening_level,
     ExperimentLoggerUtil& experiment) {
     sgp_vid_t n = g.numRows();
@@ -1337,6 +1339,8 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
 
     Kokkos::Timer timer;
 
+    c_vtx_w = vtx_view_t("coarse vertex weights", nc);
+
     //count edges per vertex
     Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
         sgp_vid_t u = vcmap.graph.entries(thread.league_rank());
@@ -1352,6 +1356,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         }, nonLoopEdgesTotal);
         Kokkos::single(Kokkos::PerTeam(thread), [=]() {
             Kokkos::atomic_add(&edges_per_source(u), nonLoopEdgesTotal);
+            Kokkos::atomic_add(&c_vtx_w(u), f_vtx_w(thread.league_rank()));
         });
     });
 
@@ -1529,8 +1534,9 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_graph,
+SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_graph, vtx_view_t& c_vtx_w,
     const matrix_type& g,
+    const vtw_view_t& f_vtx_w,
     const int coarsening_level,
     sgp_pcg32_random_t* rng,
     ExperimentLoggerUtil& experiment) {
@@ -1544,7 +1550,7 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
 #ifdef SPGEMM
     sgp_build_coarse_graph_spgemm(gc, interpolation_graph, g, coarsening_level);
 #else
-    sgp_build_coarse_graph_msd(gc, interpolation_graph, g, coarsening_level, experiment);
+    sgp_build_coarse_graph_msd(gc, c_vtx_w, interpolation_graph, g, f_vtx_w, coarsening_level, experiment);
 #endif
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Build, timer.seconds());
     timer.reset();
@@ -1552,7 +1558,7 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
     return EXIT_SUCCESS;
 }
 
-SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<matrix_type>& coarse_graphs, std::list<matrix_type>& interp_mtxs, sgp_pcg32_random_t* rng, ExperimentLoggerUtil& experiment) {
+SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<matrix_type>& coarse_graphs, std::list<matrix_type>& interp_mtxs, std::list<vtx_view_t>& vtx_weights_list, sgp_pcg32_random_t* rng, ExperimentLoggerUtil& experiment) {
 
     Kokkos::Timer timer;
     sgp_vid_t fine_n = fine_g->nvertices;
@@ -1562,6 +1568,7 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
     vtx_mirror_t entries_mirror = Kokkos::create_mirror(entries);
     wgt_view_t values("values", fine_g->source_offsets[fine_n]);
     wgt_mirror_t values_mirror = Kokkos::create_mirror(values);
+    vtx_view_t vtx_weights("vtx weights", fine_n);
 
     Kokkos::parallel_for(host_policy(0, fine_n + 1), KOKKOS_LAMBDA(sgp_vid_t u) {
         row_mirror(u) = fine_g->source_offsets[u];
@@ -1575,8 +1582,13 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
     Kokkos::deep_copy(entries, entries_mirror);
     Kokkos::deep_copy(values, values_mirror);
 
+    Kokkos::parallel_for(fine_n, KOKKOS_LAMBDA(const sgp_vid_t i){
+        vtx_weights(i) = 1;
+    });
+
     graph_type fine_graph(entries, row_map);
     coarse_graphs.push_back(matrix_type("interpolate", fine_g->nvertices, values, fine_graph));
+    vtx_weights_list.push_back(vtx_weights);
 
     printf("Fine graph copy to device time: %.8f\n", timer.seconds());
 
@@ -1585,14 +1597,19 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
         printf("Calculating coarse graph %ld\n", coarse_graphs.size());
 
         coarse_graphs.push_back(matrix_type());
+        vtx_view_t coarse_vtx_weights;
         interp_mtxs.push_back(matrix_type());
         auto end_pointer = coarse_graphs.rbegin();
 
         CHECK_SGPAR(sgp_coarsen_one_level(*coarse_graphs.rbegin(),
             *interp_mtxs.rbegin(),
+            coarse_vtx_weights,
             *(++coarse_graphs.rbegin()),
+            *(vtx_weights_list.rbegin())
             ++coarsening_level,
             rng, experiment));
+
+        vtx_weights_list.push_back(coarse_vtx_weights);
 
 #ifdef DEBUG
         sgp_real_t coarsen_ratio = (sgp_real_t) coarse_graphs.rbegin()->numRows() / (sgp_real_t) (++coarse_graphs.rbegin())->numRows();
