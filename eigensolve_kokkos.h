@@ -285,6 +285,12 @@ sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g) {
         }
     }
 
+#ifdef DEBUG
+    printf("Unrefined balance: %li, cutsize: %lu\n", balance, cutsize);
+#endif
+
+    int64_t start_balance = balance;
+    int64_t start_cut = cutsize;
     int64_t bucket_offsetA = 2 * maxE;
     int64_t bucket_offsetB = bucket_offsetA;
     sgp_vid_t total_swaps = 0;
@@ -399,7 +405,7 @@ sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g) {
     //select best cutsize which satisfies the balance condition
     //undo all following swaps
     sgp_eid_t min_cut = std::numeric_limits<sgp_eid_t>::max();
-    sgp_vid_t argmin = 0;
+    sgp_vid_t argmin = SGP_INFTY;
     //1 if n is odd, 0 if n is even
     int64_t max_imb = n - 2 * (n / 2);
     for (sgp_vid_t i = 0; i < total_swaps; i++) {
@@ -410,7 +416,16 @@ sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g) {
             }
         }
     }
-    for (sgp_vid_t i = argmin + 1; i < total_swaps; i++) {
+
+    sgp_vid_t undo_from = 0;
+    if (argmin != SGP_INFTY) {
+        undo_from = argmin + 1;
+    }
+    if (start_balance <= max_imb && start_cut < min_cut) {
+        undo_from = 0;
+    }
+
+    for (sgp_vid_t i = undo_from; i < total_swaps; i++) {
         sgp_vid_t undo = swap_order(i);
         if (partition(undo) == 0.0) {
             partition(undo) = 1.0;
@@ -433,77 +448,76 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     eigenview_t coarse_guess("coarse_guess", gc_n);
     eigenview_t::HostMirror cg_m = Kokkos::create_mirror(coarse_guess);
     //randomly initialize guess eigenvector for coarsest graph
-    if (false && gc_n > 200) {
-        for (sgp_vid_t i = 0; i < gc_n; i++) {
-            cg_m(i) = ((double)sgp_pcg32_random_r(rng)) / UINT32_MAX;
-        }
+#ifndef FM
+    for (sgp_vid_t i = 0; i < gc_n; i++) {
+        cg_m(i) = ((double)sgp_pcg32_random_r(rng)) / UINT32_MAX;
     }
-    else {
-        printf("Doing GGGP\n");
-        matrix_type cg = *graphs.rbegin();
-        edge_mirror_t row_map = Kokkos::create_mirror(cg.graph.row_map);
-        vtx_mirror_t entries = Kokkos::create_mirror(cg.graph.entries);
-        wgt_mirror_t values = Kokkos::create_mirror(cg.values);
+#else
+    printf("Doing GGGP\n");
+    matrix_type cg = *graphs.rbegin();
+    edge_mirror_t row_map = Kokkos::create_mirror(cg.graph.row_map);
+    vtx_mirror_t entries = Kokkos::create_mirror(cg.graph.entries);
+    wgt_mirror_t values = Kokkos::create_mirror(cg.values);
 
-        Kokkos::deep_copy(row_map, cg.graph.row_map);
-        Kokkos::deep_copy(entries, cg.graph.entries);
-        Kokkos::deep_copy(values, cg.values);
+    Kokkos::deep_copy(row_map, cg.graph.row_map);
+    Kokkos::deep_copy(entries, cg.graph.entries);
+    Kokkos::deep_copy(values, cg.values);
 
-        eigenview_t::HostMirror best_cg_part = Kokkos::create_mirror(coarse_guess);
-        sgp_real_t cutmin = SGP_INFTY;
-        for (sgp_vid_t i = 0; i < gc_n; i++) {
-            //reset coarse partition
-            for (sgp_vid_t j = 0; j < gc_n; j++) {
-                cg_m(j) = 0;
-            }
-            cg_m(i) = 1;
-            sgp_vid_t count = 1;
-            //incrementally grow partition 1
-            while (count < gc_n / 2) {
-                sgp_vid_t argmin = i;
-                sgp_real_t min = SGP_INFTY;
-                //find minimum increase to cutsize for moving a vertex from partition 0 to partition 1
-                for (sgp_vid_t u = 0; u < gc_n; u++) {
-                    if (cg_m(u) == 0) {
-                        sgp_real_t cutLoss = 0;
-                        for (sgp_eid_t j = row_map(u); j < row_map(u + 1); j++) {
-                            sgp_vid_t v = entries(j);
-                            if (cg_m(v) == 0) {
-                                cutLoss += values(j);
-                            }
-                            else {
-                                cutLoss -= values(j);
-                            }
-                        }
-                        if (cutLoss < min) {
-                            min = cutLoss;
-                            argmin = u;
-                        }
-                    }
-                }
-                cg_m(argmin) = 1;
-                count++;
-            }
-            sgp_real_t edge_cut = 0;
-            //find total cutsize
+    eigenview_t::HostMirror best_cg_part = Kokkos::create_mirror(coarse_guess);
+    sgp_real_t cutmin = SGP_INFTY;
+    for (sgp_vid_t i = 0; i < gc_n; i++) {
+        //reset coarse partition
+        for (sgp_vid_t j = 0; j < gc_n; j++) {
+            cg_m(j) = 0;
+        }
+        cg_m(i) = 1;
+        sgp_vid_t count = 1;
+        //incrementally grow partition 1
+        while (count < gc_n / 2) {
+            sgp_vid_t argmin = i;
+            sgp_real_t min = SGP_INFTY;
+            //find minimum increase to cutsize for moving a vertex from partition 0 to partition 1
             for (sgp_vid_t u = 0; u < gc_n; u++) {
-                for (sgp_eid_t j = row_map(u); j < row_map(u + 1); j++) {
-                    sgp_vid_t v = entries(j);
-                    if (cg_m(v) != cg_m(u)) {
-                        edge_cut += values(j);
+                if (cg_m(u) == 0) {
+                    sgp_real_t cutLoss = 0;
+                    for (sgp_eid_t j = row_map(u); j < row_map(u + 1); j++) {
+                        sgp_vid_t v = entries(j);
+                        if (cg_m(v) == 0) {
+                            cutLoss += values(j);
+                        }
+                        else {
+                            cutLoss -= values(j);
+                        }
+                    }
+                    if (cutLoss < min) {
+                        min = cutLoss;
+                        argmin = u;
                     }
                 }
             }
-            //if cutsize less than best, replace best with current
-            if (edge_cut < cutmin) {
-                cutmin = edge_cut;
-                for (sgp_vid_t j = 0; j < gc_n; j++) {
-                    best_cg_part(j) = cg_m(j);
+            cg_m(argmin) = 1;
+            count++;
+        }
+        sgp_real_t edge_cut = 0;
+        //find total cutsize
+        for (sgp_vid_t u = 0; u < gc_n; u++) {
+            for (sgp_eid_t j = row_map(u); j < row_map(u + 1); j++) {
+                sgp_vid_t v = entries(j);
+                if (cg_m(v) != cg_m(u)) {
+                    edge_cut += values(j);
                 }
             }
         }
-        cg_m = best_cg_part;
+        //if cutsize less than best, replace best with current
+        if (edge_cut < cutmin) {
+            cutmin = edge_cut;
+            for (sgp_vid_t j = 0; j < gc_n; j++) {
+                best_cg_part(j) = cg_m(j);
+            }
+        }
     }
+    cg_m = best_cg_part;
+#endif
     Kokkos::deep_copy(coarse_guess, cg_m);
 #ifndef FM
     sgp_vec_normalize_kokkos(coarse_guess, gc_n);
@@ -518,7 +532,6 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
         //refine
 #ifdef FM
         sgp_eid_t cutsize = fm_refine(coarse_guess, *graph_iter);
-        printf("cutsize = %u\n", cutsize);
 #else
         CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, refine_alg, 0
 #ifdef EXPERIMENT
