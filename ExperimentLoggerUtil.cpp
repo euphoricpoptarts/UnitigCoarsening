@@ -85,9 +85,11 @@ public:
 	}
 
 	void modifyCoarseLevelEC(int level, uint64_t unrefinedEdgeCut) {
-		//coarse levels are backwards
-		int top = coarseLevels.size() - 1;
-		coarseLevels[top - level].unrefinedEdgeCut = unrefinedEdgeCut;
+		if (coarseLevels.size() > 0) {
+			//coarse levels are backwards
+			int top = coarseLevels.size() - 1;
+			coarseLevels[top - level].unrefinedEdgeCut = unrefinedEdgeCut;
+		}
 	}
 
 	void setFinestEdgeCut(uint64_t finestEdgeCut) {
