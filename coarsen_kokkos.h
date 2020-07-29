@@ -1621,6 +1621,7 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
     if (coarse_graphs.rbegin()->numRows() < 30) {
         coarse_graphs.pop_back();
         interp_mtxs.pop_back();
+        vtx_weights_list.pop_back();
         coarsening_level--;
     }
 
