@@ -206,7 +206,7 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
 
 //edge cuts are bounded by |E| of finest graph (assuming unweighted edges for finest graph)
 //also we assume ALL coarse edge weights are integral
-sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g) {
+sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view_t& vtx_w) {
     sgp_vid_t n = g.numRows();
 
     sgp_eid_t maxE = 0;
@@ -278,10 +278,10 @@ sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g) {
     int64_t balance = 0;
     for (sgp_vid_t i = 0; i < n; i++) {
         if (partition(i) == 0) {
-            balance++;
+            balance += vtx_w(i);
         }
         else {
-            balance--;
+            balance -= vtx_w(i);
         }
     }
 
@@ -334,11 +334,11 @@ sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g) {
             cutsize -= gains(swap);
             if (partition(swap) == 0.0) {
                 partition(swap) = 1.0;
-                balance -= 2;
+                balance -= 2*vtx_w(swap);
             }
             else {
                 partition(swap) = 0.0;
-                balance += 2;
+                balance += 2*vtx_w(swap);
             }
             free_vtx(swap) = 0;
             swap_order(total_swaps) = swap;
@@ -406,11 +406,14 @@ sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g) {
     //undo all following swaps
     sgp_eid_t min_cut = std::numeric_limits<sgp_eid_t>::max();
     sgp_vid_t argmin = SGP_INFTY;
-    //1 if n is odd, 0 if n is even
-    int64_t max_imb = n - 2 * (n / 2);
+    int64_t min_imb = std::numeric_limits<int64_t>::max();
     for (sgp_vid_t i = 0; i < total_swaps; i++) {
-        if (abs(balances(i)) <= max_imb) {
+        if (abs(balances(i)) < min_imb) {
+            
+        }
+        else if (abs(balances(i)) == min_imb) {
             if (min_cut > cutsizes(i)) {
+                min_imb = abs(balances(i));
                 min_cut = cutsizes(i);
                 argmin = i;
             }
@@ -421,7 +424,11 @@ sgp_eid_t fm_refine(eigenview_t& partition, matrix_type& g) {
     if (argmin != SGP_INFTY) {
         undo_from = argmin + 1;
     }
-    if (start_balance <= max_imb && start_cut < min_cut) {
+    if (start_balance < min_imb) {
+        undo_from = 0;
+    }
+    if (start_balance == min_imb && start_cut < min_cut)
+    {
         undo_from = 0;
     }
 
@@ -457,8 +464,11 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     matrix_type cg = *graphs.rbegin();
     vtx_view_t c_vtx_w = *vtx_weights.rbegin();
 
+    sgp_vid_t vtx_w_total = 0;
+
     for (sgp_vid_t i = 0; i < c_vtx_w.extent(0); i++) {
         printf("coarse vertex weight %lu: %lu\n", i, c_vtx_w(i));
+        vtx_w_total += c_vtx_w(i);
     }
 
     edge_mirror_t row_map = Kokkos::create_mirror(cg.graph.row_map);
@@ -477,9 +487,9 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
             cg_m(j) = 0;
         }
         cg_m(i) = 1;
-        sgp_vid_t count = 1;
+        sgp_vid_t count = c_vtx_w(i);
         //incrementally grow partition 1
-        while (count < gc_n / 2) {
+        while (count < vtx_w_total / 2) {
             sgp_vid_t argmin = i;
             sgp_real_t min = SGP_INFTY;
             //find minimum increase to cutsize for moving a vertex from partition 0 to partition 1
@@ -502,7 +512,7 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
                 }
             }
             cg_m(argmin) = 1;
-            count++;
+            count += c_vtx_w(argmin);
         }
         sgp_real_t edge_cut = 0;
         //find total cutsize
@@ -531,13 +541,14 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
 
 
     auto graph_iter = graphs.rbegin(), interp_iter = interpolates.rbegin();
+    auto vtx_w_iter = vtx_weights.rbegin();
     auto end = --graphs.rend();
 
     //there is always one more refinement than interpolation
     while (graph_iter != end) {
         //refine
 #ifdef FM
-        sgp_eid_t cutsize = fm_refine(coarse_guess, *graph_iter);
+        sgp_eid_t cutsize = fm_refine(coarse_guess, *graph_iter, *vtx_w_iter);
 #else
         CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, refine_alg, 0
 #ifdef EXPERIMENT
@@ -546,6 +557,7 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
             ));
 #endif
         graph_iter++;
+        vtx_w_iter++;
 
         //interpolate
         eigenview_t fine_vec("fine vec", graph_iter->numRows());
