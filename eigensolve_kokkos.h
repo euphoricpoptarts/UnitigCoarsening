@@ -409,7 +409,9 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
     int64_t min_imb = std::numeric_limits<int64_t>::max();
     for (sgp_vid_t i = 0; i < total_swaps; i++) {
         if (abs(balances(i)) < min_imb) {
-            
+            min_imb = abs(balances(i));
+            min_cut = cutsizes(i);
+            argmin = i;
         }
         else if (abs(balances(i)) == min_imb) {
             if (min_cut > cutsizes(i)) {
