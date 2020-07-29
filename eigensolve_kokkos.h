@@ -331,7 +331,8 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
 
         //swap and modify datastructure
         if (swap != SGP_INFTY) {
-            cutsize -= gains(swap);
+            //the gain only counts the outward edges, but in an undirected graphs these edges are duplicated from other vertices
+            cutsize -= 2*gains(swap);
             if (partition(swap) == 0.0) {
                 partition(swap) = 1.0;
                 balance -= 2*vtx_w(swap);
@@ -348,7 +349,8 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
             for (sgp_eid_t j = g.graph.row_map(swap); j < g.graph.row_map(swap + 1); j++) {
                 sgp_vid_t v = g.graph.entries(j);
                 if (free_vtx(v) == 1) {
-                    int64_t gain_change = g.values(j);
+                    //multiply by 2 because this edge already counted towards v's gain, now it must count in the opposite direction
+                    int64_t gain_change = 2*g.values(j);
                     if (partition(swap) == partition(v)) {
                         gain_change = -gain_change;
                     }
