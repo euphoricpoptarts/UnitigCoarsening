@@ -294,11 +294,6 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
     int64_t bucket_offsetA = 2 * maxE;
     int64_t bucket_offsetB = bucket_offsetA;
     sgp_vid_t total_swaps = 0;
-    sgp_eid_t min_cut = std::numeric_limits<sgp_eid_t>::max();
-    sgp_vid_t argmin = SGP_INFTY;
-    int64_t min_imb = std::numeric_limits<int64_t>::max();
-    bool start_counter = false;
-    int counter = 0;
     while (bucket_offsetA >= 0 || bucket_offsetB >= 0) {
         sgp_vid_t swap_a = SGP_INFTY;
         if (bucket_offsetA >= 0) swap_a = bucketsA(bucket_offsetA);
@@ -349,24 +344,6 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
             swap_order(total_swaps) = swap;
             cutsizes(total_swaps) = cutsize;
             balances(total_swaps) = balance;
-            counter++;
-            if (abs(balance) < min_imb) {
-                min_imb = abs(balance);
-                min_cut = cutsize;
-                argmin = total_swaps;
-                start_counter = true;
-                counter = 0;
-            }
-            else if (abs(balance) == min_imb) {
-                if (min_cut > cutsize) {
-                    min_imb = abs(balance);
-                    min_cut = cutsize;
-                    argmin = total_swaps;
-                    start_counter = true;
-                    counter = 0;
-                }
-            }
-
             total_swaps++;
             for (sgp_eid_t j = g.graph.row_map(swap); j < g.graph.row_map(swap + 1); j++) {
                 sgp_vid_t v = g.graph.entries(j);
@@ -422,9 +399,25 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
                     ll_prev(v) = SGP_INFTY;
                 }
             }
-            if (counter > 50) {
-                bucket_offsetA = -1;
-                bucket_offsetB = -1;
+        }
+    }
+
+    //select best cutsize which satisfies the balance condition
+    //undo all following swaps
+    sgp_eid_t min_cut = std::numeric_limits<sgp_eid_t>::max();
+    sgp_vid_t argmin = SGP_INFTY;
+    int64_t min_imb = std::numeric_limits<int64_t>::max();
+    for (sgp_vid_t i = 0; i < total_swaps; i++) {
+        if (abs(balances(i)) < min_imb) {
+            min_imb = abs(balances(i));
+            min_cut = cutsizes(i);
+            argmin = i;
+        }
+        else if (abs(balances(i)) == min_imb) {
+            if (min_cut > cutsizes(i)) {
+                min_imb = abs(balances(i));
+                min_cut = cutsizes(i);
+                argmin = i;
             }
         }
     }
