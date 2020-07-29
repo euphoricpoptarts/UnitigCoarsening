@@ -289,7 +289,7 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
     printf("Unrefined balance: %li, cutsize: %lu\n", balance, cutsize);
 #endif
 
-    int64_t start_balance = balance;
+    int64_t start_balance = abs(balance);
     int64_t start_cut = cutsize;
     int64_t bucket_offsetA = 2 * maxE;
     int64_t bucket_offsetB = bucket_offsetA;
