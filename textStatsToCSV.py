@@ -10,6 +10,14 @@ from itertools import zip_longest
 
 lineParse = "{}mean={}, median={}, min={}, max={}, std-dev={}"
 fieldHeaders = "\
+graph experiment, median time, \
+median coarsen time, \
+median coarsen map time, \
+median coarsen sort time, \
+median refine time, \
+median edge cut, "
+
+fieldHeaders2 = "\
 graph experiment, mean time, median time, min time, max time, time std-dev, \
 mean coarsen time, median coarsen time, min coarsen time, max coarsen time, coarsen time std-dev, \
 mean coarsen sort time, median coarsen sort time, min coarsen sort time, max coarsen sort time, coarsen sort time std-dev, \
@@ -19,22 +27,25 @@ mean edge cut, median edge cut, min edge cut, max edge cut, edge cut std-dev"
 
 def textStatsToCSV(stem, filepath):
     graphStats = [stem]
+    parsedLines = []
     with open(filepath,"r") as f:
-        lcount = 0
         for line in f:
-            lcount += 1
-            if lcount > 6:
-                break
             parsed = parse(lineParse,line)
-            if parsed is not None:
-                parsed = list(parsed)
-                for stat in parsed[1:6]:
-                    graphStats.append(stat)
-            else:
-                for stat in range(1,6):
-                    graphStats.append("nan")
-    return ",".join(graphStats)
+            parsedLines.append(parsed)
 
+    if len(parsedLines) < 11:
+        return stem
+
+    for line in [0,1,2,3,8,9]:
+        parsed = parsedLines[line]
+        if parsed is not None:
+            parsed = list(parsed)
+            for stat in [2]:
+                graphStats.append(parsed[stat])
+        else:
+            for stat in [2]:
+                graphStats.append("nan")
+    return ",".join(graphStats)
 
 def main():
 

@@ -306,32 +306,57 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
         if (bucket_offsetB >= 0) swap_b = bucketsB(bucket_offsetB);
         sgp_vid_t swap = SGP_INFTY;
         
+        bool choose_a = false, choose_b = false;
+
         //select a vertex to swap and remove from datastructure
-        if (swap_a != SGP_INFTY) {
+        if (swap_a != SGP_INFTY && swap_b == SGP_INFTY) {
             if (balance > 0 || bucket_offsetB < 0) {
-                swap = swap_a;
-                sgp_vid_t next = ll_next(swap);
-                bucketsA(bucket_offsetA) = next;
-                if (next != SGP_INFTY) {
-                    ll_prev(next) = SGP_INFTY;
-                }
+                choose_a = true;
             }
+            bucket_offsetB--;
         }
-        else if(bucket_offsetA >= 0) {
+        else if (swap_a == SGP_INFTY && swap_b != SGP_INFTY) {
+            if (balance < 0 || bucket_offsetA < 0) {
+                choose_b = true;
+            }
             bucket_offsetA--;
         }
-        if (swap_b != SGP_INFTY) {
-            if (balance <= 0 || bucket_offsetA < 0) {
-                swap = swap_b;
-                sgp_vid_t next = ll_next(swap);
-                bucketsB(bucket_offsetB) = next;
-                if (next != SGP_INFTY) {
-                    ll_prev(next) = SGP_INFTY;
+        else if (swap_a != SGP_INFTY && swap_b != SGP_INFTY) {
+            if (balance > 0) {
+                choose_a = true;
+            }
+            else if (balance < 0) {
+                choose_b = true;
+            }
+            else {
+                if (bucket_offsetA > bucket_offsetB) {
+                    choose_a = true;
+                }
+                else {
+                    choose_b = true;
                 }
             }
         }
-        else if(bucket_offsetB >= 0) {
+        else {
+            bucket_offsetA--;
             bucket_offsetB--;
+        }
+
+        if (choose_a) {
+            swap = swap_a;
+            sgp_vid_t next = ll_next(swap);
+            bucketsA(bucket_offsetA) = next;
+            if (next != SGP_INFTY) {
+                ll_prev(next) = SGP_INFTY;
+            }
+        }
+        else if (choose_b) {
+            swap = swap_b;
+            sgp_vid_t next = ll_next(swap);
+            bucketsB(bucket_offsetB) = next;
+            if (next != SGP_INFTY) {
+                ll_prev(next) = SGP_INFTY;
+            }
         }
 
         //swap and modify datastructure
