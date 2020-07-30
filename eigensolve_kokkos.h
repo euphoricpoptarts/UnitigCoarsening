@@ -350,7 +350,7 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
             swap_order(total_swaps) = swap;
             cutsizes(total_swaps) = cutsize;
             balances(total_swaps) = balance;
-            counter++;
+            if(start_counter) counter++;
             if (abs(balance) < min_imb) {
                 min_imb = abs(balance);
                 min_cut = cutsize;
@@ -424,7 +424,7 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
                     ll_prev(v) = SGP_INFTY;
                 }
             }
-            if (counter > 50) {
+            if (counter > 500) {
                 bucket_offsetA = -1;
                 bucket_offsetB = -1;
             }
@@ -437,10 +437,12 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
     }
     if (start_balance < min_imb) {
         undo_from = 0;
+        min_cut = start_cut;
     }
     if (start_balance == min_imb && start_cut < min_cut)
     {
         undo_from = 0;
+        min_cut = start_cut;
     }
 
     for (sgp_vid_t i = undo_from; i < total_swaps; i++) {
