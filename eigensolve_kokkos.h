@@ -294,9 +294,9 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
     int64_t bucket_offsetA = 2 * maxE;
     int64_t bucket_offsetB = bucket_offsetA;
     sgp_vid_t total_swaps = 0;
-    sgp_eid_t min_cut = std::numeric_limits<sgp_eid_t>::max();
+    sgp_eid_t min_cut = start_cut;
     sgp_vid_t argmin = SGP_INFTY;
-    int64_t min_imb = std::numeric_limits<int64_t>::max();
+    int64_t min_imb = start_balance;
     bool start_counter = false;
     int counter = 0;
     while (bucket_offsetA >= 0 || bucket_offsetB >= 0) {
@@ -376,21 +376,12 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
             cutsizes(total_swaps) = cutsize;
             balances(total_swaps) = balance;
             if(start_counter) counter++;
-            if (abs(balance) < min_imb) {
+            if (abs(balance) <= min_imb && min_cut > cutsize) {
                 min_imb = abs(balance);
                 min_cut = cutsize;
                 argmin = total_swaps;
                 start_counter = true;
                 counter = 0;
-            }
-            else if (abs(balance) == min_imb) {
-                if (min_cut > cutsize) {
-                    min_imb = abs(balance);
-                    min_cut = cutsize;
-                    argmin = total_swaps;
-                    start_counter = true;
-                    counter = 0;
-                }
             }
 
             total_swaps++;
@@ -459,15 +450,6 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
     sgp_vid_t undo_from = 0;
     if (argmin != SGP_INFTY) {
         undo_from = argmin + 1;
-    }
-    if (start_balance < min_imb) {
-        undo_from = 0;
-        min_cut = start_cut;
-    }
-    if (start_balance == min_imb && start_cut < min_cut)
-    {
-        undo_from = 0;
-        min_cut = start_cut;
     }
 
     for (sgp_vid_t i = undo_from; i < total_swaps; i++) {
