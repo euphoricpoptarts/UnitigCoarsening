@@ -376,7 +376,17 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
             cutsizes(total_swaps) = cutsize;
             balances(total_swaps) = balance;
             if(start_counter) counter++;
-            if (abs(balance) <= min_imb && min_cut > cutsize) {
+
+            //we ideally want both the cut and imbalance to improve
+            //however we prioritize the balance, and bound how much the cut can decay by
+            if (abs(balance) < min_imb && cutsize < 1.05 * min_cut) {
+                min_imb = abs(balance);
+                min_cut = cutsize;
+                argmin = total_swaps;
+                start_counter = true;
+                counter = 0;
+            }
+            else if (abs(balance) <= min_imb && min_cut > cutsize) {
                 min_imb = abs(balance);
                 min_cut = cutsize;
                 argmin = total_swaps;
