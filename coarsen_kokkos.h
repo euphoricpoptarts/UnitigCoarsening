@@ -151,7 +151,6 @@ sgp_vid_t parallel_map_construct(vtx_view_t vcmap, const sgp_vid_t n, const vtx_
 
     //construct mapping using heaviest edges
     int swap = 1;
-    timer.reset();
     vtx_view_t curr_perm = vperm;
     while (perm_length > 0) {
         vtx_view_t next_perm("next perm", perm_length);
