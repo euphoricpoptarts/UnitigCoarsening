@@ -140,6 +140,66 @@ vtx_view_t generate_permutation(sgp_vid_t n, pool_t rand_pool) {
     return sorter.get_permute_vector();
 }
 
+sgp_vid_t parallel_map_construct(vtx_view_t vcmap, const sgp_vid_t n, const vtx_view_t vperm, const vtx_view_t hn, const vtx_view_t ordering) {
+
+    vtx_view_t match("match", n);
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+        match(i) = SGP_INFTY;
+    });
+    sgp_vid_t perm_length = n;
+    Kokkos::View<sgp_vid_t> nvertices_coarse("nvertices");
+
+    //construct mapping using heaviest edges
+    int swap = 1;
+    timer.reset();
+    vtx_view_t curr_perm = vperm;
+    while (perm_length > 0) {
+        vtx_view_t next_perm("next perm", perm_length);
+        Kokkos::View<sgp_vid_t> next_length("next_length");
+
+        Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
+            sgp_vid_t u = curr_perm(i);
+            sgp_vid_t v = hn(u);
+            int condition = ordering(u) < ordering(v);
+            //need to enforce an ordering condition to allow hard-stall conditions to be broken
+            if (condition ^ swap) {
+                if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
+                    if (Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
+                        sgp_vid_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
+                        vcmap(u) = cv;
+                        vcmap(v) = cv;
+                    }
+                    else {
+                        if (vcmap(v) != SGP_INFTY) {
+                            vcmap(u) = vcmap(v);
+                        }
+                        else {
+                            match(u) = SGP_INFTY;
+                        }
+                    }
+                }
+            }
+        });
+        Kokkos::fence();
+        //add the ones that failed to be reprocessed next round
+        //maybe count these then create next_perm to save memory?
+        Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
+            sgp_vid_t u = curr_perm(i);
+            if (vcmap(u) == SGP_INFTY) {
+                sgp_vid_t add_next = Kokkos::atomic_fetch_add(&next_length(), 1);
+                next_perm(add_next) = u;
+            }
+        });
+        Kokkos::fence();
+        swap = swap ^ 1;
+        Kokkos::deep_copy(perm_length, next_length);
+        curr_perm = next_perm;
+    }
+    sgp_vid_t nc = 0;
+    Kokkos::deep_copy(nc, nvertices_coarse);
+    return nc;
+}
+
 SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     sgp_vid_t* nvertices_coarse_ptr,
     const matrix_type& g,
@@ -197,65 +257,10 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         });
     }
     timer.reset();
-    vtx_view_t match("match", n);
-    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
-        match(i) = SGP_INFTY;
-    });
-
-    sgp_vid_t perm_length = n;
-
-    Kokkos::View<sgp_vid_t> nvertices_coarse("nvertices");
-
-    //construct mapping using heaviest edges
-    int swap = 1;
-    timer.reset();
-    while (perm_length > 0) {
-        vtx_view_t next_perm("next perm", perm_length);
-        Kokkos::View<sgp_vid_t> next_length("next_length");
-        
-        Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
-            sgp_vid_t u = vperm(i);
-            sgp_vid_t v = hn(u);
-            int condition = reverse_map(u) < reverse_map(v);
-            //need to enforce an ordering condition to allow hard-stall conditions to be broken
-            if (condition ^ swap) {
-                if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
-                    if (Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
-                        sgp_vid_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
-                        vcmap(u) = cv;
-                        vcmap(v) = cv;
-                    }
-                    else {
-                        if (vcmap(v) != SGP_INFTY) {
-                            vcmap(u) = vcmap(v);
-                        }
-                        else {
-                            match(u) = SGP_INFTY;
-                        }
-                    }
-                }
-            }
-        });
-        Kokkos::fence();
-        //add the ones that failed to be reprocessed next round
-        //maybe count these then create next_perm to save memory?
-        Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
-            sgp_vid_t u = vperm(i);
-            if (vcmap(u) == SGP_INFTY) {
-                sgp_vid_t add_next = Kokkos::atomic_fetch_add(&next_length(), 1);
-                next_perm(add_next) = u;
-            }
-        });
-        Kokkos::fence();
-        swap = swap ^ 1;
-        Kokkos::deep_copy(perm_length, next_length);
-        vperm = next_perm;
-    }
+    sgp_vid_t nc = parallel_map_construct(vcmap, n, vperm, hn, reverse_map);
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct, timer.seconds());
     timer.reset();
 
-    sgp_vid_t nc = 0;
-    Kokkos::deep_copy(nc, nvertices_coarse);
     *nvertices_coarse_ptr = nc;
 
     edge_view_t row_map("interpolate row map", n + 1);
