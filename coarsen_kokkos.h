@@ -285,7 +285,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
 SGPAR_API int sgp_recoarsen_HEC(matrix_type& interp,
     sgp_vid_t* nvertices_coarse_ptr,
     const matrix_type& g,
-    const eigen_view_t part) {
+    const eigenview_t part) {
 
     sgp_vid_t n = g.numRows();
 

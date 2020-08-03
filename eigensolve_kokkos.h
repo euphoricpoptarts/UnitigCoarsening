@@ -2,6 +2,7 @@
 
 #include "definitions_kokkos.h"
 #include "KokkosBlas1_dot.hpp"
+#include "coarsen_kokkos.h"
 #include <limits>
 #include <cstdlib>
 #include <cmath>
@@ -474,8 +475,10 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
     return min_cut;
 }
 
+
+
 eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
-    const vtx_view_t& f_vtx_w
+    const vtx_view_t& f_vtx_w,
     const eigenview_t partition) {
 
     matrix_type gc;
@@ -490,7 +493,7 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
     eigenview_t coarse_part("coarser partition", nvertices_coarse);
     Kokkos::parallel_for("create coarse partition", g.numRows(), KOKKOS_LAMBDA(sgp_vid_t i){
         sgp_vid_t coarse_vtx = interpolation_graph.graph.entries(i);
-        double part_wgt = static_cast<double>(f_vtw_w(i)) / static_cast<double>(c_vtx_w(coarse_vtx));
+        double part_wgt = static_cast<double>(f_vtx_w(i)) / static_cast<double>(c_vtx_w(coarse_vtx));
         Kokkos::atomic_add(&coarse_part(coarse_vtx), part_wgt * partition(i));
     });
     //not strictly necessary but you never know with floating point rounding errors
