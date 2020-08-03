@@ -148,5 +148,6 @@ namespace sgpar {
         using pool_t = Kokkos::Random_XorShift64_Pool<>;
         using gen_t = typename pool_t::generator_type;
         using hasher_t = Kokkos::pod_hash<sgp_vid_t>;
+        using eigenview_t = Kokkos::View<sgp_real_t*>;
     }
 }

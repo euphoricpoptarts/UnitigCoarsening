@@ -282,6 +282,106 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
     return EXIT_SUCCESS;
 }
 
+SGPAR_API int sgp_recoarsen_HEC(matrix_type& interp,
+    sgp_vid_t* nvertices_coarse_ptr,
+    const matrix_type& g,
+    const eigen_view_t part) {
+
+    sgp_vid_t n = g.numRows();
+
+    vtx_view_t hn("heavies", n);
+
+    vtx_view_t vcmap("vcmap", n);
+
+    Kokkos::parallel_for("initialize vcmap", n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        vcmap(i) = SGP_INFTY;
+    });
+
+    pool_t rand_pool(std::time(nullptr));
+    Kokkos::Timer timer;
+
+    vtx_view_t vperm = generate_permutation(n, rand_pool);
+
+    vtx_view_t reverse_map("reversed", n);
+    Kokkos::parallel_for("construct reverse map", n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        reverse_map(vperm(i)) = i;
+    });
+    //experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Permute, timer.seconds());
+    timer.reset();
+
+    Kokkos::parallel_for("Heaviest HN", n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        sgp_vid_t hn_i = SGP_INFTY;
+        sgp_vid_t order_max = SGP_INFTY;
+        sgp_wgt_t max_ewt = SGP_INFTY;
+
+        bool same_part_found = false;
+
+        sgp_eid_t end_offset = g.graph.row_map(i + 1);
+        for (sgp_eid_t j = g.graph.row_map(i); j < end_offset; j++) {
+            sgp_wgt_t wgt = g.values(j);
+            sgp_vid_t v = g.graph.entries(j);
+            sgp_vid_t order = reverse_map(v);
+            bool choose = false;
+            if (same_part_found) {
+                if (part(i) == part(v)) {
+                    if (max_ewt < wgt) {
+                        choose = true;
+                    }
+                    else if (max_ewt == wgt && order_max < order) {
+                        choose = true;
+                    }
+                }
+            } else {
+                if (part(i) == part(v)) {
+                    choose = true;
+                    same_part_found = true;
+                }
+                else {
+                    if (max_ewt < wgt) {
+                        choose = true;
+                    }
+                    else if (max_ewt == wgt && order_max < order) {
+                        choose = true;
+                    }
+                }
+            }
+
+            if (choose) {
+                max_ewt = wgt;
+                order_max = order;
+                hn_i = v;
+            }
+        }
+        hn(i) = hn_i;
+    });
+
+    timer.reset();
+    sgp_vid_t nc = parallel_map_construct(vcmap, n, vperm, hn, reverse_map);
+    //experiment.addMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct, timer.seconds());
+    timer.reset();
+
+    *nvertices_coarse_ptr = nc;
+
+    edge_view_t row_map("interpolate row map", n + 1);
+
+    Kokkos::parallel_for(n + 1, KOKKOS_LAMBDA(sgp_vid_t u){
+        row_map(u) = u;
+    });
+
+    vtx_view_t entries("interpolate entries", n);
+    wgt_view_t values("interpolate values", n);
+    //compute the interpolation weights
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t u){
+        entries(u) = vcmap(u);
+        values(u) = 1.0;
+    });
+
+    graph_type graph(entries, row_map);
+    interp = matrix_type("interpolate", nc, values, graph);
+
+    return EXIT_SUCCESS;
+}
+
 sgp_vid_t countInf(vtx_view_t target) {
     sgp_vid_t totalInf = 0;
 
