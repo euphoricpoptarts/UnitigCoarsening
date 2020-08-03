@@ -479,33 +479,42 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
 
 eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
     const vtx_view_t& f_vtx_w,
-    const eigenview_t partition) {
+    const eigenview_t partition,
+    sgp_vid_t min_cut) {
 
-    matrix_type gc;
-    matrix_type interpolation_graph;
-    sgp_vid_t nvertices_coarse;
-    vtx_view_t c_vtx_w;
-    sgp_recoarsen_HEC(interpolation_graph, &nvertices_coarse, g, partition);
+    sgp_vid_t last_cut = min_cut;
+    eigenview_t fine_part = partition;
+    printf("recoarsening\n");
+    do {
+        last_cut = min_cut;
+        matrix_type gc;
+        matrix_type interpolation_graph;
+        sgp_vid_t nvertices_coarse;
+        vtx_view_t c_vtx_w;
+        sgp_recoarsen_HEC(interpolation_graph, &nvertices_coarse, g, fine_part);
 
-    ExperimentLoggerUtil throwaway;
-    sgp_build_coarse_graph_msd(gc, c_vtx_w, interpolation_graph, g, f_vtx_w, 2, throwaway);
+        ExperimentLoggerUtil throwaway;
+        sgp_build_coarse_graph_msd(gc, c_vtx_w, interpolation_graph, g, f_vtx_w, 2, throwaway);
 
-    eigenview_t coarse_part("coarser partition", nvertices_coarse);
-    Kokkos::parallel_for("create coarse partition", g.numRows(), KOKKOS_LAMBDA(sgp_vid_t i){
-        sgp_vid_t coarse_vtx = interpolation_graph.graph.entries(i);
-        double part_wgt = static_cast<double>(f_vtx_w(i)) / static_cast<double>(c_vtx_w(coarse_vtx));
-        Kokkos::atomic_add(&coarse_part(coarse_vtx), part_wgt * partition(i));
-    });
-    //not strictly necessary but you never know with floating point rounding errors
-    Kokkos::parallel_for("discretize partition", nvertices_coarse, KOKKOS_LAMBDA(sgp_vid_t i) {
-        coarse_part(i) = round(coarse_part(i));
-    });
+        eigenview_t coarse_part("coarser partition", nvertices_coarse);
+        Kokkos::parallel_for("create coarse partition", g.numRows(), KOKKOS_LAMBDA(sgp_vid_t i) {
+            sgp_vid_t coarse_vtx = interpolation_graph.graph.entries(i);
+            double part_wgt = static_cast<double>(f_vtx_w(i)) / static_cast<double>(c_vtx_w(coarse_vtx));
+            Kokkos::atomic_add(&coarse_part(coarse_vtx), part_wgt * fine_part(i));
+        });
+        //not strictly necessary but you never know with floating point rounding errors
+        Kokkos::parallel_for("discretize partition", nvertices_coarse, KOKKOS_LAMBDA(sgp_vid_t i) {
+            coarse_part(i) = round(coarse_part(i));
+        });
 
-    fm_refine(coarse_part, gc, c_vtx_w);
-    eigenview_t fine_recoarsened("new fine partition", g.numRows());
-    KokkosSparse::spmv("N", 1.0, interpolation_graph, coarse_part, 0.0, fine_recoarsened);
+        min_cut = fm_refine(coarse_part, gc, c_vtx_w);
+        eigenview_t fine_recoarsened("new fine partition", g.numRows());
+        KokkosSparse::spmv("N", 1.0, interpolation_graph, coarse_part, 0.0, fine_recoarsened);
+        fine_part = fine_recoarsened;
+    } while (min_cut != last_cut);
 
-    return fine_recoarsened;
+    printf("stop recoarsening\n");
+    return fine_part;
 }
 
 SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graphs, std::list<matrix_type>& interpolates, std::list<vtx_view_t>& vtx_weights, sgp_pcg32_random_t* rng, int refine_alg
@@ -641,6 +650,7 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     }
 
 #ifdef FM
+    coarse_guess = sgp_recoarsen_one_level(*graph_iter, *vtx_w_iter, coarse_guess);
     printf("Refining layer %i\n", refine_layer);
     refine_layer--;
     sgp_eid_t old_cutsize = SGP_INFTY;
