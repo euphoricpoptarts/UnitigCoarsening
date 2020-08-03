@@ -324,10 +324,10 @@ SGPAR_API int sgp_recoarsen_HEC(matrix_type& interp,
             bool choose = false;
             if (same_part_found) {
                 if (part(i) == part(v)) {
-                    if (max_ewt < wgt) {
+                    if (max_ewt > wgt) {
                         choose = true;
                     }
-                    else if (max_ewt == wgt && order_max < order) {
+                    else if (max_ewt == wgt && order_max > order) {
                         choose = true;
                     }
                 }
@@ -337,10 +337,10 @@ SGPAR_API int sgp_recoarsen_HEC(matrix_type& interp,
                     same_part_found = true;
                 }
                 else {
-                    if (max_ewt < wgt) {
+                    if (max_ewt > wgt) {
                         choose = true;
                     }
-                    else if (max_ewt == wgt && order_max < order) {
+                    else if (max_ewt == wgt && order_max > order) {
                         choose = true;
                     }
                 }
