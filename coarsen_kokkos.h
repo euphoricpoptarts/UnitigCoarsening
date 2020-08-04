@@ -311,8 +311,8 @@ SGPAR_API int sgp_recoarsen_HEC(matrix_type& interp,
 
     Kokkos::parallel_for("Heaviest HN", n, KOKKOS_LAMBDA(sgp_vid_t i) {
         sgp_vid_t hn_i = SGP_INFTY;
-        sgp_vid_t order_max = SGP_INFTY;
-        sgp_wgt_t max_ewt = SGP_INFTY;
+        sgp_vid_t order_max = 0;
+        sgp_wgt_t max_ewt = 0;
 
         bool same_part_found = false;
 
@@ -324,10 +324,10 @@ SGPAR_API int sgp_recoarsen_HEC(matrix_type& interp,
             bool choose = false;
             if (same_part_found) {
                 if (part(i) == part(v)) {
-                    if (max_ewt > wgt) {
+                    if (max_ewt < wgt) {
                         choose = true;
                     }
-                    else if (max_ewt == wgt && order_max > order) {
+                    else if (max_ewt == wgt && order_max <= order) {
                         choose = true;
                     }
                 }
@@ -337,10 +337,10 @@ SGPAR_API int sgp_recoarsen_HEC(matrix_type& interp,
                     same_part_found = true;
                 }
                 else {
-                    if (max_ewt > wgt) {
+                    if (max_ewt < wgt) {
                         choose = true;
                     }
-                    else if (max_ewt == wgt && order_max > order) {
+                    else if (max_ewt == wgt && order_max <= order) {
                         choose = true;
                     }
                 }
