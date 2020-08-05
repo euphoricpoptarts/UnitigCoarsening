@@ -490,7 +490,7 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
         matrix_type interpolation_graph;
         sgp_vid_t nvertices_coarse;
         vtx_view_t c_vtx_w;
-        sgp_recoarsen_HEC(interpolation_graph, &nvertices_coarse, f_vtx_w, g, fine_part);
+        sgp_recoarsen_HEC(interpolation_graph, &nvertices_coarse, g, fine_part);
 
         ExperimentLoggerUtil throwaway;
         sgp_build_coarse_graph_msd(gc, c_vtx_w, interpolation_graph, g, f_vtx_w, 2, throwaway);
