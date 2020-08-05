@@ -479,7 +479,7 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
 eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
     const vtx_view_t& f_vtx_w,
     const eigenview_t partition,
-    sgp_eid_t min_cut, int refine_layer) {
+    sgp_eid_t min_cut, sgp_eid_t& out_cut, int refine_layer) {
 
     sgp_eid_t last_cut = min_cut;
     eigenview_t fine_part = partition;
@@ -490,7 +490,7 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
         matrix_type interpolation_graph;
         sgp_vid_t nvertices_coarse;
         vtx_view_t c_vtx_w;
-        sgp_recoarsen_HEC(interpolation_graph, &nvertices_coarse, g, fine_part);
+        sgp_recoarsen_HEC(interpolation_graph, &nvertices_coarse, f_vtx_w, g, fine_part);
 
         ExperimentLoggerUtil throwaway;
         sgp_build_coarse_graph_msd(gc, c_vtx_w, interpolation_graph, g, f_vtx_w, 2, throwaway);
@@ -516,7 +516,7 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
 		last_cut2 = min_cut;
         	min_cut = fm_refine(coarse_part, gc, c_vtx_w);
 	} while(last_cut2 != min_cut);
-	coarse_part = sgp_recoarsen_one_level(gc, c_vtx_w, coarse_part, min_cut, refine_layer + 1);
+	if(gc.numRows() < 0.99*g.numRows()) coarse_part = sgp_recoarsen_one_level(gc, c_vtx_w, coarse_part, min_cut, min_cut, refine_layer + 1);
 	last_cut2 = min_cut;
 	do{
 		last_cut2 = min_cut;
@@ -526,6 +526,7 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
         eigenview_t fine_recoarsened("new fine partition", g.numRows());
         KokkosSparse::spmv("N", 1.0, interpolation_graph, coarse_part, 0.0, fine_recoarsened);
         fine_part = fine_recoarsened;
+	out_cut = min_cut;
 	}
 	if(min_cut > 0.999*last_cut) {
     		printf("stop recoarsening level %d\n", refine_layer);
@@ -647,8 +648,8 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
             old_cutsize = cutsize;
             cutsize = fm_refine(coarse_guess, *graph_iter, *vtx_w_iter);
         } while (cutsize != old_cutsize); //could be larger if the balance improved
-        coarse_guess = sgp_recoarsen_one_level(*graph_iter, *vtx_w_iter, coarse_guess, cutsize, refine_layer);
-        do {
+        coarse_guess = sgp_recoarsen_one_level(*graph_iter, *vtx_w_iter, coarse_guess, cutsize, cutsize, refine_layer);
+	do {
             old_cutsize = cutsize;
             cutsize = fm_refine(coarse_guess, *graph_iter, *vtx_w_iter);
         } while (cutsize != old_cutsize); //could be larger if the balance improved
@@ -677,7 +678,7 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
         old_cutsize = cutsize;
         cutsize = fm_refine(coarse_guess, *graph_iter, *vtx_w_iter);
     } while (cutsize != old_cutsize); //could be larger if the balance improved
-    coarse_guess = sgp_recoarsen_one_level(*graph_iter, *vtx_w_iter, coarse_guess, cutsize, refine_layer);
+    coarse_guess = sgp_recoarsen_one_level(*graph_iter, *vtx_w_iter, coarse_guess, cutsize, cutsize, refine_layer);
     do {
         old_cutsize = cutsize;
         cutsize = fm_refine(coarse_guess, *graph_iter, *vtx_w_iter);
