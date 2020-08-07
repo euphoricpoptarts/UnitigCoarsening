@@ -474,12 +474,88 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
     return min_cut;
 }
 
+eigenview_t gggp(const matrix_type& cg,
+		const vtx_view_t& c_vtx_w){
+    printf("Doing GGGP\n");
 
+    sgp_vid_t gc_n = cg.numRows();
+
+    sgp_vid_t vtx_w_total = 0;
+
+    printf("coarse vertex count: %u\n", gc_n);
+    for (sgp_vid_t i = 0; i < c_vtx_w.extent(0); i++) {
+        vtx_w_total += c_vtx_w(i);
+    }
+
+    edge_mirror_t row_map = Kokkos::create_mirror(cg.graph.row_map);
+    vtx_mirror_t entries = Kokkos::create_mirror(cg.graph.entries);
+    wgt_mirror_t values = Kokkos::create_mirror(cg.values);
+
+    Kokkos::deep_copy(row_map, cg.graph.row_map);
+    Kokkos::deep_copy(entries, cg.graph.entries);
+    Kokkos::deep_copy(values, cg.values);
+
+    eigenview_t cg_m("coarse_guess", gc_n);
+    eigenview_t best_cg_part("best cg part", gc_n);
+    sgp_real_t cutmin = SGP_INFTY;
+    for (sgp_vid_t i = 0; i < gc_n; i++) {
+        //reset coarse partition
+        for (sgp_vid_t j = 0; j < gc_n; j++) {
+            cg_m(j) = 0;
+        }
+        cg_m(i) = 1;
+        sgp_vid_t count = c_vtx_w(i);
+        //incrementally grow partition 1
+        while (count < vtx_w_total / 2) {
+            sgp_vid_t argmin = i;
+            sgp_real_t min = SGP_INFTY;
+            //find minimum increase to cutsize for moving a vertex from partition 0 to partition 1
+            for (sgp_vid_t u = 0; u < gc_n; u++) {
+                if (cg_m(u) == 0) {
+                    sgp_real_t cutLoss = 0;
+                    for (sgp_eid_t j = row_map(u); j < row_map(u + 1); j++) {
+                        sgp_vid_t v = entries(j);
+                        if (cg_m(v) == 0) {
+                            cutLoss += values(j);
+                        }
+                        else {
+                            cutLoss -= values(j);
+                        }
+                    }
+                    if (cutLoss < min) {
+                        min = cutLoss;
+                        argmin = u;
+                    }
+                }
+            }
+            cg_m(argmin) = 1;
+            count += c_vtx_w(argmin);
+        }
+        sgp_real_t edge_cut = 0;
+        //find total cutsize
+        for (sgp_vid_t u = 0; u < gc_n; u++) {
+            for (sgp_eid_t j = row_map(u); j < row_map(u + 1); j++) {
+                sgp_vid_t v = entries(j);
+                if (cg_m(v) != cg_m(u)) {
+                    edge_cut += values(j);
+                }
+            }
+        }
+        //if cutsize less than best, replace best with current
+        if (edge_cut < cutmin) {
+            cutmin = edge_cut;
+            for (sgp_vid_t j = 0; j < gc_n; j++) {
+                best_cg_part(j) = cg_m(j);
+            }
+        }
+    }
+    return best_cg_part;
+}
 
 eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
     const vtx_view_t& f_vtx_w,
     const eigenview_t partition,
-    sgp_eid_t min_cut, sgp_eid_t& out_cut, int refine_layer) {
+    sgp_eid_t min_cut, sgp_eid_t& out_cut, int refine_layer, bool auto_replace = false) {
 
     sgp_eid_t last_cut = min_cut;
     eigenview_t fine_part = partition;
@@ -495,12 +571,27 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
         ExperimentLoggerUtil throwaway;
         sgp_build_coarse_graph_msd(gc, c_vtx_w, interpolation_graph, g, f_vtx_w, 2, throwaway);
 
-	if(gc.numRows() < 30){
-    printf("stop recoarsening level %d\n", refine_layer);
-		return fine_part;
-	}
 
         eigenview_t coarse_part("coarser partition", nvertices_coarse);
+	if(gc.numRows() < 5){
+		return fine_part;
+	}
+	if(gc.numRows() < 30){
+		coarse_part = gggp(gc, c_vtx_w);
+    		printf("stop recoarsening level %d\n", refine_layer);
+		sgp_eid_t last_cut2 = min_cut;
+		do{
+			last_cut2 = min_cut;
+        		min_cut = fm_refine(coarse_part, gc, c_vtx_w);
+		} while(last_cut2 != min_cut);
+		if(auto_replace || min_cut < last_cut){
+        	eigenview_t fine_recoarsened("new fine partition", g.numRows());
+        	KokkosSparse::spmv("N", 1.0, interpolation_graph, coarse_part, 0.0, fine_recoarsened);
+        	fine_part = fine_recoarsened;
+		out_cut = min_cut;
+		}
+		return fine_part;
+	}
         Kokkos::parallel_for("create coarse partition", g.numRows(), KOKKOS_LAMBDA(sgp_vid_t i) {
             sgp_vid_t coarse_vtx = interpolation_graph.graph.entries(i);
             double part_wgt = static_cast<double>(f_vtx_w(i)) / static_cast<double>(c_vtx_w(coarse_vtx));
@@ -516,13 +607,13 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
 		last_cut2 = min_cut;
         	min_cut = fm_refine(coarse_part, gc, c_vtx_w);
 	} while(last_cut2 != min_cut);
-	if(gc.numRows() < 0.99*g.numRows()) coarse_part = sgp_recoarsen_one_level(gc, c_vtx_w, coarse_part, min_cut, min_cut, refine_layer + 1);
+	if(gc.numRows() < 0.99*g.numRows()) coarse_part = sgp_recoarsen_one_level(gc, c_vtx_w, coarse_part, min_cut, min_cut, refine_layer + 1, true);
 	last_cut2 = min_cut;
 	do{
 		last_cut2 = min_cut;
         	min_cut = fm_refine(coarse_part, gc, c_vtx_w);
 	} while(last_cut2 != min_cut);
-	if(min_cut < last_cut){
+	if(auto_replace || min_cut < last_cut){
         eigenview_t fine_recoarsened("new fine partition", g.numRows());
         KokkosSparse::spmv("N", 1.0, interpolation_graph, coarse_part, 0.0, fine_recoarsened);
         fine_part = fine_recoarsened;
