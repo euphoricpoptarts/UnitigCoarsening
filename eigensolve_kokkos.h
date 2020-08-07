@@ -598,8 +598,8 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
             out_cut = min_cut;
             return fine_part;
         } else if (gc.numRows() < 30) {
-			return fine_part;
-		}
+            return fine_part;
+        }
         Kokkos::parallel_for("create coarse partition", g.numRows(), KOKKOS_LAMBDA(sgp_vid_t i) {
             sgp_vid_t coarse_vtx = interpolation_graph.graph.entries(i);
             double part_wgt = static_cast<double>(f_vtx_w(i)) / static_cast<double>(c_vtx_w(coarse_vtx));
@@ -615,29 +615,29 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
             last_cut2 = min_cut;
             min_cut = fm_refine(coarse_part, gc, c_vtx_w, experiment);
         } while(last_cut2 != min_cut);
-		if(top){
-			//explore an entirely new partition
+        if(top){
+            //explore an entirely new partition
             coarse_part = sgp_recoarsen_one_level(gc, c_vtx_w, coarse_part, min_cut, min_cut, refine_layer + 1, experiment, true, false);
             do{
                 last_cut2 = min_cut;
                 min_cut = fm_refine(coarse_part, gc, c_vtx_w, experiment);
             } while(last_cut2 != min_cut);
-			//refine the current partition
+            //refine the current partition
             coarse_part = sgp_recoarsen_one_level(gc, c_vtx_w, coarse_part, min_cut, min_cut, refine_layer + 1, experiment, false, false);
             do{
                 last_cut2 = min_cut;
                 min_cut = fm_refine(coarse_part, gc, c_vtx_w, experiment);
             } while(last_cut2 != min_cut);
-			//only explore on first run
-			top = false;
-		} else {
-			//continue doing whatever we're doing
+            //only explore on first run
+            top = false;
+        } else {
+            //continue doing whatever we're doing
             coarse_part = sgp_recoarsen_one_level(gc, c_vtx_w, coarse_part, min_cut, min_cut, refine_layer + 1, experiment, auto_replace, false);
             do{
                 last_cut2 = min_cut;
                 min_cut = fm_refine(coarse_part, gc, c_vtx_w, experiment);
             } while(last_cut2 != min_cut);
-		}
+        }
         eigenview_t fine_recoarsened("new fine partition", g.numRows());
         KokkosSparse::spmv("N", 1.0, interpolation_graph, coarse_part, 0.0, fine_recoarsened);
         do{
