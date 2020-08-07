@@ -121,6 +121,17 @@ SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
     return EXIT_SUCCESS;
 }
 
+template <class in, class out>
+Kokkos::View<out*> sort_order(Kokkos::View<in*> array, in max, in min){
+    typedef Kokkos::BinOp1D< Kokkos::View<in*> > BinOp;
+    BinOp bin_op(array.extent(0), min, max);
+    //VERY important that final parameter is true
+    Kokkos::BinSort< Kokkos::View<in*>, BinOp, Kokkos::DefaultExecutionSpace, out >
+        sorter(array, bin_op, true);
+    sorter.create_permute_vector();
+    return sorter.get_permute_vector();
+}
+
 vtx_view_t generate_permutation(sgp_vid_t n, pool_t rand_pool) {
     Kokkos::View<uint64_t*> randoms("randoms", n);
 
