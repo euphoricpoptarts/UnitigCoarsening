@@ -561,7 +561,7 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
     const vtx_view_t& f_vtx_w,
     const eigenview_t partition,
     sgp_eid_t min_cut, sgp_eid_t& out_cut, int refine_layer, 
-    ExperimentLoggerUtil& experiment, bool auto_replace = false) {
+    ExperimentLoggerUtil& experiment, bool auto_replace = false, bool top = true) {
 
     sgp_eid_t last_cut = min_cut;
     eigenview_t fine_part = partition;
@@ -581,25 +581,25 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
         timer.reset();
 
         eigenview_t coarse_part("coarser partition", nvertices_coarse);
-        if(gc.numRows() < 5){
+        if(gc.numRows() < 10){
            return fine_part;
         }
-        if(gc.numRows() < 30){
+        if(gc.numRows() < 30 && auto_replace){
             coarse_part = init_gggp(gc, c_vtx_w);
                 printf("stop recoarsening level %d\n", refine_layer);
             sgp_eid_t last_cut2 = min_cut;
             do{
                 last_cut2 = min_cut;
-                min_cut = fm_refine(coarse_part, gc, c_vtx_w);
+                min_cut = fm_refine(coarse_part, gc, c_vtx_w, experiment);
             } while(last_cut2 != min_cut);
-            if(auto_replace || min_cut < last_cut){
                 eigenview_t fine_recoarsened("new fine partition", g.numRows());
                 KokkosSparse::spmv("N", 1.0, interpolation_graph, coarse_part, 0.0, fine_recoarsened);
                 fine_part = fine_recoarsened;
             out_cut = min_cut;
-            }
             return fine_part;
-        }
+        } else if (gc.numRows() < 30) {
+			return fine_part;
+		}
         Kokkos::parallel_for("create coarse partition", g.numRows(), KOKKOS_LAMBDA(sgp_vid_t i) {
             sgp_vid_t coarse_vtx = interpolation_graph.graph.entries(i);
             double part_wgt = static_cast<double>(f_vtx_w(i)) / static_cast<double>(c_vtx_w(coarse_vtx));
@@ -615,16 +615,38 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
             last_cut2 = min_cut;
             min_cut = fm_refine(coarse_part, gc, c_vtx_w, experiment);
         } while(last_cut2 != min_cut);
-        coarse_part = sgp_recoarsen_one_level(gc, c_vtx_w, coarse_part, min_cut, min_cut, refine_layer + 1, true);
+		if(top){
+			//explore an entirely new partition
+            coarse_part = sgp_recoarsen_one_level(gc, c_vtx_w, coarse_part, min_cut, min_cut, refine_layer + 1, experiment, true, false);
+            do{
+                last_cut2 = min_cut;
+                min_cut = fm_refine(coarse_part, gc, c_vtx_w, experiment);
+            } while(last_cut2 != min_cut);
+			//refine the current partition
+            coarse_part = sgp_recoarsen_one_level(gc, c_vtx_w, coarse_part, min_cut, min_cut, refine_layer + 1, experiment, false, false);
+            do{
+                last_cut2 = min_cut;
+                min_cut = fm_refine(coarse_part, gc, c_vtx_w, experiment);
+            } while(last_cut2 != min_cut);
+			//only explore on first run
+			top = false;
+		} else {
+			//continue doing whatever we're doing
+            coarse_part = sgp_recoarsen_one_level(gc, c_vtx_w, coarse_part, min_cut, min_cut, refine_layer + 1, experiment, auto_replace, false);
+            do{
+                last_cut2 = min_cut;
+                min_cut = fm_refine(coarse_part, gc, c_vtx_w, experiment);
+            } while(last_cut2 != min_cut);
+		}
+        eigenview_t fine_recoarsened("new fine partition", g.numRows());
+        KokkosSparse::spmv("N", 1.0, interpolation_graph, coarse_part, 0.0, fine_recoarsened);
         do{
             last_cut2 = min_cut;
-            min_cut = fm_refine(coarse_part, gc, c_vtx_w, experiment);
+            min_cut = fm_refine(fine_recoarsened, g, f_vtx_w, experiment);
         } while(last_cut2 != min_cut);
         if(auto_replace || min_cut < last_cut){
-            eigenview_t fine_recoarsened("new fine partition", g.numRows());
-            KokkosSparse::spmv("N", 1.0, interpolation_graph, coarse_part, 0.0, fine_recoarsened);
             fine_part = fine_recoarsened;
-        out_cut = min_cut;
+            out_cut = min_cut;
         }
         if(min_cut > 0.999*last_cut) {
             printf("stop recoarsening level %d\n", refine_layer);
