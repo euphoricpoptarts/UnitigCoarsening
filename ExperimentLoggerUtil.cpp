@@ -20,6 +20,8 @@ public:
 		RadixDedupe,
 		Permute,
 		MapConstruct,
+		FMRefine,
+		FMRecoarsen,
 		END
 	};
 	std::vector<std::string> measurementNames{
@@ -33,6 +35,8 @@ public:
 		"coarsen-radix-dedupe",
 		"coarsen-permute",
 		"coarsen-map-construct",
+		"fm-refine",
+		"fm-recoarsen"
 	};
 	std::vector<double> measurements;
 
