@@ -233,8 +233,8 @@ sgp_eid_t fm_refine(eigenview_t& partition_device, const matrix_type& g_device, 
     Kokkos::parallel_reduce("max e find", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread, sgp_eid_t & t_max){
         sgp_vid_t i = thread.league_rank();
         sgp_eid_t weighted_degree = 0;
-        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g.graph.row_map(i), g.graph.row_map(i + 1)), [=](const sgp_eid_t j, sgp_eid_t& local_sum) {
-            local_sum += g.values(j);
+        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g_device.graph.row_map(i), g_device.graph.row_map(i + 1)), [=](const sgp_eid_t j, sgp_eid_t& local_sum) {
+            local_sum += g_device.values(j);
         }, weighted_degree);
         Kokkos::single(Kokkos::PerTeam(thread), [&]() {
             if (t_max < weighted_degree) {
