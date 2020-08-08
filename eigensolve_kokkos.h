@@ -205,7 +205,9 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
 }
 
 void fm_create_ds(const eigenview_t& partition_device, const matrix_type& g_device, const vtx_view_t& vtx_w_device, const sgp_eid_t maxE,
-    vtx_mirror_t& bucketsA, vtx_mirror_t& bucketsB, vtx_mirror_t& ll_next_out, vtx_mirror_t& ll_prev_out, vtx_mirror_t& free_vtx_out, Kokkos::View<int64_t*>& gains_out) {
+    sgp_eid_t& cutsize, vtx_mirror_t& bucketsA, vtx_mirror_t& bucketsB, vtx_mirror_t& ll_next_out, vtx_mirror_t& ll_prev_out, vtx_mirror_t& free_vtx_out, Kokkos::View<int64_t*>& gains_out) {
+
+    sgp_vid_t n = g_device.numRows();
 
     sgp_eid_t totalBuckets = 2 * maxE + 1;
     vtx_view_t bucketsA_cap("buckets cap 0", totalBuckets), bucketsB_cap("buckets cap 1", totalBuckets);
@@ -221,10 +223,11 @@ void fm_create_ds(const eigenview_t& partition_device, const matrix_type& g_devi
     vtx_view_t ll_next("linked list nexts", n), ll_prev("linked list prevs", n);
     Kokkos::View<int64_t*> gains("gains", n);
 
-    sgp_eid_t cutsize = 0;
+    cutsize = 0;
     //calculate gains and cutsize
     Kokkos::parallel_reduce("find gains", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread, sgp_eid_t & thread_sum){
         sgp_real_t gain = 0;
+        sgp_vid_t i = thread.league_rank();
         Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g_device.graph.row_map(i), g_device.graph.row_map(i + 1)), [=](const sgp_eid_t j, sgp_real_t& local_sum) {
             sgp_vid_t v = g_device.graph.entries(j);
             if (partition_device(i) != partition_device(v)) {
@@ -259,7 +262,7 @@ void fm_create_ds(const eigenview_t& partition_device, const matrix_type& g_devi
         update += bucketsA_cap(i);
 
         if (final) {
-            bucketA_offet(i + 1) = update;
+            bucketsA_offet(i + 1) = update;
         }
     });
     Kokkos::View<sgp_eid_t> ba_size_sub = Kokkos::subview(bucketsA_offset, totalBuckets);
@@ -269,7 +272,7 @@ void fm_create_ds(const eigenview_t& partition_device, const matrix_type& g_devi
         update += bucketsB_cap(i);
 
         if (final) {
-            bucketB_offet(i + 1) = update;
+            bucketsB_offet(i + 1) = update;
         }
     });
     Kokkos::View<sgp_eid_t> bb_size_sub = Kokkos::subview(bucketsB_offset, totalBuckets);
@@ -295,7 +298,7 @@ void fm_create_ds(const eigenview_t& partition_device, const matrix_type& g_devi
 
     Kokkos::parallel_for("move vertices to buckets", n, KOKKOS_LAMBDA(sgp_vid_t i){
         sgp_eid_t bucket = static_cast<sgp_eid_t>(gains(i) + maxE);
-        if (partition(i) == 0.0) {
+        if (partition_device(i) == 0.0) {
             sgp_eid_t offset = Kokkos::atomic_fetch_add(&bucketsA_cap(bucket), 1);
             offset += bucketsA_offset(bucket);
             bucketsA_vtx(offset) = i;
@@ -401,9 +404,10 @@ sgp_eid_t fm_refine(eigenview_t& partition_device, const matrix_type& g_device, 
     printf("maxE: %u\n", maxE);
 #endif
 
-    vtx_view_t bucketsA, bucketsB, ll_next, ll_prev, free_vtx;
-    Kokkos::View<int64_t*> gains;
-    fm_create_ds(partition_device, g_device, vtx_w_device, maxE, bucketsA, bucketsB, ll_next, ll_prev, free_vtx, gains);
+    sgp_eid_t cutsize = 0;
+    vtx_mirror_t bucketsA, bucketsB, ll_next, ll_prev, free_vtx;
+    Kokkos::View<int64_t*>::HostMirror gains;
+    fm_create_ds(partition_device, g_device, vtx_w_device, cutsize, maxE, bucketsA, bucketsB, ll_next, ll_prev, free_vtx, gains);
 
     int64_t balance = 0;
     for (sgp_vid_t i = 0; i < n; i++) {
