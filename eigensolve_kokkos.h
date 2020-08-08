@@ -522,7 +522,8 @@ eigenview_t init_gggp(const matrix_type& cg,
     eigen_mirror_t cg_m = Kokkos::create_mirror(best_cg_part);
     Kokkos::deep_copy(cg_m, best_cg_part);
     sgp_real_t cutmin = SGP_INFTY;
-    for (sgp_vid_t i = 0; i < gc_n; i++) {
+	
+	for (sgp_vid_t i = 0; i < gc_n; i++) {
         //reset coarse partition
         for (sgp_vid_t j = 0; j < gc_n; j++) {
             cg_m(j) = 0;
@@ -574,6 +575,47 @@ eigenview_t init_gggp(const matrix_type& cg,
     return best_cg_part;
 }
 
+eigenview_t init_spectral(const matrix_type& cg,
+                      const vtx_view_t& c_vtx_w){
+    printf("Doing spectral\n");
+    sgp_vid_t gc_n = cg.numRows();
+
+    sgp_vid_t vtx_w_total = 0;
+
+    printf("coarse vertex count: %u\n", gc_n);
+    for (sgp_vid_t i = 0; i < c_vtx_w.extent(0); i++) {
+        vtx_w_total += c_vtx_w(i);
+    }
+    pool_t rand_pool(std::time(nullptr));
+    eigenview_t coarse_guess("coarse_guess", gc_n);
+    gen_t generator = rand_pool.get_state();
+    for (sgp_vid_t i = 0; i < gc_n; i++) {
+        coarse_guess(i) = ((double)generator.urand64()) / (double)std::numeric_limits<uint64_t>::max();
+		coarse_guess(i) = 2.0*coarse_guess(i) - 1.0;
+		//printf("coarse_guess(%d) = %.3f\n", i, coarse_guess(i));
+    }
+    rand_pool.free_state(generator);
+    sgp_vec_normalize_kokkos(coarse_guess, gc_n);
+	ExperimentLoggerUtil throwaway;
+    sgp_power_iter(coarse_guess, cg, 0, 1
+        , throwaway);
+
+	vtx_view_t perm = sort_order<sgp_real_t, sgp_vid_t>(coarse_guess, 1.0, -1.0);
+
+	sgp_vid_t sum = 0;
+	for(sgp_vid_t i = 0; i < gc_n; i++){
+		sgp_vid_t u = perm(i);
+		if(sum < vtx_w_total / 2){
+			sum += c_vtx_w(u);
+			coarse_guess(u) = 1.0;
+		} else {
+			coarse_guess(u) = 0.0;
+		}
+	}
+	return coarse_guess;
+}
+
+
 eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
     const vtx_view_t& f_vtx_w,
     const eigenview_t partition,
@@ -603,7 +645,6 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
         }
         if(gc.numRows() < 30 && auto_replace){
             coarse_part = init_gggp(gc, c_vtx_w);
-                printf("stop recoarsening level %d\n", refine_layer);
             sgp_eid_t last_cut2 = min_cut;
             do{
                 last_cut2 = min_cut;
@@ -613,8 +654,10 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
                 KokkosSparse::spmv("N", 1.0, interpolation_graph, coarse_part, 0.0, fine_recoarsened);
                 fine_part = fine_recoarsened;
             out_cut = min_cut;
+            printf("stop recoarsening level %d\n", refine_layer);
             return fine_part;
         } else if (gc.numRows() < 30) {
+            printf("stop recoarsening level %d\n", refine_layer);
             return fine_part;
         }
         Kokkos::parallel_for("create coarse partition", g.numRows(), KOKKOS_LAMBDA(sgp_vid_t i) {
@@ -665,7 +708,7 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
             fine_part = fine_recoarsened;
             out_cut = min_cut;
         }
-        if(min_cut > 0.999*last_cut) {
+        if(min_cut > 0.99*last_cut) {
             printf("stop recoarsening level %d\n", refine_layer);
             return fine_part;
         }
@@ -689,7 +732,11 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
     matrix_type cg = *graphs.rbegin();
     vtx_view_t c_vtx_w = *vtx_weights.rbegin();
 
-    coarse_guess = init_gggp(cg, c_vtx_w);
+	if(gc_n > 200){
+    	coarse_guess = init_spectral(cg, c_vtx_w);
+	} else {
+		coarse_guess = init_gggp(cg, c_vtx_w);
+	}
 #endif
 
 
