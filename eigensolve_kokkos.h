@@ -204,8 +204,162 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
     return EXIT_SUCCESS;
 }
 
+void fm_create_ds(const eigenview_t& partition_device, const matrix_type& g_device, const vtx_view_t& vtx_w_device, const sgp_eid_t maxE,
+    vtx_mirror_t& bucketsA, vtx_mirror_t& bucketsB, vtx_mirror_t& ll_next_out, vtx_mirror_t& ll_prev_out, vtx_mirror_t& free_vtx_out, Kokkos::View<int64_t*>& gains_out) {
+
+    sgp_eid_t totalBuckets = 2 * maxE + 1;
+    vtx_view_t bucketsA_cap("buckets cap 0", totalBuckets), bucketsB_cap("buckets cap 1", totalBuckets);
+
+    //extra space for each bucket for simpler logic
+    Kokkos::parallel_for(totalBuckets, KOKKOS_LAMBDA(sgp_eid_t i){
+        bucketsA_cap(i) = 1;
+        bucketsB_cap(i) = 1;
+    });
+
+    vtx_view_t bucketsA_device("buckets part 0", totalBuckets), bucketsB_device("buckets part 1", totalBuckets);
+    edge_view_t bucketsA_offset("buckets part 0", totalBuckets + 1), bucketsB_offset("buckets part 1", totalBuckets + 1);
+    vtx_view_t ll_next("linked list nexts", n), ll_prev("linked list prevs", n);
+    Kokkos::View<int64_t*> gains("gains", n);
+
+    sgp_eid_t cutsize = 0;
+    //calculate gains and cutsize
+    Kokkos::parallel_reduce("find gains", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread, sgp_eid_t & thread_sum){
+        sgp_real_t gain = 0;
+        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g_device.graph.row_map(i), g_device.graph.row_map(i + 1)), [=](const sgp_eid_t j, sgp_real_t& local_sum) {
+            sgp_vid_t v = g_device.graph.entries(j);
+            if (partition_device(i) != partition_device(v)) {
+                local_sum += g_device.values(j);
+            }
+            else {
+                local_sum -= g_device.values(j);
+            }
+            }, gain);
+        sgp_eid_t local_cut = 0;
+        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g_device.graph.row_map(i), g_device.graph.row_map(i + 1)), [=](const sgp_eid_t j, sgp_eid_t& local_sum) {
+            sgp_vid_t v = g_device.graph.entries(j);
+            if (partition_device(i) != partition_device(v)) {
+                local_sum += g_device.values(j);
+            }
+            }, local_cut);
+        Kokkos::single(Kokkos::PerTeam(thread), [&]() {
+            gains(i) = gain;
+            thread_sum += local_cut;
+            sgp_eid_t bucket = static_cast<sgp_eid_t>(gain + maxE);
+            if (partition_device(i) == 0.0) {
+                Kokkos::atomic_increment(&bucketsA_cap(bucket));
+            }
+            else {
+                Kokkos::atomic_increment(&bucketsB_cap(bucket));
+            }
+            });
+    });
+
+    //calculate where to put vertices for each bucket
+    Kokkos::parallel_scan("align linked lists", totalBuckets, KOKKOS_LAMBDA(const sgp_eid_t i, sgp_eid_t & update, const bool final){
+        update += bucketsA_cap(i);
+
+        if (final) {
+            bucketA_offet(i + 1) = update;
+        }
+    });
+    Kokkos::View<sgp_eid_t> ba_size_sub = Kokkos::subview(bucketsA_offset, totalBuckets);
+    sgp_eid_t ba_size = 0;
+    Kokkos::deep_copy(ba_size, ba_size_sub);
+    Kokkos::parallel_scan("align linked lists", totalBuckets, KOKKOS_LAMBDA(const sgp_eid_t i, sgp_eid_t & update, const bool final){
+        update += bucketsB_cap(i);
+
+        if (final) {
+            bucketB_offet(i + 1) = update;
+        }
+    });
+    Kokkos::View<sgp_eid_t> bb_size_sub = Kokkos::subview(bucketsB_offset, totalBuckets);
+    sgp_eid_t bb_size = 0;
+    Kokkos::deep_copy(bb_size, bb_size_sub);
+
+    Kokkos::parallel_for(totalBuckets, KOKKOS_LAMBDA(sgp_eid_t i){
+        bucketsA_cap(i) = 0;
+        bucketsB_cap(i) = 0;
+        bucketsA_device(i) = SGP_INFTY;
+        bucketsB_device(i) = SGP_INFTY;
+    });
+
+    vtx_view_t bucketsA_vtx("bucketsA vertices", ba_size), bucketsB_vtx("bucketsB vertices", bb_size);
+    Kokkos::parallel_for(ba_size, KOKKOS_LAMBDA(sgp_eid_t i){
+        bucketsA_vtx(i) = SGP_INFTY;
+    });
+    Kokkos::parallel_for(bb_size, KOKKOS_LAMBDA(sgp_eid_t i){
+        bucketsB_vtx(i) = SGP_INFTY;
+    });
+
+    vtx_mirror_t free_vtx("free vertices", n);
+
+    Kokkos::parallel_for("move vertices to buckets", n, KOKKOS_LAMBDA(sgp_vid_t i){
+        sgp_eid_t bucket = static_cast<sgp_eid_t>(gains(i) + maxE);
+        if (partition(i) == 0.0) {
+            sgp_eid_t offset = Kokkos::atomic_fetch_add(&bucketsA_cap(bucket), 1);
+            offset += bucketsA_offset(bucket);
+            bucketsA_vtx(offset) = i;
+        }
+        else {
+            sgp_eid_t offset = Kokkos::atomic_fetch_add(&bucketsB_cap(bucket), 1);
+            offset += bucketsB_offset(bucket);
+            bucketsB_vtx(offset) = i;
+        }
+        ll_next(i) = SGP_INFTY;
+        ll_prev(i) = SGP_INFTY;
+        free_vtx(i) = 1;
+    });
+
+    Kokkos::parallel_for("create buckets for part 0", ba_size, KOKKOS_LAMBDA(sgp_eid_t i){
+        sgp_vid_t u = bucketsA_vtx(i);
+        if (u != SGP_INFTY) {
+            if (i != 0 || bucketsA_vtx(i - 1) != SGP_INFTY) {
+                ll_prev(u) = bucketsA_vtx(i - 1);
+            }
+            else {
+                sgp_eid_t bucket = static_cast<sgp_eid_t>(gains(u) + maxE);
+                bucketsA_device(bucket) = u;
+            }
+            //last element of bucketsA_vtx must be SGP_INFTY so this can't be out of bounds
+            //also if the next element is SGP_INFTY, then this is effectively a no-op
+            ll_next(u) = bucketsA_vtx(i + 1);
+        }
+    });
+
+    Kokkos::parallel_for("create buckets for part 1", bb_size, KOKKOS_LAMBDA(sgp_eid_t i){
+        sgp_vid_t u = bucketsB_vtx(i);
+        if (u != SGP_INFTY) {
+            if (i != 0 || bucketsB_vtx(i - 1) != SGP_INFTY) {
+                ll_prev(u) = bucketsB_vtx(i - 1);
+            }
+            else {
+                sgp_eid_t bucket = static_cast<sgp_eid_t>(gains(u) + maxE);
+                bucketsB_device(bucket) = u;
+            }
+            //last element of bucketsB_vtx must be SGP_INFTY so this can't be out of bounds
+            //also if the next element is SGP_INFTY, then this is effectively a no-op
+            ll_next(u) = bucketsB_vtx(i + 1);
+        }
+    });
+
+    bucketsA = Kokkos::create_mirror(bucketsA_device);
+    bucketsB = Kokkos::create_mirror(bucketsB_device);
+    ll_next_out = Kokkos::create_mirror(ll_next);
+    ll_prev_out = Kokkos::create_mirror(ll_prev);
+    free_vtx_out = Kokkos::create_mirror(free_vtx);
+    gains_out = Kokkos::create_mirror(gains);
+
+    Kokkos::deep_copy(bucketsA, bucketsA_device);
+    Kokkos::deep_copy(bucketsB, bucketsB_device);
+    Kokkos::deep_copy(ll_next_out, ll_next);
+    Kokkos::deep_copy(ll_prev_out, ll_prev);
+    Kokkos::deep_copy(free_vtx_out, free_vtx);
+    Kokkos::deep_copy(gains_out, gains);
+}
+
 //edge cuts are bounded by |E| of finest graph (assuming unweighted edges for finest graph)
 //also we assume ALL coarse edge weights are integral
+//this code is DISGUSTING, you've been warned
 sgp_eid_t fm_refine(eigenview_t& partition_device, const matrix_type& g_device, const vtx_view_t& vtx_w_device, ExperimentLoggerUtil& experiment) {
     sgp_vid_t n = g_device.numRows();
 
@@ -247,52 +401,9 @@ sgp_eid_t fm_refine(eigenview_t& partition_device, const matrix_type& g_device, 
     printf("maxE: %u\n", maxE);
 #endif
 
-    sgp_eid_t totalBuckets = 2 * maxE + 1;
-    vtx_mirror_t bucketsA("buckets part 1", totalBuckets), bucketsB("buckets part 2", totalBuckets);
-    vtx_mirror_t ll_next("linked list nexts", n), ll_prev("linked list prevs", n);
-    Kokkos::View<int64_t*>::HostMirror gains("gains", n), balances("balances", n);
-    vtx_mirror_t swap_order("swap order", n);
-    vtx_mirror_t free_vtx("free vertices", n);
-    edge_mirror_t cutsizes("cutsizes", n);
-
-    for (sgp_eid_t i = 0; i < 2 * maxE + 1; i++) {
-        bucketsA(i) = SGP_INFTY;
-        bucketsB(i) = SGP_INFTY;
-    }
-
-    for (sgp_vid_t i = 0; i < n; i++) {
-        ll_next(i) = SGP_INFTY;
-        ll_prev(i) = SGP_INFTY;
-        free_vtx(i) = 1;
-    }
-
-    sgp_eid_t cutsize = 0;
-    //initialize gains datastructure
-    for (sgp_vid_t i = 0; i < n; i++) {
-        sgp_real_t gain = 0;
-        for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
-            sgp_vid_t v = g.graph.entries(j);
-            if (partition(i) != partition(v)) {
-                gain += g.values(j);
-                cutsize += g.values(j);
-            }
-            else {
-                gain -= g.values(j);
-            }
-        }
-        gains(i) = gain;
-        sgp_eid_t bucket = gain + maxE;
-        vtx_mirror_t insert_into_bucket = bucketsA;
-        if (partition(i) == 1.0) {
-            insert_into_bucket = bucketsB;
-        }
-        sgp_vid_t bucket_first = insert_into_bucket(bucket);
-        if (bucket_first != SGP_INFTY) {
-            ll_prev(bucket_first) = i;
-        }
-        insert_into_bucket(bucket) = i;
-        ll_next(i) = bucket_first;
-    }
+    vtx_view_t bucketsA, bucketsB, ll_next, ll_prev, free_vtx;
+    Kokkos::View<int64_t*> gains;
+    fm_create_ds(partition_device, g_device, vtx_w_device, maxE, bucketsA, bucketsB, ll_next, ll_prev, free_vtx, gains);
 
     int64_t balance = 0;
     for (sgp_vid_t i = 0; i < n; i++) {
@@ -303,6 +414,9 @@ sgp_eid_t fm_refine(eigenview_t& partition_device, const matrix_type& g_device, 
             balance -= vtx_w(i);
         }
     }
+    Kokkos::View<int64_t*>::HostMirror balances("balances", n);
+    vtx_mirror_t swap_order("swap order", n);
+    edge_mirror_t cutsizes("cutsizes", n);
 
     printf("Unrefined balance: %li, cutsize: %lu\n", balance, cutsize);
 
