@@ -498,12 +498,15 @@ sgp_eid_t fm_refine(eigenview_t& partition_device, const matrix_type& g_device, 
 }
 
 eigenview_t init_gggp(const matrix_type& cg,
-                      const vtx_view_t& c_vtx_w){
+                      const vtx_view_t& c_vtx_w_device){
     printf("Doing GGGP\n");
 
     sgp_vid_t gc_n = cg.numRows();
 
     sgp_vid_t vtx_w_total = 0;
+
+    vtx_mirror_t c_vtx_w = Kokkos::create_mirror(c_vtx_w_device);
+    Kokkos::deep_copy(c_vtx_w, c_vtx_w_device);
 
     printf("coarse vertex count: %u\n", gc_n);
     for (sgp_vid_t i = 0; i < c_vtx_w.extent(0); i++) {
