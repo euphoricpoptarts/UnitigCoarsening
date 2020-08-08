@@ -255,7 +255,7 @@ void fm_create_ds(const eigenview_t& partition_device, const matrix_type& g_devi
                 Kokkos::atomic_increment(&bucketsB_cap(bucket));
             }
             });
-    });
+    }, cutsize);
 
     //calculate where to put vertices for each bucket
     Kokkos::parallel_scan("align linked lists", totalBuckets, KOKKOS_LAMBDA(const sgp_eid_t i, sgp_eid_t & update, const bool final){
