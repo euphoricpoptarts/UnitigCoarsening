@@ -709,9 +709,10 @@ eigenview_t init_spectral(const matrix_type& cg,
     }, vtx_w_total);
     pool_t rand_pool(std::time(nullptr));
     eigenview_t coarse_guess("coarse_guess", gc_n);
+    double max = (double)std::numeric_limits<uint64_t>::max();
     Kokkos::parallel_for(gc_n, KOKKOS_LAMBDA(sgp_vid_t i){
         gen_t generator = rand_pool.get_state();
-        coarse_guess(i) = ((double)generator.urand64()) / (double)std::numeric_limits<uint64_t>::max();
+        coarse_guess(i) = ((double)generator.urand64()) / max;
         coarse_guess(i) = 2.0 * coarse_guess(i) - 1.0;
         rand_pool.free_state(generator);
     });
