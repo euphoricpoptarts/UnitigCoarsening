@@ -206,12 +206,29 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
 
 //edge cuts are bounded by |E| of finest graph (assuming unweighted edges for finest graph)
 //also we assume ALL coarse edge weights are integral
-sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view_t& vtx_w, ExperimentLoggerUtil& experiment) {
-    sgp_vid_t n = g.numRows();
+sgp_eid_t fm_refine(eigenview_t& partition_device, const matrix_type& g_device, const vtx_view_t& vtx_w_device, ExperimentLoggerUtil& experiment) {
+    sgp_vid_t n = g_device.numRows();
 
     sgp_eid_t maxE = 0;
 
     Kokkos::Timer timer;
+
+    eigen_mirror_t partition = Kokkos::create_mirror(partition_device);
+    Kokkos::deep_copy(partition, partition_device);
+
+    vtx_mirror_t vtx_w = Kokkos::create_mirror(vtx_w_device);
+    Kokkos::deep_copy(vtx_w, vtx_w_device);
+
+    edge_mirror_t row_map = Kokkos::create_mirror(g_device.graph.row_map);
+    vtx_mirror_t entries = Kokkos::create_mirror(g_device.graph.entries);
+    wgt_mirror_t values = Kokkos::create_mirror(g_device.values);
+
+    Kokkos::deep_copy(row_map, g_device.graph.row_map);
+    Kokkos::deep_copy(entries, g_device.graph.entries);
+    Kokkos::deep_copy(values, g_device.values);
+
+    host_graph_t graph(entries, row_map);
+    host_matrix_t g("interpolate", n, values, graph);
 
     Kokkos::parallel_reduce("max e find", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread, sgp_eid_t & t_max){
         sgp_vid_t i = thread.league_rank();
@@ -473,6 +490,7 @@ sgp_eid_t fm_refine(eigenview_t& partition, const matrix_type& g, const vtx_view
     }
 
     printf("Refined balance: %li, cutsize: %lu\n", min_imb, min_cut);
+    Kokkos::deep_copy(partition_device, partition);
 
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::FMRefine, timer.seconds());
     timer.reset();
@@ -500,8 +518,9 @@ eigenview_t init_gggp(const matrix_type& cg,
     Kokkos::deep_copy(entries, cg.graph.entries);
     Kokkos::deep_copy(values, cg.values);
 
-    eigenview_t cg_m("coarse_guess", gc_n);
     eigenview_t best_cg_part("best cg part", gc_n);
+    eigen_mirror_t cg_m = Kokkos::create_mirror(best_cg_part);
+    Kokkos::deep_copy(cg_m, best_cg_part);
     sgp_real_t cutmin = SGP_INFTY;
     for (sgp_vid_t i = 0; i < gc_n; i++) {
         //reset coarse partition
@@ -549,9 +568,7 @@ eigenview_t init_gggp(const matrix_type& cg,
         //if cutsize less than best, replace best with current
         if (edge_cut < cutmin) {
             cutmin = edge_cut;
-            for (sgp_vid_t j = 0; j < gc_n; j++) {
-                best_cg_part(j) = cg_m(j);
-            }
+            Kokkos::deep_copy(best_cg_part, cg_m);
         }
     }
     return best_cg_part;
