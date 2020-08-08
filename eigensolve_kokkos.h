@@ -248,12 +248,12 @@ sgp_eid_t fm_refine(eigenview_t& partition_device, const matrix_type& g_device, 
 #endif
 
     sgp_eid_t totalBuckets = 2 * maxE + 1;
-    vtx_view_t bucketsA("buckets part 1", totalBuckets), bucketsB("buckets part 2", totalBuckets);
-    vtx_view_t ll_next("linked list nexts", n), ll_prev("linked list prevs", n);
-    Kokkos::View<int64_t*> gains("gains", n), balances("balances", n);
-    vtx_view_t swap_order("swap order", n);
-    vtx_view_t free_vtx("free vertices", n);
-    edge_view_t cutsizes("cutsizes", n);
+    vtx_mirror_t bucketsA("buckets part 1", totalBuckets), bucketsB("buckets part 2", totalBuckets);
+    vtx_mirror_t ll_next("linked list nexts", n), ll_prev("linked list prevs", n);
+    Kokkos::View<int64_t*>::HostMirror gains("gains", n), balances("balances", n);
+    vtx_mirror_t swap_order("swap order", n);
+    vtx_mirror_t free_vtx("free vertices", n);
+    edge_mirror_t cutsizes("cutsizes", n);
 
     for (sgp_eid_t i = 0; i < 2 * maxE + 1; i++) {
         bucketsA(i) = SGP_INFTY;
@@ -282,7 +282,7 @@ sgp_eid_t fm_refine(eigenview_t& partition_device, const matrix_type& g_device, 
         }
         gains(i) = gain;
         sgp_eid_t bucket = gain + maxE;
-        vtx_view_t insert_into_bucket = bucketsA;
+        vtx_mirror_t insert_into_bucket = bucketsA;
         if (partition(i) == 1.0) {
             insert_into_bucket = bucketsB;
         }
