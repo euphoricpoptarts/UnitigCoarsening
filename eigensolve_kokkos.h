@@ -294,7 +294,7 @@ void fm_create_ds(const eigenview_t& partition_device, const matrix_type& g_devi
         bucketsB_vtx(i) = SGP_INFTY;
     });
 
-    vtx_mirror_t free_vtx("free vertices", n);
+    vtx_view_t free_vtx("free vertices", n);
 
     Kokkos::parallel_for("move vertices to buckets", n, KOKKOS_LAMBDA(sgp_vid_t i){
         sgp_eid_t bucket = static_cast<sgp_eid_t>(gains(i) + maxE);
