@@ -704,36 +704,39 @@ eigenview_t init_spectral(const matrix_type& cg,
     sgp_vid_t vtx_w_total = 0;
 
     printf("coarse vertex count: %u\n", gc_n);
-    for (sgp_vid_t i = 0; i < c_vtx_w.extent(0); i++) {
-        vtx_w_total += c_vtx_w(i);
-    }
+    Kokkos::parallel_reduce(c_vtx_w.extent(0), KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & thread_sum) {
+        thread_sum += c_vtx_w(i);
+    }, vtx_w_total);
     pool_t rand_pool(std::time(nullptr));
     eigenview_t coarse_guess("coarse_guess", gc_n);
-    gen_t generator = rand_pool.get_state();
-    for (sgp_vid_t i = 0; i < gc_n; i++) {
+    Kokkos::parallel_for(gc_n, KOKKOS_LAMBDA(sgp_vid_t i){
+        gen_t generator = rand_pool.get_state();
         coarse_guess(i) = ((double)generator.urand64()) / (double)std::numeric_limits<uint64_t>::max();
-		coarse_guess(i) = 2.0*coarse_guess(i) - 1.0;
-		//printf("coarse_guess(%d) = %.3f\n", i, coarse_guess(i));
-    }
-    rand_pool.free_state(generator);
+        coarse_guess(i) = 2.0 * coarse_guess(i) - 1.0;
+        rand_pool.free_state(generator);
+    });
     sgp_vec_normalize_kokkos(coarse_guess, gc_n);
-	ExperimentLoggerUtil throwaway;
+    ExperimentLoggerUtil throwaway;
     sgp_power_iter(coarse_guess, cg, 0, 1
         , throwaway);
 
-	vtx_view_t perm = sort_order<sgp_real_t, sgp_vid_t>(coarse_guess, 1.0, -1.0);
+    vtx_view_t perm_d = sort_order<sgp_real_t, sgp_vid_t>(coarse_guess, 1.0, -1.0);
+    vtx_mirror_t perm = Kokkos::create_mirror(perm_d);
+    Kokkos::deep_copy(perm, perm_d);
 
-	sgp_vid_t sum = 0;
-	for(sgp_vid_t i = 0; i < gc_n; i++){
-		sgp_vid_t u = perm(i);
-		if(sum < vtx_w_total / 2){
-			sum += c_vtx_w(u);
-			coarse_guess(u) = 1.0;
-		} else {
-			coarse_guess(u) = 0.0;
-		}
-	}
-	return coarse_guess;
+    sgp_vid_t sum = 0;
+    eigen_mirror_t cg_m("coarse guess discretized mirror", gc_n);
+    for(sgp_vid_t i = 0; i < gc_n; i++){
+        sgp_vid_t u = perm(i);
+        if(sum < vtx_w_total / 2){
+            sum += c_vtx_w(u);
+            cg_m(u) = 1.0;
+        } else {
+            cg_m(u) = 0.0;
+        }
+    }
+    Kokkos::deep_copy(coarse_guess, cg_m);
+    return coarse_guess;
 }
 
 
