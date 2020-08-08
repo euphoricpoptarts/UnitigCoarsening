@@ -316,7 +316,7 @@ void fm_create_ds(const eigenview_t& partition_device, const matrix_type& g_devi
     Kokkos::parallel_for("create buckets for part 0", ba_size, KOKKOS_LAMBDA(sgp_eid_t i){
         sgp_vid_t u = bucketsA_vtx(i);
         if (u != SGP_INFTY) {
-            if (i != 0 || bucketsA_vtx(i - 1) != SGP_INFTY) {
+            if (i != 0 && bucketsA_vtx(i - 1) != SGP_INFTY) {
                 ll_prev(u) = bucketsA_vtx(i - 1);
             }
             else {
@@ -332,7 +332,7 @@ void fm_create_ds(const eigenview_t& partition_device, const matrix_type& g_devi
     Kokkos::parallel_for("create buckets for part 1", bb_size, KOKKOS_LAMBDA(sgp_eid_t i){
         sgp_vid_t u = bucketsB_vtx(i);
         if (u != SGP_INFTY) {
-            if (i != 0 || bucketsB_vtx(i - 1) != SGP_INFTY) {
+            if (i != 0 && bucketsB_vtx(i - 1) != SGP_INFTY) {
                 ll_prev(u) = bucketsB_vtx(i - 1);
             }
             else {
