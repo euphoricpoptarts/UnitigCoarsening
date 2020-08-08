@@ -205,7 +205,7 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
 }
 
 void fm_create_ds(const eigenview_t& partition_device, const matrix_type& g_device, const vtx_view_t& vtx_w_device, const sgp_eid_t maxE,
-    sgp_eid_t& cutsize, vtx_mirror_t& bucketsA, vtx_mirror_t& bucketsB, vtx_mirror_t& ll_next_out, vtx_mirror_t& ll_prev_out, vtx_mirror_t& free_vtx_out, Kokkos::View<int64_t*>& gains_out) {
+    sgp_eid_t& cutsize, vtx_mirror_t& bucketsA, vtx_mirror_t& bucketsB, vtx_mirror_t& ll_next_out, vtx_mirror_t& ll_prev_out, vtx_mirror_t& free_vtx_out, Kokkos::View<int64_t*>::HostMirror& gains_out) {
 
     sgp_vid_t n = g_device.numRows();
 
@@ -262,7 +262,7 @@ void fm_create_ds(const eigenview_t& partition_device, const matrix_type& g_devi
         update += bucketsA_cap(i);
 
         if (final) {
-            bucketsA_offet(i + 1) = update;
+            bucketsA_offset(i + 1) = update;
         }
     });
     Kokkos::View<sgp_eid_t> ba_size_sub = Kokkos::subview(bucketsA_offset, totalBuckets);
@@ -272,7 +272,7 @@ void fm_create_ds(const eigenview_t& partition_device, const matrix_type& g_devi
         update += bucketsB_cap(i);
 
         if (final) {
-            bucketsB_offet(i + 1) = update;
+            bucketsB_offset(i + 1) = update;
         }
     });
     Kokkos::View<sgp_eid_t> bb_size_sub = Kokkos::subview(bucketsB_offset, totalBuckets);
