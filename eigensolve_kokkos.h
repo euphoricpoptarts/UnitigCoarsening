@@ -407,7 +407,7 @@ sgp_eid_t fm_refine(eigenview_t& partition_device, const matrix_type& g_device, 
     sgp_eid_t cutsize = 0;
     vtx_mirror_t bucketsA, bucketsB, ll_next, ll_prev, free_vtx;
     Kokkos::View<int64_t*>::HostMirror gains;
-    fm_create_ds(partition_device, g_device, vtx_w_device, cutsize, maxE, bucketsA, bucketsB, ll_next, ll_prev, free_vtx, gains);
+    fm_create_ds(partition_device, g_device, vtx_w_device, maxE, cutsize, bucketsA, bucketsB, ll_next, ll_prev, free_vtx, gains);
 
     int64_t balance = 0;
     for (sgp_vid_t i = 0; i < n; i++) {
