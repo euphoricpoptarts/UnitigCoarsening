@@ -725,12 +725,15 @@ eigenview_t init_spectral(const matrix_type& cg,
     vtx_mirror_t perm = Kokkos::create_mirror(perm_d);
     Kokkos::deep_copy(perm, perm_d);
 
+    vtx_mirror_t c_vtx_m = Kokkos::create_mirror(c_vtx_w);
+    Kokkos::deep_copy(c_vtx_m, c_vtx_w);
+
     sgp_vid_t sum = 0;
     eigen_mirror_t cg_m("coarse guess discretized mirror", gc_n);
     for(sgp_vid_t i = 0; i < gc_n; i++){
         sgp_vid_t u = perm(i);
         if(sum < vtx_w_total / 2){
-            sum += c_vtx_w(u);
+            sum += c_vtx_m(u);
             cg_m(u) = 1.0;
         } else {
             cg_m(u) = 0.0;
