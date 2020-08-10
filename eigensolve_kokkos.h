@@ -810,7 +810,7 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
                 last_cut2 = min_cut;
                 min_cut = fm_refine(coarse_part, gc, c_vtx_w, experiment);
             } while(last_cut2 != min_cut);
-            //refine the current partition
+            //refine the new partition
             coarse_part = sgp_recoarsen_one_level(gc, c_vtx_w, coarse_part, min_cut, min_cut, refine_layer + 1, experiment, false, false);
             do{
                 last_cut2 = min_cut;
@@ -832,6 +832,10 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
             last_cut2 = min_cut;
             min_cut = fm_refine(fine_recoarsened, g, f_vtx_w, experiment);
         } while(last_cut2 != min_cut);
+        //partition can coarsen to become incredibly unbalanced, this is an easy way to detect max imbalance
+        if(min_cut == 0){
+            return fine_part;
+        }
         if(auto_replace || min_cut < last_cut){
             fine_part = fine_recoarsened;
             out_cut = min_cut;
