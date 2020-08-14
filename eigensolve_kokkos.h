@@ -432,6 +432,10 @@ sgp_eid_t fm_refine(eigenview_t& partition_device, const matrix_type& g_device, 
     sgp_eid_t min_cut = start_cut;
     sgp_vid_t argmin = SGP_INFTY;
     int64_t min_imb = start_balance;
+	int64_t target_imb = start_balance / 10;
+	if(target_imb < 20){
+		target_imb = 20;
+	}
     bool start_counter = true;
     int counter = 0;
     while (bucket_offsetA >= 0 || bucket_offsetB >= 0) {
@@ -514,20 +518,30 @@ sgp_eid_t fm_refine(eigenview_t& partition_device, const matrix_type& g_device, 
 
             //we ideally want both the cut and imbalance to improve
             //however we prioritize the balance, and bound how much the cut can decay by
-            if (abs(balance) < min_imb && cutsize < 1.05 * min_cut) {
+			if(abs(balance) <= target_imb && cutsize <= min_cut){
                 min_imb = abs(balance);
                 min_cut = cutsize;
                 argmin = total_swaps;
                 start_counter = true;
                 counter = 0;
-            }
-            else if (abs(balance) <= min_imb && min_cut > cutsize) {
-                min_imb = abs(balance);
-                min_cut = cutsize;
-                argmin = total_swaps;
-                start_counter = true;
-                counter = 0;
-            }
+			}
+			else if(abs(balance) > target_imb)
+			{
+				if (abs(balance) < min_imb && cutsize < 1.05 * min_cut) {
+            	    min_imb = abs(balance);
+                	min_cut = cutsize;
+                	argmin = total_swaps;
+                	start_counter = true;
+                	counter = 0;
+            	}
+            	else if (abs(balance) <= min_imb && cutsize <= min_cut) {
+                	min_imb = abs(balance);
+                	min_cut = cutsize;
+                	argmin = total_swaps;
+                	start_counter = true;
+                	counter = 0;
+            	}
+			}
 
             total_swaps++;
             for (sgp_eid_t j = g.graph.row_map(swap); j < g.graph.row_map(swap + 1); j++) {
@@ -769,6 +783,7 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
 
         eigenview_t coarse_part("coarser partition", nvertices_coarse);
         if(gc.numRows() < 10){
+           printf("stop recoarsening level %d\n", refine_layer);
            return fine_part;
         }
         if(gc.numRows() < 30 && auto_replace){
@@ -817,7 +832,6 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
                 min_cut = fm_refine(coarse_part, gc, c_vtx_w, experiment);
             } while(last_cut2 != min_cut);
             //only explore on first run
-            top = false;
         } else {
             //continue doing whatever we're doing
             coarse_part = sgp_recoarsen_one_level(gc, c_vtx_w, coarse_part, min_cut, min_cut, refine_layer + 1, experiment, auto_replace, false);
@@ -840,10 +854,11 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
             fine_part = fine_recoarsened;
             out_cut = min_cut;
         }
-        if(min_cut > 0.99*last_cut) {
+        if(!top && min_cut > 0.999*last_cut) {
             printf("stop recoarsening level %d\n", refine_layer);
             return fine_part;
         }
+        top = false;
     }
 }
 
@@ -889,11 +904,13 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
             old_cutsize = cutsize;
             cutsize = fm_refine(coarse_guess, *graph_iter, *vtx_w_iter, experiment);
         } while (cutsize != old_cutsize); //could be larger if the balance improved
+#ifdef RECOARSEN
         coarse_guess = sgp_recoarsen_one_level(*graph_iter, *vtx_w_iter, coarse_guess, cutsize, cutsize, refine_layer, experiment);
         do {
             old_cutsize = cutsize;
             cutsize = fm_refine(coarse_guess, *graph_iter, *vtx_w_iter, experiment);
         } while (cutsize != old_cutsize); //could be larger if the balance improved
+#endif
 #else
         CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, refine_alg, 0
 #ifdef EXPERIMENT
@@ -919,11 +936,13 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
         old_cutsize = cutsize;
         cutsize = fm_refine(coarse_guess, *graph_iter, *vtx_w_iter, experiment);
     } while (cutsize != old_cutsize); //could be larger if the balance improved
+#ifdef RECOARSEN
     coarse_guess = sgp_recoarsen_one_level(*graph_iter, *vtx_w_iter, coarse_guess, cutsize, cutsize, refine_layer, experiment);
     do {
         old_cutsize = cutsize;
         cutsize = fm_refine(coarse_guess, *graph_iter, *vtx_w_iter, experiment);
     } while (cutsize != old_cutsize); //could be larger if the balance improved
+#endif
 #else
     //last refine
     CHECK_SGPAR(sgp_power_iter(coarse_guess, *graph_iter, refine_alg, 1
