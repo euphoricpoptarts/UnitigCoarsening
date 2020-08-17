@@ -174,7 +174,7 @@ sgp_vid_t parallel_map_construct(vtx_view_t vcmap, const sgp_vid_t n, const vtx_
             //need to enforce an ordering condition to allow hard-stall conditions to be broken
             if (condition ^ swap) {
                 if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
-                    if (Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
+                    if (u == v || Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
                         sgp_vid_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
                         vcmap(u) = cv;
                         vcmap(v) = cv;
@@ -347,14 +347,14 @@ SGPAR_API int sgp_recoarsen_HEC(matrix_type& interp,
                     choose = true;
                     same_part_found = true;
                 }
-                else {
-                    if (max_ewt < wgt) {
-                        choose = true;
-                    }
-                    else if (max_ewt == wgt && order_max <= order) {
-                        choose = true;
-                    }
-                }
+               // else {
+               //     if (max_ewt < wgt) {
+               //         choose = true;
+               //     }
+               //     else if (max_ewt == wgt && order_max <= order) {
+               //         choose = true;
+               //     }
+               // }
             }
 
             if (choose) {
@@ -363,6 +363,28 @@ SGPAR_API int sgp_recoarsen_HEC(matrix_type& interp,
                 hn_i = v;
             }
         }
+		if(hn_i == SGP_INFTY){
+        	sgp_vid_t rand = reverse_map(i);
+			for(sgp_vid_t j = rand + 1; j < n; j++){
+				sgp_vid_t v = vperm(j);
+				if(part(i) == part(v)){
+					hn_i = v;
+					break;
+				}
+			}
+			if(hn_i == SGP_INFTY){
+				for(sgp_vid_t j = 0; j < rand; j++){
+					sgp_vid_t v = vperm(j);
+					if(part(i) == part(v)){
+						hn_i = v;
+						break;
+					}
+				}
+			}
+		}
+		if(hn_i == SGP_INFTY){
+			hn_i = i;
+		}
         hn(i) = hn_i;
     });
 
@@ -1567,11 +1589,9 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixSort, radix.seconds());
     radix.reset();
 
-    edge_view_t wgt_by_source2("wgts replacement", size_sbo);
     functorDedupeAfterSort<Kokkos::DefaultExecutionSpace>
-        deduper(source_bucket_offset, dest_by_source, wgt_by_source, wgt_by_source2, edges_per_source);
+        deduper(source_bucket_offset, dest_by_source, wgt_by_source, wgt_by_source, edges_per_source);
     Kokkos::parallel_reduce("deduplicated sorted", nc, deduper, gc_nedges);
-    wgt_by_source = wgt_by_source2;
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixDedupe, radix.seconds());
     radix.reset();
 #else
@@ -1733,7 +1753,7 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
     }
 
     //don't use the coarsest level if it has too few vertices
-    if (coarse_graphs.rbegin()->numRows() < 30) {
+    if (coarse_graphs.rbegin()->numRows() < 10) {
         coarse_graphs.pop_back();
         interp_mtxs.pop_back();
         vtx_weights_list.pop_back();
