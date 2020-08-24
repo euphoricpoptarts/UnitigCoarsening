@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <Kokkos_Core.hpp>
 #include <Kokkos_Atomic.hpp>
 #include <Kokkos_UnorderedMap.hpp>
@@ -67,7 +68,7 @@ namespace sgpar {
     typedef uint64_t sgp_eid_t;
 #else
     typedef uint32_t sgp_vid_t;
-#define SGP_INFTY UINT32_MAX
+	const sgp_vid_t SGP_INFTY = std::numeric_limits<sgp_vid_t>::max();
     typedef uint32_t sgp_eid_t;
 #endif
     typedef double sgp_real_t;
