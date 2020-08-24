@@ -4,6 +4,9 @@
 #include <fstream>
 #include <string>
 #include <cassert>
+#include <sstream>
+#include <iostream>
+#include <string>
 
 using namespace std;
 
@@ -15,13 +18,17 @@ int main(int argc, char *argv[]) {
     }
 
     char* inFileName = argv[1];
-    FILE* inFilePtr = fopen(inFileName, "r");
-    if (inFilePtr == NULL) {
+	ifstream inFile(inFileName);
+    if (!inFile.is_open()) {
         cout << "Error: could not open input file " << argv[1] << "! Exiting" << endl;
         exit(1);
     }
+	std::stringstream buffer;
+	buffer << inFile.rdbuf();
+	inFile.close();
 
-    char line[2048];
+	string lineS;
+    const char * line;
     long lineCount = 0;
 
     long N = 0;
@@ -39,7 +46,8 @@ int main(int argc, char *argv[]) {
     vector< vector<unsigned int> > AdjVector;
 
     // Read the file
-    while (fgets(line, sizeof(line), inFilePtr) != NULL) {
+    while (getline(buffer, lineS)) {
+		line = lineS.c_str();
         if (line[0] == '%') {
             // header
             if (line[1] == '%') {
@@ -119,7 +127,6 @@ int main(int argc, char *argv[]) {
             }
         }
     }
-    fclose(inFilePtr);
     cout << lineCount-1 << " lines read from file. Non-zero count is given to be " << M << "." << endl;
 
     // Sort the adjacencies of each vertex
