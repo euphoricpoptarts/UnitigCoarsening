@@ -29,6 +29,90 @@
 namespace sgpar {
 namespace sgpar_kokkos {
 
+Kokkos::View<int*> mis_2(const matrix_type& g) {
+
+    sgp_vid_t n = g.numRows();
+
+    Kokkos::View<int*> state("is membership", n);
+
+    sgp_vid_t unassigned_total = n;
+    Kokkos::View<uint64_t*> randoms("randomized", n);
+    pool_t rand_pool(std::time(nullptr));
+    Kokkos::parallel_for("create random entries", n, KOKKOS_LAMBDA(sgp_vid_t i){
+        gen_t generator = rand_pool.get_state();
+        randoms(i) = generator.urand64();
+        rand_pool.free_state(generator);
+    });
+
+    /*vtx_view_t unassigned("unassigned vtx", n);
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(const sgp_vid_t i){
+        unassigned(i) = i;
+    });*/
+
+    while (unassigned_total > 0) {
+
+        Kokkos::View<int*> tuple_state("tuple state", n);
+        Kokkos::View<uint64_t*> tuple_rand("tuple rand", n);
+        vtx_view_t tuple_idx("tuple index", n);
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(const sgp_vid_t i){
+            tuple_state(i) = state(i);
+            tuple_rand(i) = randoms(i);
+            tuple_idx(i) = i;
+        });
+
+        for (int k = 0; k < 2; k++) {
+
+            Kokkos::parallel_for(n, KOKKOS_LAMBDA(const sgp_vid_t i){
+                sgp_vid_t max_state = tuple_state(i);
+                uint64_t max_rand = tuple_rand(i);
+                sgp_vid_t max_idx = tuple_idx(i);
+
+                for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+                    sgp_vid_t v = g.graph.entries(j);
+                    bool is_max = false;
+                    if (tuple_state(v) > max_state) {
+                        is_max = true;
+                    }
+                    else if (tuple_state(v) == max_state) {
+                        if (tuple_rand(v) > max_rand) {
+                            is_max = true;
+                        }
+                        else if (tuple_rand(v) == max_rand) {
+                            if (tuple_idx(v) > max_idx) {
+                                is_max = true;
+                            }
+                        }
+                    }
+                    if (is_max) {
+                        max_state = tuple_state(v);
+                        max_rand = tuple_rand(v);
+                        max_idx = tuple_idx(v);
+                    }
+                }
+                tuple_state(i) = max_state;
+                tuple_rand(i) = max_rand;
+                tuple_idx(i) = max_idx;
+            });
+        }
+
+        unassigned_total = 0;
+        Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& thread_sum){
+            if (state(i) == 0) {
+                if (tuple_state == state(i) && tuple_rand(i) == rand(i) && tuple_idx(i) == i) {
+                    state(i) = 1;
+                }
+                else if(tuple_state == 1) {
+                    state(i) = -1;
+                }
+            }
+            if (state(i) == 0) {
+                thread_sum++;
+            }
+        }, unassigned_total);
+    }
+    return state;
+}
+
 SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
     sgp_vid_t* nvertices_coarse_ptr,
     const matrix_type& g,
@@ -37,7 +121,7 @@ SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
     ExperimentLoggerUtil& experiment) {
 
     sgp_vid_t n = g.numRows();
-    typedef KokkosKernels::Experimental::KokkosKernelsHandle
+    /*typedef KokkosKernels::Experimental::KokkosKernelsHandle
         <sgp_eid_t, sgp_vid_t, sgp_wgt_t,
         typename Device::execution_space, typename Device::memory_space, typename Device::memory_space > KernelHandle;
 
@@ -48,12 +132,14 @@ SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
     kh.create_distance2_graph_coloring_handle();
     KokkosGraph::Experimental::graph_color_distance2(&kh, n, g.graph.row_map, g.graph.entries);
     Kokkos::View<sgp_vid_t*> colors = kh.get_distance2_graph_coloring_handle()->get_vertex_colors();
-    kh.destroy_distance2_graph_coloring_handle();
+    kh.destroy_distance2_graph_coloring_handle();*/
+
+    Kokkos::View<int*> colors = mis_2(g);
 
     Kokkos::View<sgp_vid_t> nvc("nvertices_coarse");
     Kokkos::View<sgp_vid_t*> vcmap("vcmap", n);
     
-    sgp_vid_t first_color = 1;
+    int first_color = 1;
 
     //create aggregates for color 1
     Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
@@ -91,11 +177,11 @@ SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
     });
 
     //create singleton aggregates of remaining unaggregated vertices
-    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
-        if (vcmap(i) == SGP_INFTY) {
-            vcmap(i) = Kokkos::atomic_fetch_add(&nvc(), 1);
-        }
-    });
+    //Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+    //    if (vcmap(i) == SGP_INFTY) {
+    //        vcmap(i) = Kokkos::atomic_fetch_add(&nvc(), 1);
+    //    }
+    //});
 
     sgp_vid_t nc = 0;
     Kokkos::deep_copy(nc, nvc);
