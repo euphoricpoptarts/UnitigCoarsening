@@ -98,7 +98,7 @@ Kokkos::View<int*> mis_2(const matrix_type& g) {
         unassigned_total = 0;
         Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& thread_sum){
             if (state(i) == 0) {
-                if (tuple_state(i) == state(i) && tuple_rand(i) == rand(i) && tuple_idx(i) == i) {
+                if (tuple_state(i) == state(i) && tuple_rand(i) == randoms(i) && tuple_idx(i) == i) {
                     state(i) = 1;
                 }
                 else if(tuple_state(i) == 1) {
