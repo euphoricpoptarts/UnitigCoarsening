@@ -54,6 +54,10 @@ Kokkos::View<int*> mis_2(const matrix_type& g) {
         Kokkos::View<int*> tuple_state("tuple state", n);
         Kokkos::View<uint64_t*> tuple_rand("tuple rand", n);
         vtx_view_t tuple_idx("tuple index", n);
+
+        Kokkos::View<int*> tuple_state_update("tuple state", n);
+        Kokkos::View<uint64_t*> tuple_rand_update("tuple rand", n);
+        vtx_view_t tuple_idx_update("tuple index", n);
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(const sgp_vid_t i){
             tuple_state(i) = state(i);
             tuple_rand(i) = randoms(i);
@@ -89,9 +93,15 @@ Kokkos::View<int*> mis_2(const matrix_type& g) {
                         max_idx = tuple_idx(v);
                     }
                 }
-                tuple_state(i) = max_state;
-                tuple_rand(i) = max_rand;
-                tuple_idx(i) = max_idx;
+                tuple_state_update(i) = max_state;
+                tuple_rand_update(i) = max_rand;
+                tuple_idx_update(i) = max_idx;
+            });
+
+            Kokkos::parallel_for(n, KOKKOS_LAMBDA(const sgp_vid_t i){
+                tuple_state(i) = tuple_state_update(i);
+                tuple_rand(i) = tuple_rand_update(i);
+                tuple_idx(i) = tuple_idx_update(i);
             });
         }
 
