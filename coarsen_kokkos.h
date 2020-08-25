@@ -67,7 +67,7 @@ Kokkos::View<int*> mis_2(const matrix_type& g) {
         for (int k = 0; k < 2; k++) {
 
             Kokkos::parallel_for(n, KOKKOS_LAMBDA(const sgp_vid_t i){
-                sgp_vid_t max_state = tuple_state(i);
+                int max_state = tuple_state(i);
                 uint64_t max_rand = tuple_rand(i);
                 sgp_vid_t max_idx = tuple_idx(i);
 
