@@ -10,13 +10,18 @@ from pathlib import Path
 from threading import Thread, BoundedSemaphore
 from itertools import zip_longest
 
-parCall = "./sgpar_exp"
+cudaCall = "./sgpar.cuda"
+hecCall = "./sgpar.spec_hec"
+mtCall = "./sgpar.spec_mt"
+mpCall = "./sgpar.mp"
+matchCall = "./sgpar.spec_match"
+misCall = "./sgpar.spec_mis"
 serialCall = "./sgpar_serial"
 bigParCall = "./sgpar_hg_exp"
 bigSerialCall = "./sgpar_hg_serial"
 
-rateLimit = BoundedSemaphore(value = 4)
-waitLimit = 300
+rateLimit = BoundedSemaphore(value = 1)
+waitLimit = 3600
 
 def printStat(fieldTitle, statList, outfile):
     min_s = min(statList)
@@ -83,6 +88,8 @@ def analyzeMetrics(metricsPath, logFile):
 
 def runExperiment(executable, filepath, metricDir, logFile, t_count):
 
+    if(os.path.exists(logFile)):
+        return
     myenv = os.environ.copy()
     myenv['OMP_NUM_THREADS'] = str(t_count)
 
@@ -108,8 +115,14 @@ def runExperiment(executable, filepath, metricDir, logFile, t_count):
 
 def processGraph(filepath, metricDir, logFileTemplate):
     
-    logFile = logFileTemplate.format("parHEC")
-    runExperiment(parCall, filepath, metricDir, logFile, 8)
+    logFile = logFileTemplate.format("spec_hec")
+    runExperiment(hecCall, filepath, metricDir, logFile, 64)
+    logFile = logFileTemplate.format("spec_mt")
+    runExperiment(mtCall, filepath, metricDir, logFile, 64)
+    logFile = logFileTemplate.format("spec_match")
+    runExperiment(matchCall, filepath, metricDir, logFile, 64)
+    logFile = logFileTemplate.format("spec_mis")
+    runExperiment(misCall, filepath, metricDir, logFile, 64)
 
     #logFile = logFileTemplate.format("serialHEC")
     #runExperiment(serialCall, filepath, metricDir, logFile, t_count)
