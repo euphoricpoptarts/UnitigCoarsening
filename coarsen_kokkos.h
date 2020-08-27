@@ -271,19 +271,16 @@ sgp_vid_t parallel_map_construct(vtx_view_t vcmap, const sgp_vid_t n, const vtx_
             if (condition ^ swap) {
                 if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
                     if (u == v || Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
-                        //write access to vcmap(u) and vcmap(v) is now solely owned by this thread
-                        //HOWEVER, read access to both is NOT protected
                         sgp_vid_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
-                        Kokkos::atomic_store(&vcmap(u), cv);
-                        Kokkos::atomic_store(&vcmap(v), cv);
+                        vcmap(u) = cv;
+                        vcmap(v) = cv;
                     }
                     else {
-                        sgp_vid_t coarse_vtx = Kokkos::atomic_load(&vcmap(v));
-                        if (coarse_vtx != SGP_INFTY) {
-                            Kokkos::atomic_store(&vcmap(u), coarse_vtx);
+                        if (vcmap(v) != SGP_INFTY) {
+                            vcmap(u) = vcmap(v);
                         }
                         else {
-                            Kokkos::atomic_store(&match(u), SGP_INFTY);
+                            match(u) = SGP_INFTY;
                         }
                     }
                 }
@@ -669,11 +666,11 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
                 if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
                     if (Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
                         sgp_vid_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
-                        Kokkos::atomic_store(&vcmap(u), cv);
-                        Kokkos::atomic_store(&vcmap(v), cv);
+                        vcmap(u) = cv;
+                        vcmap(v) = cv;
                     }
                     else {
-                        Kokkos::atomic_store(&match(u), SGP_INFTY);
+                        match(u) = SGP_INFTY;
                     }
                 }
             }
@@ -883,11 +880,11 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
                         if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
                             if (Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
                                 sgp_vid_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
-                                Kokkos::atomic_store(&vcmap(u), cv);
-                                Kokkos::atomic_store(&vcmap(v), cv);
+                                vcmap(u) = cv;
+                                vcmap(v) = cv;
                             }
                             else {
-                                Kokkos::atomic_store(&match(u), SGP_INFTY);
+                                match(u) = SGP_INFTY;
                             }
                         }
                     }
