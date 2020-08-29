@@ -276,7 +276,7 @@ sgp_vid_t parallel_map_construct(vtx_view_t vcmap, const sgp_vid_t n, const vtx_
                         vcmap(v) = cv;
                     }
                     else {
-                        if (vcmap(v) != SGP_INFTY) {
+                        if (vcmap(v) < n) {
                             vcmap(u) = vcmap(v);
                         }
                         else {
@@ -291,9 +291,12 @@ sgp_vid_t parallel_map_construct(vtx_view_t vcmap, const sgp_vid_t n, const vtx_
         //maybe count these then create next_perm to save memory?
         Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
             sgp_vid_t u = curr_perm(i);
-            if (vcmap(u) == SGP_INFTY) {
+            if (vcmap(u) >= n) {
                 sgp_vid_t add_next = Kokkos::atomic_fetch_add(&next_length(), 1);
                 next_perm(add_next) = u;
+				//been noticing some memory erros on my machine, probably from memory overclock
+				//this fixes the problem, and is lightweight
+				match(u) = SGP_INFTY;
             }
         });
         Kokkos::fence();
@@ -362,6 +365,7 @@ SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
             hn(i) = hn_i;
         });
     }
+	experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Heavy, timer.seconds());
     timer.reset();
     sgp_vid_t nc = parallel_map_construct(vcmap, n, vperm, hn, reverse_map);
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct, timer.seconds());
@@ -719,6 +723,7 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
                     sgp_vid_t add_next = Kokkos::atomic_fetch_add(&next_length(), 1);
                     next_perm(add_next) = u;
                     hn(u) = h;
+					match(u) = SGP_INFTY;
                 }
             }
         });
@@ -822,6 +827,7 @@ SGPAR_API int sgp_coarsen_match(matrix_type& interp,
             Kokkos::parallel_for("reset hn", mappable_count, KOKKOS_LAMBDA(sgp_vid_t i){
                 sgp_vid_t u = mappableVtx(i);
                 hn(u) = SGP_INFTY;
+				match(u) = SGP_INFTY;
             });
 
             //choose relatives for unmapped vertices
@@ -1903,6 +1909,7 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
 
         vtx_weights_list.push_back(coarse_vtx_weights);
 
+		if(coarse_graphs.size() > 200) break;
 #ifdef DEBUG
         sgp_real_t coarsen_ratio = (sgp_real_t) coarse_graphs.rbegin()->numRows() / (sgp_real_t) (++coarse_graphs.rbegin())->numRows();
         printf("Coarsening ratio: %.8f\n", coarsen_ratio);
