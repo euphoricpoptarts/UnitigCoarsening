@@ -1421,6 +1421,7 @@ struct functorHashmapAccumulator
 {
     typedef ExecutionSpace execution_space;
 
+	vtx_view_t remaining;
     edge_view_t row_map;
     vtx_view_t entries;
     wgt_view_t wgts;
@@ -1438,7 +1439,8 @@ struct functorHashmapAccumulator
         edge_view_t dedupe_edge_count,
         uniform_memory_pool_t memory_pool,
         const sgp_vid_t hash_size,
-        const sgp_vid_t max_hash_entries)
+        const sgp_vid_t max_hash_entries,
+		vtx_view_t remaining)
         : row_map(row_map)
         , entries(entries)
         , wgts(wgts)
@@ -1446,15 +1448,23 @@ struct functorHashmapAccumulator
         , _memory_pool(memory_pool)
         , _hash_size(hash_size)
         , _max_hash_entries(max_hash_entries)
+		, remaining(remaining)
         , tokens(ExecutionSpace()){}
 
+	//reduces to find total number of rows that were too large
     KOKKOS_INLINE_FUNCTION
-        void operator()(const sgp_vid_t idx) const
+        void operator()(const sgp_vid_t idx_unrem, sgp_vid_t& thread_sum) const
     {
+		sgp_vid_t idx = remaining(idx_unrem);
         typedef sgp_vid_t hash_size_type;
         typedef sgp_vid_t hash_key_type;
         typedef sgp_wgt_t hash_value_type;
 
+		//can't do this row at current hashmap size
+		if(row_map(idx + 1) - row_map(idx) >= _max_hash_entries){
+			thread_sum++;
+		   	return;
+		}
         // Alternative to team_policy thread id
         auto tid = tokens.acquire();
 
@@ -1608,14 +1618,6 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         }
     });
 
-    //figure out max size for hashmap
-    sgp_vid_t max_entries = 0;
-    Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const sgp_vid_t u, sgp_vid_t& thread_max){
-        sgp_vid_t degree = edges_per_source(u);
-        if (thread_max < degree) {
-            thread_max = degree;
-        }
-    }, Kokkos::Max<sgp_vid_t, Kokkos::HostSpace>(max_entries));
 
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
         edges_per_source(i) = 0; // will use as counter again
@@ -1652,10 +1654,40 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     timer.reset();
 
 #ifdef HASHMAP
+    
+	sgp_vid_t remaining_count = nc;
+	vtx_view_t remaining("remaining vtx", nc);
+	Kokkos::parallel_for(nc, KOKKOS_LAMBDA(const sgp_vid_t i){
+		remaining(i) = i;
+	});
+	do{
+	//figure out max size for hashmap
+    sgp_vid_t avg_entries = 0;
+    if(static_cast<double>(remaining_count) / static_cast<double>(nc) > 0.01){
+	Kokkos::parallel_reduce("calc average", remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& thread_sum){
+		sgp_vid_t u = remaining(i);
+        sgp_vid_t degree = edges_per_source(u);
+    	thread_sum += degree;
+	}, avg_entries);
+	//degrees are often skewed so we want to err on the side of bigger hashmaps
+	avg_entries = avg_entries * 2 / remaining_count;
+	if(avg_entries < 50) avg_entries = 50;
+	} else {
+	Kokkos::parallel_reduce("calc average", remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& thread_max){
+		sgp_vid_t u = remaining(i);
+        sgp_vid_t degree = edges_per_source(u);
+		if(degree > thread_max){
+    		thread_max = degree;
+		}
+	}, Kokkos::Max<sgp_vid_t, Kokkos::HostSpace>(avg_entries));
+	avg_entries++;
+	}
+
     typedef typename KokkosKernels::Impl::UniformMemoryPool<Kokkos::DefaultExecutionSpace, sgp_vid_t> uniform_memory_pool_t;
     // Set the hash_size as the next power of 2 bigger than hash_size_hint.
     // - hash_size must be a power of two since we use & rather than % (which is slower) for
     // computing the hash value for HashmapAccumulator.
+	sgp_vid_t max_entries = avg_entries;
     sgp_vid_t hash_size = 1;
     while (hash_size < max_entries) { hash_size *= 2; }
 
@@ -1671,12 +1703,41 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     // our number of chunks at 32.
     sgp_vid_t mem_chunk_count = Kokkos::DefaultExecutionSpace::concurrency();
 
+	//walk back number of mem_chunks if necessary
+	size_t mem_needed = static_cast<size_t>(mem_chunk_count) * static_cast<size_t>(mem_chunk_size) * sizeof(sgp_vid_t);
+	size_t max_mem_allowed = 536870912;//1073741824;
+	if(mem_needed > max_mem_allowed){
+		size_t chunk_dif = mem_needed - max_mem_allowed;
+		chunk_dif = chunk_dif / (static_cast<size_t>(mem_chunk_size) * sizeof(sgp_vid_t));
+		chunk_dif++;
+		mem_chunk_count -= chunk_dif;
+	}
+
     uniform_memory_pool_t memory_pool(mem_chunk_count, mem_chunk_size, -1, pool_type);
 
     functorHashmapAccumulator<Kokkos::DefaultExecutionSpace, uniform_memory_pool_t>
-        hashmapAccumulator(source_bucket_offset, dest_by_source, wgt_by_source, edges_per_source, memory_pool, hash_size, max_entries);
+        hashmapAccumulator(source_bucket_offset, dest_by_source, wgt_by_source, edges_per_source, memory_pool, hash_size, max_entries, remaining);
 
-    Kokkos::parallel_for("hashmap time", nc, hashmapAccumulator);
+	sgp_vid_t old_remaining_count = remaining_count;
+    Kokkos::parallel_reduce("hashmap time", old_remaining_count, hashmapAccumulator, remaining_count);
+
+	if(remaining_count > 0){
+		vtx_view_t new_remaining("new remaining vtx", remaining_count);
+
+		Kokkos::parallel_scan("move remaining vertices", old_remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& update, const bool final){
+			sgp_vid_t u = remaining(i);
+			if(edges_per_source(u) >= max_entries){
+				if(final){
+					new_remaining(update) = u;
+				}
+				update++;
+			}
+		});
+
+		remaining = new_remaining;
+	}
+	printf("remaining count: %u\n", remaining_count);
+	} while(remaining_count > 0);
 #elif defined(RADIX)
     Kokkos::Timer radix;
     KokkosSparse::Experimental::SortEntriesFunctor<Kokkos::DefaultExecutionSpace, sgp_eid_t, sgp_vid_t, edge_view_t, vtx_view_t>
