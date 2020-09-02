@@ -252,7 +252,7 @@ namespace sgpar_kokkos {
                             vcmap(v) = cv;
                         }
                         else {
-                            if (vcmap(v) != SGP_INFTY) {
+                            if (vcmap(v) < n) {
                                 vcmap(u) = vcmap(v);
                             }
                             else {
@@ -267,9 +267,12 @@ namespace sgpar_kokkos {
             //maybe count these then create next_perm to save memory?
             Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
                 sgp_vid_t u = curr_perm(i);
-                if (vcmap(u) == SGP_INFTY) {
+                if (vcmap(u) >= n) {
                     sgp_vid_t add_next = Kokkos::atomic_fetch_add(&next_length(), 1);
                     next_perm(add_next) = u;
+                    //been noticing some memory erros on my machine, probably from memory overclock
+                    //this fixes the problem, and is lightweight
+                    match(u) = SGP_INFTY;
                 }
             });
             Kokkos::fence();
@@ -338,6 +341,7 @@ namespace sgpar_kokkos {
                 hn(i) = hn_i;
             });
         }
+        experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Heavy, timer.seconds());
         timer.reset();
         sgp_vid_t nc = parallel_map_construct(vcmap, n, vperm, hn, reverse_map);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct, timer.seconds());

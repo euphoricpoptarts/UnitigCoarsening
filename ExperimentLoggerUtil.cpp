@@ -22,6 +22,7 @@ public:
 		MapConstruct,
 		FMRefine,
 		FMRecoarsen,
+		Heavy,
 		END
 	};
 	std::vector<std::string> measurementNames{
@@ -36,7 +37,8 @@ public:
 		"coarsen-permute",
 		"coarsen-map-construct",
 		"fm-refine",
-		"fm-recoarsen"
+		"fm-recoarsen",
+		"heavy"
 	};
 	std::vector<double> measurements;
 

@@ -9,17 +9,10 @@ import json
 from pathlib import Path
 from itertools import zip_longest
 
-stemParse = r"(.+)_(HEC|MIS|mt|match)_Sampling_Data"
+stemParse = r"(.+)_fm_(.+)_(.+)_Sampling_Data"
 lineParse = "{}mean={}, median={}, min={}, max={}, std-dev={}"
-fieldHeaders = "Graph, HEC, MIS, Match, MT"
-
-fieldHeaders2 = "\
-graph experiment, mean time, median time, min time, max time, time std-dev, \
-mean coarsen time, median coarsen time, min coarsen time, max coarsen time, coarsen time std-dev, \
-mean coarsen sort time, median coarsen sort time, min coarsen sort time, max coarsen sort time, coarsen sort time std-dev, \
-mean coarsen other time, median coarsen other time, min coarsen other time, max coarsen other time, coarsen other time std-dev, \
-mean refine time, median refine time, min refine time, max refine time, refine time std-dev, \
-mean edge cut, median edge cut, min edge cut, max edge cut, edge cut std-dev"
+#fieldHeaders = "Graph, HEC, MIS, Match, MT"
+fieldHeaders = "Graph, method, 1, 2, 4, 8, 16, 32"
 
 def textStatsToCSV(stem, filepath, relevantLines):
     graphStats = []
@@ -32,15 +25,19 @@ def textStatsToCSV(stem, filepath, relevantLines):
     if len(parsedLines) < 11:
         return stem
 
+    desiredStats = [2,5]
     for line in relevantLines:
         parsed = parsedLines[line]
+
+        chosenStats = []
         if parsed is not None:
             parsed = list(parsed)
-            for stat in [2]:
-                graphStats.append(parsed[stat])
+            for stat in desiredStats:
+                chosenStats.append(parsed[stat])
         else:
-            for stat in [2]:
-                graphStats.append("nan")
+            for stat in desiredStats:
+                chosenStats.append("nan")
+        graphStats.append(chosenStats)
     return graphStats
 
 def main():
@@ -56,25 +53,28 @@ def main():
         stem = Path(filepath).stem
         stemMatch = re.match(stemParse, stem)
         if stemMatch is not None:
-            graph = stemMatch.groups()[0]
-            experiment = stemMatch.groups()[1]
+            graph = (stemMatch.groups()[0],stemMatch.groups()[1])
+            experiment = stemMatch.groups()[2]
             if graph not in data:
                 data[graph] = {}
-            if experiment in ["HEC", "MIS"]:
-                data[graph][experiment] = textStatsToCSV(stem, filepath, [0,1,2,3,8,9])
-            else:
-                data[graph][experiment] = textStatsToCSV(stem, filepath, [0,1,2,3,12,13])
+            #if experiment in ["HEC", "MIS"]:
+            #    data[graph][experiment] = textStatsToCSV(stem, filepath, [0,1,2,3,8,9])
+            #else:
+            #0 is total, 1 is all coarsen, 2 is coarsen map, 3 is coarsen build, 12 is refine time, 13 is cutsize
+            data[graph][experiment] = textStatsToCSV(stem, filepath, [0,1,2,3,12,13,15])
 
-    experiments = ["HEC", "MIS", "match", "mt"]
+    experiments = ["1","2","4","8","16","32"]#["hec","mis","match","mt"]
     with open(outFile,"w") as f:
         print(fieldHeaders, file=f)
         for graph, values in data.items():
-            l = [graph]
+            l = [graph[0], graph[1]]
             for experiment in experiments:
                 if experiment in values:
-                    l.append(values[experiment][5])
+                    l.append("{}".format(values[experiment][1][0]))
                 else:
                     l.append("DNF")
+            #for experimentName, experiment in values.items():
+            #    print(",".join([graph, experimentName[0], experimentName[1], experiment[2][0]]), file=f)
             print(",".join(l), file=f)
 
 

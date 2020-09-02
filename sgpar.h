@@ -2403,6 +2403,9 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
 
     printf("Coarsening permutation time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Permute));
     printf("Coarsening map construction time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct));
+    printf("Coarsening map total time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Map));
+    printf("Coarsening heavy find total time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Heavy));
+    printf("FM coarsen time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::FMRecoarsen));
     printf("Total: %3.3lf s, coarsening %3.3lf %3.0lf%% "
         "(sort %3.3lf %3.0lf%%), "
         "refine %3.3lf s (%3.3lf s, %3.0lf%% + %3.3lf, %3.0lf%%)\n",
