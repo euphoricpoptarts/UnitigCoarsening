@@ -728,11 +728,12 @@ namespace sgpar_kokkos {
             Kokkos::parallel_for("create digests", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
                 sgp_vid_t u = thread.league_rank();
                 if (vcmap(u) == SGP_INFTY) {
-                    uint32_t hash = hasher(part(u));
+                    uint32_t hash = 0;
                     Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g.graph.row_map(u), g.graph.row_map(u + 1)), [=](const sgp_eid_t j, uint32_t& thread_sum) {
                         thread_sum += hasher(g.graph.entries(j));
                         }, hash);
                     Kokkos::single(Kokkos::PerTeam(thread), [=]() {
+                        hash += hasher(part(u));
                         sgp_vid_t idx = Kokkos::atomic_fetch_add(&unmappedIdx(), 1);
                         unmappedVtx(idx) = u;
                         hashes(idx) = hash;
