@@ -16,14 +16,13 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
     char *filename = argv[1];
-    char *metrics = argv[2];
 
     config_t config;
     CHECK_SGPAR(sgp_load_config(argv[3], &config));
 
     sgp_graph_t g;
     CHECK_SGPAR( sgp_load_graph(&g, filename) );
-    printf("n: %ld, m: %ld\n", g.nvertices, g.nedges);
+    printf("n: %ld, m: %ld\n", ((long) g.nvertices), ((long) g.nedges));
     printf("coarsening_alg: %d, refine_alg: %d, local_alg %d, num_iter %d\n", 
                     config.coarsening_alg, config.refine_alg, config.local_search_alg, config.num_iter);
 
@@ -40,7 +39,7 @@ int main(int argc, char **argv) {
         compare_part = 1;
     }
 
-    long edgecut_min = 1<<30;
+    sgp_eid_t edgecut_min = 1<<30;
     sgp_pcg32_random_t rng;
     rng.state = time(NULL);
     rng.inc   = 1;
@@ -115,11 +114,13 @@ int main(int argc, char **argv) {
         if (i + 1 < config.num_iter) {
             last = false;
         }
+
+        char *metrics = argv[2];
         experiment.log(metrics, first, last);
 #endif
     }
     printf("graph %s, min edgecut found is %ld\n", 
-                    filename, edgecut_min);
+                    filename, ((long) edgecut_min));
 
     /*
     FILE *outfp = fopen("parts.txt", "w");
