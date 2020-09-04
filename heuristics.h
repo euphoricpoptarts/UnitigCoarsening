@@ -565,7 +565,6 @@ namespace sgpar_kokkos {
     SGPAR_API int sgp_recoarsen_match(matrix_type& interp,
         sgp_vid_t* nvertices_coarse_ptr,
         const matrix_type& g,
-        const int coarsening_level,
         const eigenview_t part,
         ExperimentLoggerUtil& experiment) {
 
@@ -718,7 +717,7 @@ namespace sgpar_kokkos {
         unmappedRatio = static_cast<double>(unmapped) / static_cast<double>(n);
 
         //twin matches
-        if (unmappedRatio > 0.25) {
+        if (false && unmappedRatio > 0.25) {
             vtx_view_t unmappedVtx("unmapped vertices", unmapped);
             Kokkos::View<uint32_t*> hashes("hashes", unmapped);
 
