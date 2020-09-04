@@ -764,15 +764,15 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
 	do{
 	//figure out max size for hashmap
     sgp_vid_t avg_entries = 0;
-    if(static_cast<double>(remaining_count) / static_cast<double>(nc) > 0.01){
-	Kokkos::parallel_reduce("calc average", remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& thread_sum){
-		sgp_vid_t u = remaining(i);
-        sgp_vid_t degree = edges_per_source(u);
-    	thread_sum += degree;
-	}, avg_entries);
-	//degrees are often skewed so we want to err on the side of bigger hashmaps
-	avg_entries = avg_entries * 2 / remaining_count;
-	if(avg_entries < 50) avg_entries = 50;
+    if(typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space) && static_cast<double>(remaining_count) / static_cast<double>(nc) > 0.01){
+		Kokkos::parallel_reduce("calc average", remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& thread_sum){
+			sgp_vid_t u = remaining(i);
+        	sgp_vid_t degree = edges_per_source(u);
+    		thread_sum += degree;
+		}, avg_entries);
+		//degrees are often skewed so we want to err on the side of bigger hashmaps
+		avg_entries = avg_entries * 2 / remaining_count;
+		if(avg_entries < 50) avg_entries = 50;
 	} else {
 	Kokkos::parallel_reduce("calc average", remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& thread_max){
 		sgp_vid_t u = remaining(i);
@@ -795,6 +795,10 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     // Create Uniform Initialized Memory Pool
     KokkosKernels::Impl::PoolType pool_type = KokkosKernels::Impl::ManyThread2OneChunk;
 
+	if(typeid(Kokkos::DefaultExecutionSpace::memory_space) == typeid(Kokkos::DefaultHostExecutionSpace::memory_space)){
+	//	pool_type = KokkosKernels::Impl::OneThread2OneChunk;
+	}
+
     // Determine memory chunk size for UniformMemoryPool
     sgp_vid_t mem_chunk_size = hash_size;      // for hash indices
     mem_chunk_size += hash_size;            // for hash begins
@@ -804,14 +808,16 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     // our number of chunks at 32.
     sgp_vid_t mem_chunk_count = Kokkos::DefaultExecutionSpace::concurrency();
 
-	//walk back number of mem_chunks if necessary
-	size_t mem_needed = static_cast<size_t>(mem_chunk_count) * static_cast<size_t>(mem_chunk_size) * sizeof(sgp_vid_t);
-	size_t max_mem_allowed = 536870912;//1073741824;
-	if(mem_needed > max_mem_allowed){
-		size_t chunk_dif = mem_needed - max_mem_allowed;
-		chunk_dif = chunk_dif / (static_cast<size_t>(mem_chunk_size) * sizeof(sgp_vid_t));
-		chunk_dif++;
-		mem_chunk_count -= chunk_dif;
+	if(typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)){
+		//walk back number of mem_chunks if necessary
+		size_t mem_needed = static_cast<size_t>(mem_chunk_count) * static_cast<size_t>(mem_chunk_size) * sizeof(sgp_vid_t);
+		size_t max_mem_allowed = 536870912;//1073741824;
+		if(mem_needed > max_mem_allowed){
+			size_t chunk_dif = mem_needed - max_mem_allowed;
+			chunk_dif = chunk_dif / (static_cast<size_t>(mem_chunk_size) * sizeof(sgp_vid_t));
+			chunk_dif++;
+			mem_chunk_count -= chunk_dif;
+		}
 	}
 
     uniform_memory_pool_t memory_pool(mem_chunk_count, mem_chunk_size, -1, pool_type);
@@ -837,7 +843,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
 
 		remaining = new_remaining;
 	}
-	printf("remaining count: %u\n", remaining_count);
+	//printf("remaining count: %u\n", remaining_count);
 	} while(remaining_count > 0);
 #elif defined(RADIX)
     Kokkos::Timer radix;
