@@ -319,13 +319,19 @@ namespace sgpar_kokkos {
             Kokkos::parallel_for("Random HN", n, KOKKOS_LAMBDA(sgp_vid_t i) {
                 gen_t generator = rand_pool.get_state();
                 sgp_vid_t adj_size = g.graph.row_map(i + 1) - g.graph.row_map(i);
+				if(adj_size > 0){
                 sgp_vid_t offset = g.graph.row_map(i) + (generator.urand64() % adj_size);
                 hn(i) = g.graph.entries(offset);
+				} else {
+					hn(i) = generator.urand64() % n;
+				}
                 rand_pool.free_state(generator);
             });
         }
         else {
             Kokkos::parallel_for("Heaviest HN", n, KOKKOS_LAMBDA(sgp_vid_t i) {
+                sgp_vid_t adj_size = g.graph.row_map(i + 1) - g.graph.row_map(i);
+				if(adj_size > 0){
                 sgp_vid_t hn_i = g.graph.entries(g.graph.row_map(i));
                 sgp_wgt_t max_ewt = g.values(g.graph.row_map(i));
 
@@ -339,6 +345,11 @@ namespace sgpar_kokkos {
 
                 }
                 hn(i) = hn_i;
+				} else {
+                	gen_t generator = rand_pool.get_state();
+					hn(i) = generator.urand64() % n;
+                	rand_pool.free_state(generator);
+				}
             });
         }
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Heavy, timer.seconds());
@@ -648,6 +659,7 @@ namespace sgpar_kokkos {
                         sgp_vid_t add_next = Kokkos::atomic_fetch_add(&next_length(), 1);
                         next_perm(add_next) = u;
                         hn(u) = h;
+						match(u) = SGP_INFTY;
                     }
                 }
             });
@@ -801,6 +813,37 @@ namespace sgpar_kokkos {
                         }
                     }
                 });
+                
+				//create a list of all zero adjancency vertices
+                sgp_vid_t noadj = 0;
+                Kokkos::parallel_reduce("count noadj", mappable_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & thread_sum){
+                    sgp_vid_t u = mappableVtx(i);
+					sgp_vid_t adj = g.graph.row_map(u + 1) - g.graph.row_map(u);
+                    if (adj == 0 && vcmap(u) == SGP_INFTY) {
+                        thread_sum++;
+                    }
+                }, noadj);
+
+                vtx_view_t noadj_v("no adjacencies", noadj);
+
+                Kokkos::parallel_scan("move noadj", mappable_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & update, const bool final){
+                    sgp_vid_t u = mappableVtx(i);
+                    sgp_vid_t adj = g.graph.row_map(u + 1) - g.graph.row_map(u);
+                    if (adj == 0 && vcmap(u) == SGP_INFTY) {
+                        if (final) {
+                            noadj_v(update) = u;
+							match(u) = SGP_INFTY;
+                        }
+
+                        update++;
+                    }
+                });
+
+				Kokkos::parallel_for("match noadj", noadj, KOKKOS_LAMBDA(const sgp_vid_t i){
+                	gen_t generator = rand_pool.get_state();
+					hn(noadj_v(i)) = noadj_v(generator.urand64() % noadj);
+                	rand_pool.free_state(generator);
+				});
 
                 //create a list of all mappable vertices according to set entries of hn
                 sgp_vid_t old_mappable = mappable_count;
@@ -819,6 +862,7 @@ namespace sgpar_kokkos {
                     if (hn(u) != SGP_INFTY) {
                         if (final) {
                             nextMappable(update) = u;
+							match(u) = SGP_INFTY;
                         }
 
                         update++;
@@ -835,7 +879,7 @@ namespace sgpar_kokkos {
                         //need to enforce an ordering condition to allow hard-stall conditions to be broken
                         if (condition ^ swap) {
                             if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
-                                if (Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
+                                if (u == v || Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
                                     sgp_vid_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
                                     vcmap(u) = cv;
                                     vcmap(v) = cv;
