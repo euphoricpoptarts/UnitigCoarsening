@@ -442,7 +442,7 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
     Kokkos::View<int64_t*> gains("gains", n);
     edge_view_t scan_cuts("scan cuts", n);
     Kokkos::View<int64_t*> scan_imbs("scan imbs", n);
-    int64_t start_cut = 0;
+    sgp_eid_t start_cut = 0;
     int64_t start_imb = 0;
 
     Kokkos::parallel_reduce("calculate gains and starting cut", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_eid_t & local_cut){
