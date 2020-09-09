@@ -3,6 +3,7 @@
 #include "definitions_kokkos.h"
 #include "KokkosBlas1_dot.hpp"
 #include "coarsen_kokkos.h"
+#include "heuristics.h"
 #include <limits>
 #include <cstdlib>
 #include <cmath>
@@ -358,6 +359,170 @@ void fm_create_ds(const eigenview_t& partition_device, const matrix_type& g_devi
     Kokkos::deep_copy(ll_prev_out, ll_prev);
     Kokkos::deep_copy(free_vtx_out, free_vtx);
     Kokkos::deep_copy(gains_out, gains);
+}
+
+struct imbCut {
+    sgp_eid_t cut = 0;
+    int64_t imb = 0;
+    sgp_vid_t idx = 0;
+};
+
+struct bestImbCut
+{
+
+    edge_view_t scan_cuts;
+    Kokkos::View<int64_t*> scan_imbs;
+    sgp_eid_t start_cut;
+    int64_t start_imb;
+
+    bestImbCut(edge_view_t scan_cuts,
+        Kokkos::View<int64_t*> scan_imbs,
+        sgp_eid_t start_cut,
+        int64_t start_imb)
+        : scan_cuts(scan_cuts)
+        , scan_imbs(scan_imbs)
+        , start_cut(start_cut)
+        , start_imb(start_imb) {}
+
+    KOKKOS_INLINE_FUNCTION
+        void operator()(const sgp_vid_t i, imbCut& update) const
+    {
+        bool swap = false;
+        if (abs(update.imb) >= abs(scan_imbs(i)) && update.cut >= scan_cuts(i)) {
+            swap = true;
+        } 
+        else if (abs(update.imb) > abs(scan_imbs(i)) && 1.05 * update.cut > scan_cuts(i)) {
+            swap = true;
+        }
+        if (swap) {
+            update.imb = scan_imbs(i);
+            update.cut = scan_cuts(i);
+            //idx is exclusive of last vtx to be swapped
+            update.idx = i + 1;
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+        void join(volatile imbCut& update, volatile imbCut& compare) const
+    {
+        bool swap = false;
+        if (abs(update.imb) >= abs(compare.imb) && update.cut >= compare.cut) {
+            swap = true;
+        }
+        else if (abs(update.imb) > abs(compare.imb) && 1.05 * update.cut > compare.cut) {
+            swap = true;
+        }
+        if (swap) {
+            update.imb = compare.imb;
+            update.cut = compare.cut;
+            update.idx = compare.idx;
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+        void init(imbCut& update) const
+    {
+        update.imb = start_imb;
+        update.cut = start_cut;
+        update.idx = 0;
+    }
+};
+
+sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_view_t& vtx_w, ExperimentLoggerUtil& experiment, const int level) {
+    sgp_vid_t n = g.numRows();
+
+    pool_t rand_pool(std::time(nullptr));
+    vtx_view_t perm = generate_permutation(n, rand_pool);
+
+    vtx_view_t reverse_map("reversed", n);
+    Kokkos::parallel_for("construct reverse map", n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        reverse_map(perm(i)) = i;
+    });
+
+    Kokkos::View<int64_t*> gains("gains", n);
+    edge_view_t scan_cuts("scan cuts", n);
+    Kokkos::View<int64_t*> scan_imbs("scan imbs", n);
+    int64_t start_cut = 0;
+    int64_t start_imb = 0;
+
+    Kokkos::parallel_reduce("calculate gains and starting cut", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_eid_t & local_cut){
+        int64_t gain = 0;
+        sgp_eid_t cut = 0;
+        for (sgp_eid_t j = g.graph.rows(i); j < g.graph.rows(i + 1); j++) {
+            sgp_vid_t v = g.graph.entries(j);
+            sgp_wgt_t wgt = g.values(j);
+            bool vPartSwapped = (reverse_map(v) < reverse_map(i));
+            if (partition(i) != partition(v)) {
+                cut += wgt;
+                if (vPartSwapped) {
+                    gain -= wgt;
+                }
+                else {
+                    gain += wgt;
+                }
+            }
+            else {
+                if (vPartSwapped) {
+                    gain += wgt;
+                }
+                else {
+                    gain -= wgt;
+                }
+            }
+        }
+        gains(i) = gain;
+        local_cut += cut;
+    }, start_cut);
+
+    Kokkos::parallel_reduce("calculate starting imb", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_eid_t & local_imb){
+        if (part(i) == 0.0) {
+            local_imb += vtx_w(i);
+        }
+        else {
+            local_imb -= vtx_w(i);
+        }
+    }, start_imb);
+
+    Kokkos::parallel_scan("cut scan", n, KOKKOS_LAMBDA(const sgp_vid_t i, int64_t & update, const bool final){
+        sgp_vid_t u = perm(i);
+        update += gains(u);
+        if (final) {
+            scan_cuts(i) = start_cut + update;
+        }
+    });
+
+    Kokkos::parallel_scan("imb scan", n, KOKKOS_LAMBDA(const sgp_vid_t i, int64_t & update, const bool final){
+        sgp_vid_t u = perm(i);
+        //vtx is swapping partitions so the sign is swapped from start imb calculation and value is doubled
+        if (partition(u) == 0.0) {
+            update -= 2*vtx_w(u);
+        }
+        else {
+            update += 2*vtx_w(u);
+        }
+        if (final) {
+            scan_imbs(i) = start_imb + update;
+        }
+    });
+
+    bestImbCut findBest(scan_cuts, scan_imbs, start_cut, start_imb);
+
+    imbCut result;
+
+    Kokkos::parallel_reduce("find best partition", n, findBest, result);
+
+    Kokkos::parallel_for("perform swaps", result.idx, KOKKOS_LAMBDA(const sgp_vid_t i){
+        sgp_vid_t u = perm(i);
+        if (partition(u) == 0.0) {
+            partition(u) = 1.0;
+        }
+        else {
+            partition(u) = 0.0;
+        }
+    });
+
+    printf("Level %i; Refined balance: %li, cutsize: %lu\n", level, result.imb, result.cut);
+    return result.cut;
 }
 
 //edge cuts are bounded by |E| of finest graph (assuming unweighted edges for finest graph)
