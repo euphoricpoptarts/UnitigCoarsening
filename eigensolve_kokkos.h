@@ -448,7 +448,7 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
     Kokkos::parallel_reduce("calculate gains and starting cut", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_eid_t & local_cut){
         int64_t gain = 0;
         sgp_eid_t cut = 0;
-        for (sgp_eid_t j = g.graph.rows(i); j < g.graph.rows(i + 1); j++) {
+        for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
             sgp_vid_t v = g.graph.entries(j);
             sgp_wgt_t wgt = g.values(j);
             bool vPartSwapped = (reverse_map(v) < reverse_map(i));
@@ -475,7 +475,7 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
     }, start_cut);
 
     Kokkos::parallel_reduce("calculate starting imb", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_eid_t & local_imb){
-        if (part(i) == 0.0) {
+        if (partition(i) == 0.0) {
             local_imb += vtx_w(i);
         }
         else {
