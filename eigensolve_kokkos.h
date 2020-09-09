@@ -403,7 +403,7 @@ struct bestImbCut
     }
 
     KOKKOS_INLINE_FUNCTION
-        void join(volatile imbCut& update, volatile imbCut& compare) const
+        void join(volatile imbCut& update, const volatile imbCut& compare) const
     {
         bool swap = false;
         if (abs(update.imb) >= abs(compare.imb) && update.cut >= compare.cut) {
