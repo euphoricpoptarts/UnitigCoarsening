@@ -474,7 +474,7 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
         local_cut += cut;
     }, start_cut);
 
-    Kokkos::parallel_reduce("calculate starting imb", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_eid_t & local_imb){
+    Kokkos::parallel_reduce("calculate starting imb", n, KOKKOS_LAMBDA(const sgp_vid_t i, int64_t& local_imb){
         if (partition(i) == 0.0) {
             local_imb += vtx_w(i);
         }
