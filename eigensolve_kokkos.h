@@ -466,7 +466,7 @@ struct scanImbReduce
             update += v_wgt(u);
         }
     }
-}
+};
 
 struct reduceImb
 {
@@ -544,15 +544,18 @@ struct fillPerm
     
     eigenview_t part;
     Kokkos::View<sgp_vid_t> balance_point;
+    double correct_part;
 
     fillPerm(vtx_view_t in_perm,
         vtx_view_t out_perm,
         eigenview_t part,
-        Kokkos::View<sgp_vid_t> balance_point)
+        Kokkos::View<sgp_vid_t> balance_point,
+        double correct_part)
         : in_perm(in_perm)
         , out_perm(out_perm)
         , part(part)
-        , balance_point(balance_point) {}
+        , balance_point(balance_point)
+        , correct_part(correct_part) {}
 
     KOKKOS_INLINE_FUNCTION
         void operator()(const sgp_vid_t i, sgp_vid_t& update, const bool final) const
