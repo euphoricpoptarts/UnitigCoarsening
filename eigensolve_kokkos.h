@@ -433,6 +433,41 @@ struct imbIdx {
     int64_t imb = 0;
 };
 
+struct scanImbReduce
+{
+    vtx_view_t v_wgt, in_perm;
+    int64_t start_imb;
+    Kokkos::View<int64_t*> imbScan;
+    eigenview_t part;
+
+    scanImbReduce(vtx_view_t v_wgt,
+        vtx_view_t in_perm,
+        int64_t start_imb,
+        eigenview_t part,
+        Kokkos::View<int64_t*> imbScan)
+        : v_wgt(v_wgt)
+        , in_perm(in_perm)
+        , start_imb(start_imb)
+        , part(part)
+        , imbScan(imbScan) {}
+
+    KOKKOS_INLINE_FUNCTION
+        void operator()(const sgp_vid_t i, int64_t& update, const bool final) const
+    {
+        sgp_vid_t u = in_perm(i);
+        if (final) {
+            imbScan(i) = update;
+        }
+        //part 0 increases imbalance, part 1 decreases imbalance
+        if (start_imb > 0 && part(u) == 1.0) {
+            update -= v_wgt(u);
+        }
+        else if (start_imb < 0 && part(u) == 0.0) {
+            update += v_wgt(u);
+        }
+    }
+}
+
 struct reduceImb
 {
 
@@ -441,6 +476,7 @@ struct reduceImb
     int64_t target_imb;
     eigenview_t part;
     Kokkos::View<sgp_vid_t> balance_point;
+    Kokkos::View<int64_t*> imbScan;
 
     reduceImb(vtx_view_t v_wgt,
         vtx_view_t in_perm,
@@ -448,72 +484,56 @@ struct reduceImb
         int64_t start_imb,
         int64_t target_imb,
         eigenview_t part,
-        Kokkos::View<sgp_vid_t> balance_point)
+        Kokkos::View<sgp_vid_t> balance_point,
+        Kokkos::View<int64_t*> imbScan)
         : v_wgt(v_wgt)
         , in_perm(in_perm)
         , out_perm(out_perm)
         , start_imb(start_imb)
         , target_imb(target_imb)
         , part(part)
-        , balance_point(balance_point) {}
+        , balance_point(balance_point)
+        , imbScan(imbScan) {}
 
     KOKKOS_INLINE_FUNCTION
-        void operator()(const sgp_vid_t i, imbIdx& update, const bool final) const
+        void operator()(const sgp_vid_t i, sgp_vid_t& update, const bool final) const
     {
         sgp_vid_t u = in_perm(i);
         //part 0 increases imbalance, part 1 decreases imbalance
         if (start_imb > 0 && part(u) == 1.0) {
             if (final) {
-                out_perm(update.write_idx) = u;
+                out_perm(update) = u;
             }
-            if (abs(update.imb) > target_imb) {
-                update.imb -= v_wgt(u);
-                if (abs(udpate.imb) > target_imb) {
-                    update.write_idx += 1;
+            if (abs(start_imb + imbScan(i)) > target_imb) {
+                if (abs(start_imb + imbScan(i)) > target_imb) {
+                    update += 1;
                 }
                 else {
-                    balance_point() = update.write_idx + 1;
-                    update.write_idx += 2;
+                    balance_point() = update + 1;
+                    update += 2;
                 }
             }
             else {
-                update.write_idx += 2;
+                update += 2;
             }
         }
         else if (start_imb < 0 && part(u) == 0.0) {
             if (final) {
-                out_perm(update.write_idx) = u;
+                out_perm(update) = u;
             }
-            if (abs(update.imb) > target_imb) {
-                update.imb += v_wgt(u);
-                if (abs(udpate.imb) > target_imb) {
-                    update.write_idx += 1;
+            if (abs(start_imb + imbScan(i)) > target_imb) {
+                if (abs(start_imb + imbScan(i)) > target_imb) {
+                    update += 1;
                 }
                 else {
-                    balance_point() = update.write_idx + 1;
-                    update.write_idx += 2;
+                    balance_point() = update + 1;
+                    update += 2;
                 }
             }
             else {
-                update.write_idx += 2;
+                update += 2;
             }
         }
-    }
-
-    KOKKOS_INLINE_FUNCTION
-        void join(volatile imbCut& update, const volatile imbCut& src) const
-    {
-        if (update.write_idx < src.write_idx) {
-            update.imb = src.imb;
-            update.write_dix = src.write_idx;
-        }
-    }
-
-    KOKKOS_INLINE_FUNCTION
-        void init(imbIdx& update) const
-    {
-        update.imb = start_imb;
-        update.write_idx = 0;
     }
 };
 
@@ -584,7 +604,9 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
     }
 
     Kokkos::View<sgp_vid_t> balance_point("balance point");
-    reduceImb r_imb(vtx_w, rand_perm, perm, start_imb, target_imb, partition, balance_point);
+    Kokkos::View<int64_t*> imb_reducer_scan("scan for imbalance reducer", n);
+    scanImbReduce(vtx_w, rand_perm, start_imb, partition, imb_reducer_scan);
+    reduceImb r_imb(vtx_w, rand_perm, perm, start_imb, target_imb, partition, balance_point, imb_reducer_scan);
     fillPerm filler(rand_perm, perm, partition, balance_point);
 
     Kokkos::parallel_scan("reduce imbalance", n, r_imb);
