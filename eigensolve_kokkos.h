@@ -428,11 +428,167 @@ struct bestImbCut
     }
 };
 
+struct imbIdx {
+    sgp_vid_t write_idx = 0;
+    int64_t imb = 0;
+};
+
+struct reduceImb
+{
+
+    vtx_view_t v_wgt, in_perm, out_perm;
+    int64_t start_imb;
+    int64_t target_imb;
+    eigenview_t part;
+    Kokkos::View<sgp_vid_t> balance_point;
+
+    reduceImb(vtx_view_t v_wgt,
+        vtx_view_t in_perm,
+        vtx_view_t out_perm,
+        int64_t start_imb,
+        int64_t target_imb,
+        eigenview_t part,
+        Kokkos::View<sgp_vid_t> balance_point)
+        : v_wgt(v_wgt)
+        , in_perm(in_perm)
+        , out_perm(out_perm)
+        , start_imb(start_imb)
+        , target_imb(target_imb)
+        , part(part)
+        , balance_point(balance_point) {}
+
+    KOKKOS_INLINE_FUNCTION
+        void operator()(const sgp_vid_t i, imbIdx& update, const bool final) const
+    {
+        sgp_vid_t u = in_perm(i);
+        //part 0 increases imbalance, part 1 decreases imbalance
+        if (start_imb > 0 && part(u) == 1.0) {
+            if (final) {
+                out_perm(update.write_idx) = u;
+            }
+            if (abs(update.imb) > target_imb) {
+                update.imb -= v_wgt(u);
+                if (abs(udpate.imb) > target_imb) {
+                    update.write_idx += 1;
+                }
+                else {
+                    balance_point() = update.write_idx + 1;
+                    update.write_idx += 2;
+                }
+            }
+            else {
+                update.write_idx += 2;
+            }
+        }
+        else if (start_imb < 0 && part(u) == 0.0) {
+            if (final) {
+                out_perm(update.write_idx) = u;
+            }
+            if (abs(update.imb) > target_imb) {
+                update.imb += v_wgt(u);
+                if (abs(udpate.imb) > target_imb) {
+                    update.write_idx += 1;
+                }
+                else {
+                    balance_point() = update.write_idx + 1;
+                    update.write_idx += 2;
+                }
+            }
+            else {
+                update.write_idx += 2;
+            }
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+        void join(volatile imbCut& update, const volatile imbCut& src) const
+    {
+        if (update.write_idx < src.write_idx) {
+            update.imb = src.imb;
+            update.write_dix = src.write_idx;
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+        void init(imbIdx& update) const
+    {
+        update.imb = start_imb;
+        update.write_idx = 0;
+    }
+};
+
+struct fillPerm
+{
+
+    vtx_view_t in_perm, out_perm;
+    
+    eigenview_t part;
+    Kokkos::View<sgp_vid_t> balance_point;
+
+    fillPerm(vtx_view_t in_perm,
+        vtx_view_t out_perm,
+        eigenview_t part,
+        Kokkos::View<sgp_vid_t> balance_point)
+        : in_perm(in_perm)
+        , out_perm(out_perm)
+        , part(part)
+        , balance_point(balance_point) {}
+
+    KOKKOS_INLINE_FUNCTION
+        void operator()(const sgp_vid_t i, sgp_vid_t& update, const bool final) const
+    {
+        sgp_vid_t u = in_perm(i);
+        
+        if (part(u) == correct_part) {
+            if (final) {
+                out_perm(update) = u;
+            }
+            if (out_perm(update + 1) == SGP_INFTY) {
+                update += 1;
+            }
+            else {
+                update += 2;
+            }
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+        void init(sgp_vid_t& update) const
+    {
+        update = balance_point();
+    }
+};
+
 sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_view_t& vtx_w, ExperimentLoggerUtil& experiment, const int level) {
     sgp_vid_t n = g.numRows();
 
     pool_t rand_pool(std::time(nullptr));
-    vtx_view_t perm = generate_permutation(n, rand_pool);
+    //perm contains the order in which we will swap the vertices
+    vtx_view_t rand_perm = generate_permutation(n, rand_pool);
+    vtx_view_t perm("swap order", n);
+
+    int64_t start_imb = 0;
+    Kokkos::parallel_reduce("calculate starting imb", n, KOKKOS_LAMBDA(const sgp_vid_t i, int64_t & local_imb){
+        if (partition(i) == 0.0) {
+            local_imb += vtx_w(i);
+        }
+        else {
+            local_imb -= vtx_w(i);
+        }
+        perm(i) = SGP_INFTY;
+    }, start_imb);
+
+    int64_t target_imb = start_imb / 10;
+    if (target_imb < 20) {
+        target_imb = 20;
+    }
+
+    Kokkos::View<sgp_vid_t> balance_point("balance point");
+    reduceImb r_imb(vtx_w, rand_perm, perm, start_imb, target_imb, partition, balance_point);
+    fillPerm filler(rand_perm, perm, partition, balance_point);
+
+    Kokkos::parallel_scan("reduce imbalance", n, r_imb);
+    Kokkos::parallel_scan("fill permutation", n, filler);
 
     vtx_view_t reverse_map("reversed", n);
     Kokkos::parallel_for("construct reverse map", n, KOKKOS_LAMBDA(sgp_vid_t i) {
@@ -443,7 +599,6 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
     edge_view_t scan_cuts("scan cuts", n);
     Kokkos::View<int64_t*> scan_imbs("scan imbs", n);
     sgp_eid_t start_cut = 0;
-    int64_t start_imb = 0;
 
     Kokkos::parallel_reduce("calculate gains and starting cut", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_eid_t & local_cut){
         int64_t gain = 0;
@@ -451,6 +606,7 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
         for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
             sgp_vid_t v = g.graph.entries(j);
             sgp_wgt_t wgt = g.values(j);
+            //will v be swapped before i is swapped?
             bool vPartSwapped = (reverse_map(v) < reverse_map(i));
             if (partition(i) != partition(v)) {
                 cut += wgt;
@@ -470,22 +626,14 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
                 }
             }
         }
-        gains(i) = gain;
+        gains(i) = 2*gain;
         local_cut += cut;
     }, start_cut);
 
-    Kokkos::parallel_reduce("calculate starting imb", n, KOKKOS_LAMBDA(const sgp_vid_t i, int64_t& local_imb){
-        if (partition(i) == 0.0) {
-            local_imb += vtx_w(i);
-        }
-        else {
-            local_imb -= vtx_w(i);
-        }
-    }, start_imb);
-
     Kokkos::parallel_scan("cut scan", n, KOKKOS_LAMBDA(const sgp_vid_t i, int64_t & update, const bool final){
         sgp_vid_t u = perm(i);
-        update += gains(u);
+        //gain is the quantity the edge cut will decrease by
+        update -= gains(u);
         if (final) {
             scan_cuts(i) = start_cut + update;
         }
