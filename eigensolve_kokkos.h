@@ -475,7 +475,6 @@ struct reduceImb
     int64_t start_imb;
     int64_t target_imb;
     eigenview_t part;
-    Kokkos::View<sgp_vid_t> balance_point, end_point;
     Kokkos::View<int64_t*> imbScan;
 
     reduceImb(vtx_view_t v_wgt,
@@ -484,8 +483,6 @@ struct reduceImb
         int64_t start_imb,
         int64_t target_imb,
         eigenview_t part,
-        Kokkos::View<sgp_vid_t> balance_point,
-        Kokkos::View<sgp_vid_t> end_point,
         Kokkos::View<int64_t*> imbScan)
         : v_wgt(v_wgt)
         , in_perm(in_perm)
@@ -493,8 +490,6 @@ struct reduceImb
         , start_imb(start_imb)
         , target_imb(target_imb)
         , part(part)
-        , balance_point(balance_point)
-        , end_point(end_point)
         , imbScan(imbScan) {}
 
     KOKKOS_INLINE_FUNCTION
@@ -511,7 +506,6 @@ struct reduceImb
                     update += 1;
                 }
                 else {
-                    balance_point() = update + 1;
                     update += 2;
                 }
             }
@@ -528,19 +522,11 @@ struct reduceImb
                     update += 1;
                 }
                 else {
-                    balance_point() = update + 1;
                     update += 2;
                 }
             }
             else {
                 update += 2;
-            }
-        }
-        if (final) {
-            int64_t largest = imbScan(imbScan.extent(0) - 1);
-            //imbScan(i) is the first one to be the largest
-            if (imbScan(i) == largest && imbScan(i) != imbScan(i - 1)) {
-                end_point() = i;
             }
         }
     }
@@ -549,23 +535,20 @@ struct reduceImb
 struct fillPerm
 {
 
-    vtx_view_t in_perm, out_perm;
+    vtx_view_t in_perm, out_perm, unused;
     
     eigenview_t part;
-    Kokkos::View<sgp_vid_t> balance_point, end_point;
     double correct_part;
 
     fillPerm(vtx_view_t in_perm,
         vtx_view_t out_perm,
         eigenview_t part,
-        Kokkos::View<sgp_vid_t> balance_point,
-        Kokkos::View<sgp_vid_t> end_point,
+        vtx_view_t unused,
         double correct_part)
         : in_perm(in_perm)
         , out_perm(out_perm)
         , part(part)
-        , balance_point(balance_point)
-        , end_point(end_point)
+        , unused(unused)
         , correct_part(correct_part) {}
 
     KOKKOS_INLINE_FUNCTION
@@ -575,21 +558,11 @@ struct fillPerm
         
         if (part(u) == correct_part) {
             if (final) {
-                out_perm(update) = u;
+                sgp_vid_t write_loc = unused(update);
+                out_perm(write_loc) = u;
             }
-            if (i >= end_point()) {
-                update += 1;
-            }
-            else {
-                update += 2;
-            }
+            update += 1;
         }
-    }
-
-    KOKKOS_INLINE_FUNCTION
-        void init(sgp_vid_t& update) const
-    {
-        update = balance_point();
     }
 };
 
@@ -624,12 +597,22 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
 
     Kokkos::View<sgp_vid_t> balance_point("balance point"), end_point("end point");
     Kokkos::View<int64_t*> imb_reducer_scan("scan for imbalance reducer", n);
+    vtx_view_t unused("unused perm", n);
     scanImbReduce compute_imbalance_reducer(vtx_w, rand_perm, start_imb, partition, imb_reducer_scan);
-    reduceImb r_imb(vtx_w, rand_perm, perm, start_imb, target_imb, partition, balance_point, end_point, imb_reducer_scan);
-    fillPerm filler(rand_perm, perm, partition, balance_point, end_point, correct_part);
+    reduceImb r_imb(vtx_w, rand_perm, perm, start_imb, target_imb, partition, imb_reducer_scan);
 
     Kokkos::parallel_scan("compute an imbalance reduction", n, compute_imbalance_reducer);
     Kokkos::parallel_scan("reduce imbalance", n, r_imb);
+    Kokkos::parallel_scan("compute unused", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & update, const bool final){
+        if (perm(i) == SGP_INFTY) {
+            if (final) {
+                unused(update) = i;
+            }
+            update += 1;
+        }
+    });
+
+    fillPerm filler(rand_perm, perm, partition, unused, correct_part);
     Kokkos::parallel_scan("fill permutation", n, filler);
 
     vtx_view_t reverse_map("reversed", n);
