@@ -504,8 +504,8 @@ struct reduceImb
             if (final) {
                 out_perm(update) = u;
             }
-            if (abs(start_imb + imbScan(i)) > target_imb) {
-                if (abs(start_imb + imbScan(i) - v_wgt(i)) > target_imb) {
+            if (start_imb + imbScan(i) > target_imb) {
+                if (start_imb + imbScan(i) - v_wgt(u) > target_imb) {
                     update += 1;
                 }
                 else {
@@ -521,8 +521,8 @@ struct reduceImb
             if (final) {
                 out_perm(update) = u;
             }
-            if (abs(start_imb + imbScan(i)) > target_imb) {
-                if (abs(start_imb + imbScan(i) + v_wgt(i)) > target_imb) {
+            if (start_imb + imbScan(i) < -target_imb) {
+                if (start_imb + imbScan(i) + v_wgt(u) < -target_imb) {
                     update += 1;
                 }
                 else {
