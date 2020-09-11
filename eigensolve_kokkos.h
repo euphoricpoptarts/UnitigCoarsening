@@ -505,7 +505,7 @@ struct reduceImb
                 out_perm(update) = u;
             }
             if (abs(start_imb + imbScan(i)) > target_imb) {
-                if (abs(start_imb + imbScan(i)) > target_imb) {
+                if (abs(start_imb + imbScan(i) - v_wgt(i)) > target_imb) {
                     update += 1;
                 }
                 else {
@@ -522,7 +522,7 @@ struct reduceImb
                 out_perm(update) = u;
             }
             if (abs(start_imb + imbScan(i)) > target_imb) {
-                if (abs(start_imb + imbScan(i)) > target_imb) {
+                if (abs(start_imb + imbScan(i) + v_wgt(i)) > target_imb) {
                     update += 1;
                 }
                 else {
@@ -601,7 +601,7 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
         perm(i) = SGP_INFTY;
     }, start_imb);
 
-    int64_t target_imb = start_imb / 10;
+    int64_t target_imb = abs(start_imb) / 10;
     if (target_imb < 20) {
         target_imb = 20;
     }
@@ -613,10 +613,11 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
 
     Kokkos::View<sgp_vid_t> balance_point("balance point");
     Kokkos::View<int64_t*> imb_reducer_scan("scan for imbalance reducer", n);
-    scanImbReduce(vtx_w, rand_perm, start_imb, partition, imb_reducer_scan);
+    scanImbReduce compute_imbalance_reducer(vtx_w, rand_perm, start_imb, partition, imb_reducer_scan);
     reduceImb r_imb(vtx_w, rand_perm, perm, start_imb, target_imb, partition, balance_point, imb_reducer_scan);
     fillPerm filler(rand_perm, perm, partition, balance_point, correct_part);
 
+    Kokkos::parallel_scan("compute an imbalance reduction", n, compute_imbalance_reducer);
     Kokkos::parallel_scan("reduce imbalance", n, r_imb);
     Kokkos::parallel_scan("fill permutation", n, filler);
 
