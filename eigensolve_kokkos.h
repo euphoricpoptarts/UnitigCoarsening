@@ -458,11 +458,11 @@ struct scanImbReduce
         if (final) {
             imbScan(i) = update;
         }
-        //part 0 increases imbalance, part 1 decreases imbalance
-        if (start_imb > 0 && part(u) == 1.0) {
+        //swapping part 0 decreases imbalance, swapping part 1 increases imbalance
+        if (start_imb > 0 && part(u) == 0.0) {
             update -= v_wgt(u);
         }
-        else if (start_imb < 0 && part(u) == 0.0) {
+        else if (start_imb < 0 && part(u) == 1.0) {
             update += v_wgt(u);
         }
     }
@@ -499,8 +499,8 @@ struct reduceImb
         void operator()(const sgp_vid_t i, sgp_vid_t& update, const bool final) const
     {
         sgp_vid_t u = in_perm(i);
-        //part 0 increases imbalance, part 1 decreases imbalance
-        if (start_imb > 0 && part(u) == 1.0) {
+        //swapping part 0 decreases imbalance, swapping part 1 increases imbalance
+        if (start_imb > 0 && part(u) == 0.0) {
             if (final) {
                 out_perm(update) = u;
             }
@@ -517,7 +517,7 @@ struct reduceImb
                 update += 2;
             }
         }
-        else if (start_imb < 0 && part(u) == 0.0) {
+        else if (start_imb < 0 && part(u) == 1.0) {
             if (final) {
                 out_perm(update) = u;
             }
@@ -603,11 +603,16 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
         target_imb = 20;
     }
 
+    double correct_part = 0;
+    if (start_imb > 0) {
+        correct_part = 1;
+    }
+
     Kokkos::View<sgp_vid_t> balance_point("balance point");
     Kokkos::View<int64_t*> imb_reducer_scan("scan for imbalance reducer", n);
     scanImbReduce(vtx_w, rand_perm, start_imb, partition, imb_reducer_scan);
     reduceImb r_imb(vtx_w, rand_perm, perm, start_imb, target_imb, partition, balance_point, imb_reducer_scan);
-    fillPerm filler(rand_perm, perm, partition, balance_point);
+    fillPerm filler(rand_perm, perm, partition, balance_point, correct_part);
 
     Kokkos::parallel_scan("reduce imbalance", n, r_imb);
     Kokkos::parallel_scan("fill permutation", n, filler);
