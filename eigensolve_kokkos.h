@@ -428,27 +428,16 @@ struct bestImbCut
     }
 };
 
-struct imbIdx {
-    sgp_vid_t write_idx = 0;
-    int64_t imb = 0;
-};
-
-struct scanImbReduce
+struct scanVtxWgt
 {
     vtx_view_t v_wgt, in_perm;
-    int64_t start_imb;
     Kokkos::View<int64_t*> imbScan;
-    eigenview_t part;
 
-    scanImbReduce(vtx_view_t v_wgt,
+    scanVtxWgt(vtx_view_t v_wgt,
         vtx_view_t in_perm,
-        int64_t start_imb,
-        eigenview_t part,
         Kokkos::View<int64_t*> imbScan)
         : v_wgt(v_wgt)
         , in_perm(in_perm)
-        , start_imb(start_imb)
-        , part(part)
         , imbScan(imbScan) {}
 
     KOKKOS_INLINE_FUNCTION
@@ -458,109 +447,126 @@ struct scanImbReduce
         if (final) {
             imbScan(i) = update;
         }
-        //swapping part 0 decreases imbalance, swapping part 1 increases imbalance
-        if (start_imb > 0 && part(u) == 0.0) {
-            update -= v_wgt(u);
-        }
-        else if (start_imb < 0 && part(u) == 1.0) {
-            update += v_wgt(u);
-        }
+        update += v_wgt(u);
     }
 };
 
-struct reduceImb
+struct findInterleaveIdx
 {
 
-    vtx_view_t v_wgt, in_perm, out_perm;
-    int64_t start_imb;
     int64_t target_imb;
-    eigenview_t part;
     Kokkos::View<int64_t*> imbScan;
 
-    reduceImb(vtx_view_t v_wgt,
-        vtx_view_t in_perm,
-        vtx_view_t out_perm,
-        int64_t start_imb,
-        int64_t target_imb,
-        eigenview_t part,
+    findInterleaveIdx(int64_t target_imb,
         Kokkos::View<int64_t*> imbScan)
-        : v_wgt(v_wgt)
-        , in_perm(in_perm)
-        , out_perm(out_perm)
-        , start_imb(start_imb)
-        , target_imb(target_imb)
-        , part(part)
+        : target_imb(target_imb)
         , imbScan(imbScan) {}
+
+    KOKKOS_INLINE_FUNCTION
+        void operator()(const sgp_vid_t i, sgp_vid_t& update) const
+    {
+        if (imbScan(i) >= target_imb) {
+            if (i < update) {
+                update = i;
+            }
+        }
+    }
+
+    //min reduction
+    KOKKOS_INLINE_FUNCTION
+        void join(volatile sgp_vid_t& update, volatile const sgp_vid_t& input) const {
+        if (input < update) update = input;
+    }
+
+    KOKKOS_INLINE_FUNCTION
+        void init(sgp_vid_t& update) const {
+        update = SGP_INFTY;
+    }
+};
+
+struct interleaveParts
+{
+
+    vtx_view_t first_part, last_part, out_perm;
+
+    sgp_vid_t interleave_loc;
+
+    interleaveParts(vtx_view_t first_part,
+        vtx_view_t last_part,
+        vtx_view_t out_perm,
+        sgp_vid_t interleave_loc)
+        : first_part(first_part)
+        , last_part(last_part)
+        , out_perm(out_perm)
+        , interleave_loc(interleave_loc) {}
 
     KOKKOS_INLINE_FUNCTION
         void operator()(const sgp_vid_t i, sgp_vid_t& update, const bool final) const
     {
-        sgp_vid_t u = in_perm(i);
-        //swapping part 0 decreases imbalance, swapping part 1 increases imbalance
-        if (start_imb > 0 && part(u) == 0.0) {
+        //both middle conditions can't be simultaneously true
+        if (i < interleave_loc) {
             if (final) {
-                out_perm(update) = u;
+                out_perm(update) = first_part(i);
             }
-            if (start_imb + imbScan(i) > target_imb) {
-                if (start_imb + imbScan(i) - v_wgt(u) > target_imb) {
-                    update += 1;
-                }
-                else {
-                    update += 2;
-                }
-            }
-            else {
-                update += 2;
-            }
+            update += 1;
         }
-        else if (start_imb < 0 && part(u) == 1.0) {
+        else if(i > first_part.extent(0)) {
             if (final) {
-                out_perm(update) = u;
+                out_perm(update) = last_part(i - interleave_loc);
             }
-            if (start_imb + imbScan(i) < -target_imb) {
-                if (start_imb + imbScan(i) + v_wgt(u) < -target_imb) {
-                    update += 1;
-                }
-                else {
-                    update += 2;
-                }
+            update += 1;
+        }
+        else if (i > interleave_loc + last_part.extent(0)) {
+            if (final) {
+                out_perm(update) = first_part(i);
             }
-            else {
-                update += 2;
+            update += 1;
+        }
+        else {
+            if (final) {
+                out_perm(update) = last_part(i - interleave_loc);
+                out_perm(update + 1) = first_part(i);
             }
+            update += 2;
         }
     }
 };
 
-struct fillPerm
+struct sortPart
 {
+    vtx_view_t in_perm, out_perm;
 
-    vtx_view_t in_perm, out_perm, unused;
-    
     eigenview_t part;
     double correct_part;
 
-    fillPerm(vtx_view_t in_perm,
+    sortPart(vtx_view_t in_perm,
         vtx_view_t out_perm,
         eigenview_t part,
-        vtx_view_t unused,
         double correct_part)
         : in_perm(in_perm)
         , out_perm(out_perm)
         , part(part)
-        , unused(unused)
         , correct_part(correct_part) {}
 
     KOKKOS_INLINE_FUNCTION
         void operator()(const sgp_vid_t i, sgp_vid_t& update, const bool final) const
     {
         sgp_vid_t u = in_perm(i);
-        
+
         if (part(u) == correct_part) {
             if (final) {
-                sgp_vid_t write_loc = unused(update);
-                out_perm(write_loc) = u;
+                out_perm(update) = u;
             }
+            update += 1;
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION
+        void operator()(const sgp_vid_t i, sgp_vid_t& update) const
+    {
+        sgp_vid_t u = in_perm(i);
+
+        if (part(u) == correct_part) {
             update += 1;
         }
     }
@@ -585,35 +591,62 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
         perm(i) = SGP_INFTY;
     }, start_imb);
 
-    int64_t target_imb = abs(start_imb) / 10;
-    if (target_imb < 20) {
-        target_imb = 20;
-    }
-
     double correct_part = 0;
     if (start_imb > 0) {
         correct_part = 1;
     }
 
-    Kokkos::View<sgp_vid_t> balance_point("balance point"), end_point("end point");
-    Kokkos::View<int64_t*> imb_reducer_scan("scan for imbalance reducer", n);
-    vtx_view_t unused("unused perm", n);
-    scanImbReduce compute_imbalance_reducer(vtx_w, rand_perm, start_imb, partition, imb_reducer_scan);
-    reduceImb r_imb(vtx_w, rand_perm, perm, start_imb, target_imb, partition, imb_reducer_scan);
+    //move permutation into parts but respect ordering
+    vtx_view_t part0, part1;
+    sgp_vid_t part0_size = 0, part1_size = 0;
+    sortPart part0_sort(rand_perm, part0, partition, 0.0);
+    Kokkos::parallel_reduce("find part 0 size", n, part0_sort, part0_size);
+    part0 = vtx_view_t("part 0", part0_size);
+    part0_sort = sortPart(rand_perm, part0, partition, 0.0);
+    sortPart part1_sort(rand_perm, part1, partition, 1.0);
+    Kokkos::parallel_reduce("find part 0 size", n, part1_sort, part1_size);
+    part1 = vtx_view_t("part 1", part1_size);
+    part1_sort = sortPart(rand_perm, part1, partition, 1.0);
 
-    Kokkos::parallel_scan("compute an imbalance reduction", n, compute_imbalance_reducer);
-    Kokkos::parallel_scan("reduce imbalance", n, r_imb);
-    Kokkos::parallel_scan("compute unused", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & update, const bool final){
-        if (perm(i) == SGP_INFTY) {
-            if (final) {
-                unused(update) = i;
-            }
-            update += 1;
+    //compute location of interleave
+    int64_t target_imb = abs(start_imb) / 10;
+    if (target_imb < 20) {
+        target_imb = 20;
+    }
+    target_imb = abs(start_imb) - target_imb;
+    sgp_vid_t interleave = 0;
+    if (target_imb > 0 && start_imb > 0) {
+        Kokkos::View<int64_t*> imbalance_part("scan for imbalance reducer", part0_size);
+        scanVtxWgt scan_imb(vtx_w, part0, imbalance_part);
+        Kokkos::parallel_scan("scan imbalance", part0_size, scan_imb);
+        findInterleaveIdx find_interleave(target_imb, scan_imb);
+        Kokkos::parallel_reduce("find interleave", part0_size, find_interleave, interleave);
+    }
+    else if(target_imb > 0) {
+        Kokkos::View<int64_t*> imbalance_part("scan for imbalance reducer", part1_size);
+        scanVtxWgt scan_imb(vtx_w, part1, imbalance_part);
+        Kokkos::parallel_scan("scan imbalance", part1_size, scan_imb);
+        findInterleaveIdx find_interleave(target_imb, scan_imb);
+        Kokkos::parallel_reduce("find interleave", part1_size, find_interleave, interleave);
+    }
+
+    interleaveParts interleave_parts;
+    sgp_vid_t interleave_size = 0;
+    if (start_imb > 0) {
+        interleave_parts = interleaveParts(part0, part1, perm, interleave);
+        interleave_size = part1_size + interleave;
+        if (part0_size > interleave_size) {
+            interleave_size = part0_size;
         }
-    });
-
-    fillPerm filler(rand_perm, perm, partition, unused, correct_part);
-    Kokkos::parallel_scan("fill permutation", n, filler);
+    }
+    else {
+        interleave_parts = interleaveParts(part1, part0, perm, interleave);
+        interleave_size = part0_size + interleave;
+        if (part1_size > interleave_size) {
+            interleave_size = part1_size;
+        }
+    }
+    Kokkos::parallel_scan("interleave parts", interleave_size, interleave_parts);
 
     vtx_view_t reverse_map("reversed", n);
     Kokkos::parallel_for("construct reverse map", n, KOKKOS_LAMBDA(sgp_vid_t i) {
