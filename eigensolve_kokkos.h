@@ -479,6 +479,11 @@ struct findInterleaveIdx
     }
 
     KOKKOS_INLINE_FUNCTION
+        void join(sgp_vid_t& update, const sgp_vid_t& input) const {
+        if (input < update) update = input;
+    }
+
+    KOKKOS_INLINE_FUNCTION
         void init(sgp_vid_t& update) const {
         update = SGP_INFTY;
     }
@@ -510,13 +515,13 @@ struct interleaveParts
             }
             update += 1;
         }
-        else if(i > first_part.extent(0)) {
+        else if(i >= first_part.extent(0)) {
             if (final) {
                 out_perm(update) = last_part(i - interleave_loc);
             }
             update += 1;
         }
-        else if (i > interleave_loc + last_part.extent(0)) {
+        else if (i >= interleave_loc + last_part.extent(0)) {
             if (final) {
                 out_perm(update) = first_part(i);
             }
@@ -528,6 +533,31 @@ struct interleaveParts
                 out_perm(update + 1) = first_part(i);
             }
             update += 2;
+        }
+    }
+};
+
+struct countPart
+{
+    vtx_view_t in_perm;
+
+    eigenview_t part;
+    double correct_part;
+
+    countPart(vtx_view_t in_perm,
+        eigenview_t part,
+        double correct_part)
+        : in_perm(in_perm)
+        , part(part)
+        , correct_part(correct_part) {}
+
+    KOKKOS_INLINE_FUNCTION
+        void operator()(const sgp_vid_t i, sgp_vid_t& update) const
+    {
+        sgp_vid_t u = in_perm(i);
+
+        if (part(u) == correct_part) {
+            update += 1;
         }
     }
 };
@@ -560,16 +590,6 @@ struct sortPart
             update += 1;
         }
     }
-
-    KOKKOS_INLINE_FUNCTION
-        void operator()(const sgp_vid_t i, sgp_vid_t& update) const
-    {
-        sgp_vid_t u = in_perm(i);
-
-        if (part(u) == correct_part) {
-            update += 1;
-        }
-    }
 };
 
 sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_view_t& vtx_w, ExperimentLoggerUtil& experiment, const int level) {
@@ -591,22 +611,19 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
         perm(i) = SGP_INFTY;
     }, start_imb);
 
-    double correct_part = 0;
-    if (start_imb > 0) {
-        correct_part = 1;
-    }
-
     //move permutation into parts but respect ordering
     vtx_view_t part0, part1;
     sgp_vid_t part0_size = 0, part1_size = 0;
-    sortPart part0_sort(rand_perm, part0, partition, 0.0);
-    Kokkos::parallel_reduce("find part 0 size", n, part0_sort, part0_size);
+    countPart part0_count(rand_perm, partition, 0.0);
+    Kokkos::parallel_reduce("find part 0 size", n, part0_count, part0_size);
     part0 = vtx_view_t("part 0", part0_size);
-    part0_sort = sortPart(rand_perm, part0, partition, 0.0);
-    sortPart part1_sort(rand_perm, part1, partition, 1.0);
-    Kokkos::parallel_reduce("find part 0 size", n, part1_sort, part1_size);
+    sortPart part0_sort(rand_perm, part0, partition, 0.0);
+    Kokkos::parallel_scan("move part 0", n, part0_sort);
+    countPart part1_count(rand_perm, partition, 1.0);
+    Kokkos::parallel_reduce("find part 0 size", n, part1_count, part1_size);
     part1 = vtx_view_t("part 1", part1_size);
-    part1_sort = sortPart(rand_perm, part1, partition, 1.0);
+    sortPart part1_sort(rand_perm, part1, partition, 1.0);
+    Kokkos::parallel_scan("move part 1", n, part1_sort);
 
     //compute location of interleave
     int64_t target_imb = abs(start_imb) / 10;
@@ -630,23 +647,23 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
         Kokkos::parallel_reduce("find interleave", part1_size, find_interleave, interleave);
     }
 
-    interleaveParts interleave_parts;
     sgp_vid_t interleave_size = 0;
     if (start_imb > 0) {
-        interleave_parts = interleaveParts(part0, part1, perm, interleave);
+        interleaveParts interleave_parts = interleaveParts(part0, part1, perm, interleave);
         interleave_size = part1_size + interleave;
         if (part0_size > interleave_size) {
             interleave_size = part0_size;
         }
+        Kokkos::parallel_scan("interleave parts", interleave_size, interleave_parts);
     }
     else {
-        interleave_parts = interleaveParts(part1, part0, perm, interleave);
+        interleaveParts interleave_parts = interleaveParts(part1, part0, perm, interleave);
         interleave_size = part0_size + interleave;
         if (part1_size > interleave_size) {
             interleave_size = part1_size;
         }
+        Kokkos::parallel_scan("interleave parts", interleave_size, interleave_parts);
     }
-    Kokkos::parallel_scan("interleave parts", interleave_size, interleave_parts);
 
     vtx_view_t reverse_map("reversed", n);
     Kokkos::parallel_for("construct reverse map", n, KOKKOS_LAMBDA(sgp_vid_t i) {
