@@ -678,7 +678,7 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
         chosen = 0;
         //choose some vertices that have a good gain based on the currently chosen vtx
         Kokkos::parallel_reduce("choose some vtx", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& local_sum){
-            if (chosen_at(v) == SGP_INFTY) {
+            if (chosen_at(i) == SGP_INFTY) {
                 int64_t gain = 0;
                 for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
                     sgp_vid_t v = g.graph.entries(j);
