@@ -678,36 +678,38 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
         chosen = 0;
         //choose some vertices that have a good gain based on the currently chosen vtx
         Kokkos::parallel_reduce("choose some vtx", n, KOKKOS_LAMBDA(const sgp_vid_t i, int64_t & local_sum){
-            int64_t gain = 0;
-            for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
-                sgp_vid_t v = g.graph.entries(j);
-                sgp_wgt_t wgt = g.values(j);
-                //has v been chosen
-                bool vPartSwapped = (chosen_at(v) < n);
-                if (partition(i) != partition(v)) {
-                    if (vPartSwapped) {
-                        gain -= wgt;
+            if (chosen_at(v) == SGP_INFTY) {
+                int64_t gain = 0;
+                for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+                    sgp_vid_t v = g.graph.entries(j);
+                    sgp_wgt_t wgt = g.values(j);
+                    //has v been chosen
+                    bool vPartSwapped = (chosen_at(v) < n);
+                    if (partition(i) != partition(v)) {
+                        if (vPartSwapped) {
+                            gain -= wgt;
+                        }
+                        else {
+                            gain += wgt;
+                        }
                     }
                     else {
-                        gain += wgt;
+                        if (vPartSwapped) {
+                            gain += wgt;
+                        }
+                        else {
+                            gain -= wgt;
+                        }
                     }
+                }
+                if (gain > 0) {
+                    sgp_vid_t write_loc = Kokkos::atomic_fetch_add(&chosen_total(), 1);
+                    start_perm(write_loc) = i;
+                    pre_commit_chosen(i) = write_loc;
                 }
                 else {
-                    if (vPartSwapped) {
-                        gain += wgt;
-                    }
-                    else {
-                        gain -= wgt;
-                    }
+                    pre_commit_chosen(i) = SGP_INFTY;
                 }
-            }
-            if (gain > 0) {
-                sgp_vid_t write_loc = Kokkos::atomic_fetch_add(&chosen_total(), 1);
-                start_perm(write_loc) = i;
-                pre_commit_chosen(i) = write_loc;
-            }
-            else {
-                pre_commit_chosen(i) = SGP_INFTY;
             }
         }, chosen);
 
