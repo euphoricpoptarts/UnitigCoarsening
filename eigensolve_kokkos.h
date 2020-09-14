@@ -592,25 +592,7 @@ struct sortPart
     }
 };
 
-sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_view_t& vtx_w, ExperimentLoggerUtil& experiment, const int level) {
-    sgp_vid_t n = g.numRows();
-
-    pool_t rand_pool(std::time(nullptr));
-    //perm contains the order in which we will swap the vertices
-    vtx_view_t rand_perm = generate_permutation(n, rand_pool);
-    vtx_view_t perm("swap order", n);
-
-    int64_t start_imb = 0;
-    Kokkos::parallel_reduce("calculate starting imb", n, KOKKOS_LAMBDA(const sgp_vid_t i, int64_t & local_imb){
-        if (partition(i) == 0.0) {
-            local_imb += vtx_w(i);
-        }
-        else {
-            local_imb -= vtx_w(i);
-        }
-        perm(i) = SGP_INFTY;
-    }, start_imb);
-
+vtx_view_t interleave_for_balance(const eigenview_t& partition, const vtx_view_t& rand_perm, const vtx_view_t& vtx_w, const int64_t start_imb, const sgp_vid_t n) {
     //move permutation into parts but respect ordering
     vtx_view_t part0, part1;
     sgp_vid_t part0_size = 0, part1_size = 0;
@@ -636,17 +618,18 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
         Kokkos::View<int64_t*> imbalance_part("scan for imbalance reducer", part0_size);
         scanVtxWgt scan_imb(vtx_w, part0, imbalance_part);
         Kokkos::parallel_scan("scan imbalance", part0_size, scan_imb);
-        findInterleaveIdx find_interleave(target_imb, scan_imb);
+        findInterleaveIdx find_interleave(target_imb, imbalance_part);
         Kokkos::parallel_reduce("find interleave", part0_size, find_interleave, interleave);
     }
-    else if(target_imb > 0) {
+    else if (target_imb > 0) {
         Kokkos::View<int64_t*> imbalance_part("scan for imbalance reducer", part1_size);
         scanVtxWgt scan_imb(vtx_w, part1, imbalance_part);
         Kokkos::parallel_scan("scan imbalance", part1_size, scan_imb);
-        findInterleaveIdx find_interleave(target_imb, scan_imb);
+        findInterleaveIdx find_interleave(target_imb, imbalance_part);
         Kokkos::parallel_reduce("find interleave", part1_size, find_interleave, interleave);
     }
 
+    vtx_view_t perm("swap order", n);
     sgp_vid_t interleave_size = 0;
     if (start_imb > 0) {
         interleaveParts interleave_parts = interleaveParts(part0, part1, perm, interleave);
@@ -664,6 +647,28 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
         }
         Kokkos::parallel_scan("interleave parts", interleave_size, interleave_parts);
     }
+
+    return perm;
+}
+
+sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_view_t& vtx_w, ExperimentLoggerUtil& experiment, const int level) {
+    sgp_vid_t n = g.numRows();
+
+    pool_t rand_pool(std::time(nullptr));
+    //perm contains the order in which we will swap the vertices
+    vtx_view_t rand_perm = generate_permutation(n, rand_pool);
+
+    int64_t start_imb = 0;
+    Kokkos::parallel_reduce("calculate starting imb", n, KOKKOS_LAMBDA(const sgp_vid_t i, int64_t & local_imb){
+        if (partition(i) == 0.0) {
+            local_imb += vtx_w(i);
+        }
+        else {
+            local_imb -= vtx_w(i);
+        }
+    }, start_imb);
+
+    vtx_view_t perm = interleave_for_balance(partition, rand_perm, vtx_w, start_imb, n);
 
     vtx_view_t reverse_map("reversed", n);
     Kokkos::parallel_for("construct reverse map", n, KOKKOS_LAMBDA(sgp_vid_t i) {
