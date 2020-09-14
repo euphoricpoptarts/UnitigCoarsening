@@ -656,7 +656,11 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
 
     pool_t rand_pool(std::time(nullptr));
     //perm contains the order in which we will swap the vertices
-    vtx_view_t rand_perm = generate_permutation(n, rand_pool);
+    vtx_view_t start_perm("starting permutation", n);
+    vtx_view_t chosen_at("reverse permutation", n);
+    Kokkos::parallel_for("init reverse", n, KOKKOS_LAMBDA(const sgp_vid_t i){
+        chosen_at(i) = SGP_INFTY;
+    });
 
     int64_t start_imb = 0;
     Kokkos::parallel_reduce("calculate starting imb", n, KOKKOS_LAMBDA(const sgp_vid_t i, int64_t & local_imb){
@@ -667,8 +671,128 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
             local_imb -= vtx_w(i);
         }
     }, start_imb);
+    Kokkos::View<sgp_vid_t> chosen_total("chosen total");
+    sgp_vid_t chosen = 0;
+    do {
+        vtx_view_t pre_commit_chosen("pre commit chosen", n);
+        chosen = 0;
+        //choose some vertices that have a good gain based on the currently chosen vtx
+        Kokkos::parallel_reduce("choose some vtx", n, KOKKOS_LAMBDA(const sgp_vid_t i, int64_t & local_sum){
+            int64_t gain = 0;
+            for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+                sgp_vid_t v = g.graph.entries(j);
+                sgp_wgt_t wgt = g.values(j);
+                //has v been chosen
+                bool vPartSwapped = (chosen_at(v) < n);
+                if (partition(i) != partition(v)) {
+                    if (vPartSwapped) {
+                        gain -= wgt;
+                    }
+                    else {
+                        gain += wgt;
+                    }
+                }
+                else {
+                    if (vPartSwapped) {
+                        gain += wgt;
+                    }
+                    else {
+                        gain -= wgt;
+                    }
+                }
+            }
+            if (gain > 0) {
+                sgp_vid_t write_loc = Kokkos::atomic_fetch_add(&chosen_total(), 1);
+                start_perm(write_loc) = i;
+                pre_commit_chosen(i) = write_loc;
+            }
+            else {
+                pre_commit_chosen(i) = SGP_INFTY;
+            }
+        }, chosen);
 
-    vtx_view_t perm = interleave_for_balance(partition, rand_perm, vtx_w, start_imb, n);
+        //this can be optimized to be only on the chosen range
+        Kokkos::parallel_for("commit chosen", n, KOKKOS_LAMBDA(const sgp_vid_t i){
+            if (pre_commit_chosen(i) < n) {
+                chosen_at(i) = pre_commit_chosen(i);
+            }
+        });
+    } while (chosen > 10);
+
+    //this might not be necessary if we only interleave on the chosen range
+    Kokkos::parallel_scan("move rest of vtx", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & update, const bool final){
+        //i was not chosen
+        if (chosen_at(i) >= n) {
+            if (final) {
+                start_perm(chosen_total() + update) = i;
+            }
+            update += 1;
+        }
+    });
+
+    vtx_view_t mid_perm = interleave_for_balance(partition, start_perm, vtx_w, start_imb, n);
+
+    sgp_vid_t chosen_host = 0;
+    Kokkos::deep_copy(chosen_host, chosen_total);
+
+    vtx_view_t end_perm("final permutation", n);
+    Kokkos::deep_copy(chosen_total, 0);
+    Kokkos::View<sgp_vid_t> end_write("end write");
+
+    Kokkos::parallel_for("remove bad gains", chosen_host, KOKKOS_LAMBDA(const sgp_vid_t i){
+        int64_t gain = 0, gainLost = 0;
+        for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+            sgp_vid_t v = g.graph.entries(j);
+            sgp_wgt_t wgt = g.values(j);
+            //has v been chosen
+            bool vPartSwappedBefore = (chosen_at(v) < i);
+            bool vPartSwappedAfter = !vPartSwappedBefore && (chosen_at(v) < n);
+            if (partition(i) != partition(v)) {
+                if (vPartSwappedBefore) {
+                    gain -= wgt;
+                }
+                else {
+                    gain += wgt;
+                }
+                if (vPartSwappedAfter) {
+                    gainLost += wgt;
+                }
+            }
+            else {
+                if (vPartSwappedBefore) {
+                    gain += wgt;
+                }
+                else {
+                    gain -= wgt;
+                }
+                if (vPartSwappedAfter) {
+                    gainLost -= wgt;
+                }
+            }
+        }
+        //will decide later what to do with gainLost
+        if (gain > 0) {
+            sgp_vid_t write_loc = Kokkos::atomic_fetch_add(&chosen_total(), 1);
+            end_perm(write_loc) = i;
+        }
+        else {
+            sgp_vid_t write_loc = n - 1 - Kokkos::atomic_fetch_add(&end_write(), 1);
+            end_perm(write_loc) = i;
+        }
+    });
+
+    //this might not be necessary if we only interleave on the chosen range
+    Kokkos::parallel_scan("move rest of vtx", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& update, const bool final){
+        //i was not chosen
+        if (chosen_at(i) >= n) {
+            if (final) {
+                end_perm(chosen_total() + update) = i;
+            }
+            update += 1;
+        }
+    });
+
+    vtx_view_t perm = interleave_for_balance(partition, end_perm, vtx_w, start_imb, n);
 
     vtx_view_t reverse_map("reversed", n);
     Kokkos::parallel_for("construct reverse map", n, KOKKOS_LAMBDA(sgp_vid_t i) {
