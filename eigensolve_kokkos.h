@@ -677,7 +677,7 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
         vtx_view_t pre_commit_chosen("pre commit chosen", n);
         chosen = 0;
         //choose some vertices that have a good gain based on the currently chosen vtx
-        Kokkos::parallel_reduce("choose some vtx", n, KOKKOS_LAMBDA(const sgp_vid_t i, int64_t & local_sum){
+        Kokkos::parallel_reduce("choose some vtx", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& local_sum){
             if (chosen_at(v) == SGP_INFTY) {
                 int64_t gain = 0;
                 for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
@@ -706,6 +706,7 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
                     sgp_vid_t write_loc = Kokkos::atomic_fetch_add(&chosen_total(), 1);
                     start_perm(write_loc) = i;
                     pre_commit_chosen(i) = write_loc;
+                    local_sum++;
                 }
                 else {
                     pre_commit_chosen(i) = SGP_INFTY;
