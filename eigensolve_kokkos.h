@@ -742,15 +742,21 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
     Kokkos::deep_copy(chosen_total, 0);
     Kokkos::View<sgp_vid_t> end_write("end write");
 
+    vtx_view_t reverse_map("reversed", n);
+    Kokkos::parallel_for("construct reverse map", n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        reverse_map(mid_perm(i)) = i;
+    });
+
     Kokkos::parallel_for("remove bad gains", chosen_host, KOKKOS_LAMBDA(const sgp_vid_t i){
         int64_t gain = 0, gainLost = 0;
-        for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+        sgp_vid_t u = mid_perm(i);
+        for (sgp_eid_t j = g.graph.row_map(u); j < g.graph.row_map(u + 1); j++) {
             sgp_vid_t v = g.graph.entries(j);
             sgp_wgt_t wgt = g.values(j);
             //has v been chosen
-            bool vPartSwappedBefore = (chosen_at(v) < i);
-            bool vPartSwappedAfter = !vPartSwappedBefore && (chosen_at(v) < n);
-            if (partition(i) != partition(v)) {
+            bool vPartSwappedBefore = (reverse_map(v) < reverse_map(u));
+            bool vPartSwappedAfter = !vPartSwappedBefore && (reverse_map(v) < chosen_host);
+            if (partition(u) != partition(v)) {
                 if (vPartSwappedBefore) {
                     gain -= wgt;
                 }
@@ -776,20 +782,21 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
         //will decide later what to do with gainLost
         if (gain > 0) {
             sgp_vid_t write_loc = Kokkos::atomic_fetch_add(&chosen_total(), 1);
-            end_perm(write_loc) = i;
+            end_perm(write_loc) = u;
         }
         else {
             sgp_vid_t write_loc = n - 1 - Kokkos::atomic_fetch_add(&end_write(), 1);
-            end_perm(write_loc) = i;
+            end_perm(write_loc) = u;
         }
     });
 
     //this might not be necessary if we only interleave on the chosen range
     Kokkos::parallel_scan("move rest of vtx", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& update, const bool final){
         //i was not chosen
-        if (chosen_at(i) >= n) {
+        sgp_vid_t u = mid_perm(i);
+        if (chosen_at(u) >= n) {
             if (final) {
-                end_perm(chosen_total() + update) = i;
+                end_perm(chosen_total() + update) = u;
             }
             update += 1;
         }
@@ -797,7 +804,6 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
 
     vtx_view_t perm = interleave_for_balance(partition, end_perm, vtx_w, start_imb, n);
 
-    vtx_view_t reverse_map("reversed", n);
     Kokkos::parallel_for("construct reverse map", n, KOKKOS_LAMBDA(sgp_vid_t i) {
         reverse_map(perm(i)) = i;
     });
