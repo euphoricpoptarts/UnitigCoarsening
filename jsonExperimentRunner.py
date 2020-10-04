@@ -33,6 +33,30 @@ def printStat(fieldTitle, statList, outfile):
     med = median(statList)
     print("{}: mean={}, median={}, min={}, max={}, std-dev={}".format(fieldTitle, avg, med, min_s, max_s, sdev), file=outfile)
 
+def listToStats(statList):
+    stats = {}
+    stats["min"] = min(statList)
+    stats["max"] = max(statList)
+    stats["mean"] = mean(statList)
+    stats["std-dev"] = "only one data-point"
+    if len(statList) > 1:
+        stats["std-dev"] = stdev(statList)
+    stats["median"] = median(statList)
+    return stats
+
+def dictToStats(data):
+    output = {}
+    for key, value in data.items():
+        if isinstance(value[0], dict):
+            d = []
+            for datum in value:
+                d.append(dictToStats(datum))
+            output[key] = d
+        else:
+            output[key] = listToStats(value)
+    return output
+
+
 def printDict(data, outfile):
     for key, value in data.items():
         if isinstance(value[0], dict):
@@ -75,6 +99,11 @@ def analyzeMetrics(metricsPath, logFile):
 
     with open(logFile, "w") as output:
         printDict(data, output)
+
+    statsDict = dictToStats(data)
+    jsonFile = os.path.splitext(logFile) + ".json"
+    with open(jsonFile, "w") as output:
+        json.dump(statsDict, output)
 
 def analyzeMetricsOld(metricsPath, logFile):
     with open(metricsPath) as fp:
