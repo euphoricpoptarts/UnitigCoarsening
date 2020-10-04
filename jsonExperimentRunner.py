@@ -101,7 +101,7 @@ def analyzeMetrics(metricsPath, logFile):
         printDict(data, output)
 
     statsDict = dictToStats(data)
-    jsonFile = os.path.splitext(logFile) + ".json"
+    jsonFile = os.path.splitext(logFile)[0] + ".json"
     with open(jsonFile, "w") as output:
         json.dump(statsDict, output)
 
