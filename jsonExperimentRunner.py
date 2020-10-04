@@ -11,17 +11,17 @@ from threading import Thread, BoundedSemaphore
 from itertools import zip_longest
 
 cudaCall = "./sgpar.cuda"
-hecCall = "./sgpar.spec_hec"
-mtCall = "./sgpar.spec_mt"
+hecCall = "./sgpar.hec"
+mtCall = "./sgpar.mt"
 mpCall = "./sgpar.mp"
-matchCall = "./sgpar.spec_match"
-misCall = "./sgpar.spec_mis"
+matchCall = "./sgpar.match"
+misCall = "./sgpar.mis"
 serialCall = "./sgpar_serial"
 bigParCall = "./sgpar_hg_exp"
 bigSerialCall = "./sgpar_hg_serial"
 
 rateLimit = BoundedSemaphore(value = 1)
-waitLimit = 3600
+waitLimit = 10800
 
 def printStat(fieldTitle, statList, outfile):
     min_s = min(statList)
@@ -34,11 +34,11 @@ def printStat(fieldTitle, statList, outfile):
     print("{}: mean={}, median={}, min={}, max={}, std-dev={}".format(fieldTitle, avg, med, min_s, max_s, sdev), file=outfile)
 
 def printDict(data, outfile):
-    for key, value in data:
+    for key, value in data.items():
         if isinstance(value[0], dict):
             for idx, datum in enumerate(value):
                 print("{} Level {}:".format(key, idx), file=outfile)
-                printDict(datum)
+                printDict(datum, outfile)
         else:
             printStat(key, value, outfile)
 
@@ -73,8 +73,8 @@ def analyzeMetrics(metricsPath, logFile):
 
     data = transposeListOfDicts(data)
 
-    with open(logfile) as output:
-        printDict(data)
+    with open(logFile, "w") as output:
+        printDict(data, output)
 
 def analyzeMetricsOld(metricsPath, logFile):
     with open(metricsPath) as fp:
@@ -141,7 +141,9 @@ def runExperiment(executable, filepath, metricDir, logFile, t_count):
     call_str = " ".join(call)
     with rateLimit:
         print("running {}".format(call_str), flush=True)
-        process = subprocess.Popen(call, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=myenv)
+        stdout_f = "/var/tmp/sgpar_log.txt"
+        with open(stdout_f, 'w') as fp:
+            process = subprocess.Popen(call, stdout=fp, stderr=subprocess.DEVNULL, env=myenv)
         try:
             returncode = process.wait(timeout = waitLimit)
         except subprocess.TimeoutExpired:
@@ -158,14 +160,15 @@ def runExperiment(executable, filepath, metricDir, logFile, t_count):
 
 def processGraph(filepath, metricDir, logFileTemplate):
     
-    logFile = logFileTemplate.format("spec_hec")
-    runExperiment(hecCall, filepath, metricDir, logFile, 64)
-    logFile = logFileTemplate.format("spec_mt")
-    runExperiment(mtCall, filepath, metricDir, logFile, 64)
-    logFile = logFileTemplate.format("spec_match")
-    runExperiment(matchCall, filepath, metricDir, logFile, 64)
-    logFile = logFileTemplate.format("spec_mis")
-    runExperiment(misCall, filepath, metricDir, logFile, 64)
+    #for t in [1,2,4,8,16,32]:
+    logFile = logFileTemplate.format("spec_hec")#.format(t))
+    runExperiment(cudaCall, filepath, metricDir, logFile, 64)
+        #logFile = logFileTemplate.format("fm_mt_{}".format(t))
+        #runExperiment(mtCall, filepath, metricDir, logFile, t)
+        #logFile = logFileTemplate.format("fm_match_{}".format(t))
+        #runExperiment(matchCall, filepath, metricDir, logFile, t)
+        #logFile = logFileTemplate.format("fm_mis_{}".format(t))
+        #runExperiment(misCall, filepath, metricDir, logFile, t)
 
     #logFile = logFileTemplate.format("serialHEC")
     #runExperiment(serialCall, filepath, metricDir, logFile, t_count)
