@@ -33,9 +33,52 @@ def printStat(fieldTitle, statList, outfile):
     med = median(statList)
     print("{}: mean={}, median={}, min={}, max={}, std-dev={}".format(fieldTitle, avg, med, min_s, max_s, sdev), file=outfile)
 
+def printDict(data, outfile):
+    for key, value in data:
+        if isinstance(value[0], dict):
+            for idx, datum in enumerate(value):
+                print("{} Level {}:".format(key, idx), file=outfile)
+                printDict(datum)
+        else:
+            printStat(key, value, outfile)
+
+def transposeListOfDicts(data):
+    data = [x for x in data if x is not None]
+    transposed = {}
+    if len(data) == 0:
+        return transposed
+    #all entries should have same fields
+    fields = [x for x in data[0]]
+    for field in fields:
+        transposed[field] = [datum[field] for datum in data]
+
+    fieldsToTranpose = []
+    for key, value in transposed.items():
+        if len(value) > 0 and isinstance(value[0], list):
+            fieldsToTranpose.append(key)
+
+    for field in fieldsToTranpose:
+        #value is a list of lists, transform it into list of dicts
+        aligned_lists = zip_longest(*transposed[field])
+        dict_list = []
+        for l in aligned_lists:
+            d = transposeListOfDicts(l)
+            dict_list.append(d)
+        transposed[field] = dict_list
+    return transposed
+
 def analyzeMetrics(metricsPath, logFile):
     with open(metricsPath) as fp:
-            data = json.load(fp)
+        data = json.load(fp)
+
+    data = transposeListOfDicts(data)
+
+    with open(logfile) as output:
+        printDict(data)
+
+def analyzeMetricsOld(metricsPath, logFile):
+    with open(metricsPath) as fp:
+        data = json.load(fp)
 
     times = [d['total-duration-seconds'] for d in data]
     coarsenTimes = [d['coarsen-duration-seconds'] for d in data]
