@@ -120,6 +120,7 @@ int dump_mtx(const matrix_type& mtx, char* filename, bool symmetric) {
 }
 
 SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
+	vtx_view_t& c_vtx_w, const vtx_view_t f_vtx_w,
     const matrix_type& interp_mtx,
     const matrix_type& g,
     const int coarsening_level) {
@@ -350,6 +351,9 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
 
     graph_type gc_graph(entries_nonloop, row_map_nonloop);
     gc = matrix_type("gc", nc, values_nonloop, gc_graph);
+
+	c_vtx_w = vtx_view_t("coarse vtx weights", interp_mtx.numCols());
+    KokkosSparse::spmv("N", 1.0, interp_transpose, f_vtx_w, 0.0, c_vtx_w);
 
     return EXIT_SUCCESS;
 }
@@ -947,7 +951,7 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
 
     timer.reset();
 #ifdef SPGEMM
-    sgp_build_coarse_graph_spgemm(gc, interpolation_graph, g, coarsening_level);
+    sgp_build_coarse_graph_spgemm(gc, c_vtx_w, f_vtx_w, interpolation_graph, g, coarsening_level);
 #else
     sgp_build_coarse_graph_msd(gc, c_vtx_w, interpolation_graph, g, f_vtx_w, coarsening_level, experiment);
 #endif
