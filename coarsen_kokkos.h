@@ -7,8 +7,8 @@
 #include <list>
 #include <ctime>
 #include <limits>
-#include <ofstream>
-#include <ostringstream>
+#include <fstream>
+#include <stringstream>
 
 #ifdef _OPENMP
 #include <omp.h>
