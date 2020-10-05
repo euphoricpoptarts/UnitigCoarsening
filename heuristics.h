@@ -291,6 +291,72 @@ namespace sgpar_kokkos {
         return EXIT_SUCCESS;
     }
 
+    SGPAR_API int sgp_coarsen_GOSH(matrix_type& interp,
+        sgp_vid_t* nvertices_coarse_ptr,
+        const matrix_type& g,
+        const int coarsening_level,
+        sgp_pcg32_random_t* rng,
+        ExperimentLoggerUtil& experiment) {
+
+        sgp_vid_t n = g.numRows();
+
+        Kokkos::View<int*> colors = mis_2(g);
+
+        Kokkos::View<sgp_vid_t> nvc("nvertices_coarse");
+        Kokkos::View<sgp_vid_t*> vcmap("vcmap", n);
+
+        int first_color = 1;
+
+        //create aggregates for color 1
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+            if (colors(i) == first_color) {
+                vcmap(i) = Kokkos::atomic_fetch_add(&nvc(), 1);
+            }
+            else {
+                vcmap(i) = SGP_INFTY;
+            }
+        });
+
+        //add unaggregated vertices to aggregate of highest degree neighbor
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+            if (colors(i) != first_color) {
+                //could use a thread team here
+                sgp_eid_t max_degree = 0;
+                for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+                    sgp_vid_t v = g.graph.entries(j);
+                    sgp_eid_t degree = g.graph.row_map(v + 1) - g.graph.row_map(v);
+                    if (degree > max_degree) {
+                        max_degree = degree;
+                        vcmap(i) = vcmap(v);
+                    }
+                }
+            }
+        });
+
+        sgp_vid_t nc = 0;
+        Kokkos::deep_copy(nc, nvc);
+        *nvertices_coarse_ptr = nc;
+
+        edge_view_t row_map("interpolate row map", n + 1);
+
+        Kokkos::parallel_for(n + 1, KOKKOS_LAMBDA(sgp_vid_t u){
+            row_map(u) = u;
+        });
+
+        vtx_view_t entries("interpolate entries", n);
+        wgt_view_t values("interpolate values", n);
+        //compute the interpolation weights
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t u){
+            entries(u) = vcmap(u);
+            values(u) = 1.0;
+        });
+
+        graph_type graph(entries, row_map);
+        interp = matrix_type("interpolate", nc, values, graph);
+
+        return EXIT_SUCCESS;
+    }
+
     template <class in, class out>
     Kokkos::View<out*> sort_order(Kokkos::View<in*> array, in max, in min) {
         typedef Kokkos::BinOp1D< Kokkos::View<in*> > BinOp;
