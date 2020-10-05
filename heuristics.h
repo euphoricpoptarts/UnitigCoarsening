@@ -100,6 +100,103 @@ namespace sgpar_kokkos {
         return state;
     }
 
+    Kokkos::View<int*> GOSH_clusters(const matrix_type& g) {
+        //finds the central vertices for GOSH clusters
+        //approximately this is a maximal independent set (if you pretend edges whose endpoints both exceed degree thresholds don't exist)
+        //IS vertices are preferred to be degrees with high degree, so it should be small
+
+        sgp_vid_t n = g.numRows();
+
+        //0: unassigned
+        //1: in IS
+        //-1: adjacent to an IS vertex
+        Kokkos::View<int*> state("psuedo is membership", n);
+
+        sgp_vid_t unassigned_total = n;
+
+        //gonna keep this as an edge view in case we wanna do weighted degree
+        edge_view_t degrees("degrees", n);
+        Kokkos::parallel_for("populate degrees", n, KOKKOS_LAMBDA(sgp_vid_t i){
+            degrees(i) = g.graph.row_map(i + 1) - g.graph.row_map(i);
+        });
+        sgp_eid_t threshold = g.numCols() / g.numRows();
+
+        while (unassigned_total > 0) {
+
+            Kokkos::View<int*> tuple_state("tuple state", n);
+            edge_view_t tuple_degree("tuple rand", n);
+            vtx_view_t tuple_idx("tuple index", n);
+
+            Kokkos::View<int*> tuple_state_update("tuple state", n);
+            edge_view_t tuple_degree_update("tuple rand", n);
+            vtx_view_t tuple_idx_update("tuple index", n);
+            Kokkos::parallel_for(n, KOKKOS_LAMBDA(const sgp_vid_t i){
+                tuple_state(i) = state(i);
+                tuple_degree(i) = degrees(i);
+                tuple_idx(i) = i;
+            });
+
+            Kokkos::parallel_for(n, KOKKOS_LAMBDA(const sgp_vid_t i){
+                int max_state = tuple_state(i);
+                sgp_eid_t max_degree = tuple_rand(i);
+                sgp_vid_t max_idx = tuple_idx(i);
+
+                for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+                    sgp_vid_t v = g.graph.entries(j);
+                    bool is_max = false;
+                    if (tuple_state(v) > max_state) {
+                        is_max = true;
+                    }
+                    else if (tuple_state(v) == max_state) {
+                        if (tuple_degree(v) > max_degree) {
+                            is_max = true;
+                        }
+                        else if (tuple_degree(v) == max_degree) {
+                            if (tuple_idx(v) > max_idx) {
+                                is_max = true;
+                            }
+                        }
+                    }
+                    //pretend edges between two vertices exceeding threshold do not exist
+                    if (degrees(i) > threshold && degrees(v) > threshold) {
+                        is_max = false;
+                    }
+                    if (is_max) {
+                        max_state = tuple_state(v);
+                        max_degree = tuple_degree(v);
+                        max_idx = tuple_idx(v);
+                    }
+                }
+                tuple_state_update(i) = max_state;
+                tuple_degree_update(i) = max_degree;
+                tuple_idx_update(i) = max_idx;
+            });
+
+            Kokkos::parallel_for(n, KOKKOS_LAMBDA(const sgp_vid_t i){
+                tuple_state(i) = tuple_state_update(i);
+                tuple_degree(i) = tuple_degree_update(i);
+                tuple_idx(i) = tuple_idx_update(i);
+            });
+
+            unassigned_total = 0;
+            Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & thread_sum){
+                if (state(i) == 0) {
+                    if (tuple_idx(i) == i) {
+                        state(i) = 1;
+                    }
+                    //check if at least one of neighbors are in the IS or will be placed into the IS
+                    else if (tuple_state(i) == 1 || tuple_idx(tuple_idx(i)) == tuple_idx(i)) {
+                        state(i) = -1;
+                    }
+                }
+                if (state(i) == 0) {
+                    thread_sum++;
+                }
+            }, unassigned_total);
+        }
+        return state;
+    }
+
     SGPAR_API int sgp_coarsen_mis_2(matrix_type& interp,
         sgp_vid_t* nvertices_coarse_ptr,
         const matrix_type& g,
