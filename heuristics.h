@@ -138,7 +138,7 @@ namespace sgpar_kokkos {
 
             Kokkos::parallel_for(n, KOKKOS_LAMBDA(const sgp_vid_t i){
                 int max_state = tuple_state(i);
-                sgp_eid_t max_degree = tuple_rand(i);
+                sgp_eid_t max_degree = tuple_degree(i);
                 sgp_vid_t max_idx = tuple_idx(i);
 
                 for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
