@@ -186,7 +186,7 @@ namespace sgpar_kokkos {
             Kokkos::parallel_reduce(unassigned_total, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & thread_sum){
                 sgp_vid_t u = unassigned(i);
                 if (state(u) == 0) {
-                    if (tuple_idx(u) == i) {
+                    if (tuple_idx(u) == u) {
                         state(u) = 1;
                     }
                     //check if at least one of neighbors are in the IS or will be placed into the IS
