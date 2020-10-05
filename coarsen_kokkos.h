@@ -950,8 +950,10 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
     sgp_coarsen_HEC(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
 #elif defined PUREMATCH || MTMETIS
     sgp_coarsen_match(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
-#else
+#elif defined MIS
     sgp_coarsen_mis_2(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
+#else
+    sgp_coarsen_GOSH(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
 #endif
 	experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
 
