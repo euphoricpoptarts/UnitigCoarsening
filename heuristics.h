@@ -300,7 +300,7 @@ namespace sgpar_kokkos {
 
         sgp_vid_t n = g.numRows();
 
-        Kokkos::View<int*> colors = mis_2(g);
+        Kokkos::View<int*> colors = GOSH_clusters(g);
 
         Kokkos::View<sgp_vid_t> nvc("nvertices_coarse");
         Kokkos::View<sgp_vid_t*> vcmap("vcmap", n);
