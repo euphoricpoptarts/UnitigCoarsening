@@ -119,7 +119,7 @@ namespace sgpar_kokkos {
         Kokkos::parallel_for("populate degrees", n, KOKKOS_LAMBDA(sgp_vid_t i){
             degrees(i) = g.graph.row_map(i + 1) - g.graph.row_map(i);
         });
-        sgp_eid_t threshold = g.numCols() / g.numRows();
+        sgp_eid_t threshold = g.nnz() / g.numRows();
 
         while (unassigned_total > 0) {
 
