@@ -83,7 +83,7 @@ int write_g(const matrix_type& g, char* out_f, bool symmetric) {
     {
         for (sgp_eid_t j = g.graph.row_map(u); j < g.graph.row_map(u+1); j++) {
             sgp_vid_t v = g.graph.entries(j);
-            if (general || u > v) {
+            if (!symmetric || u > v) {
                 out_s << (u + 1) << " " << (v + 1) << std::endl;
             }
         }
