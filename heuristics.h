@@ -116,8 +116,10 @@ namespace sgpar_kokkos {
 
         //gonna keep this as an edge view in case we wanna do weighted degree
         edge_view_t degrees("degrees", n);
+        vtx_view_t unassigned_vtx("unassigned vertices", n);
         Kokkos::parallel_for("populate degrees", n, KOKKOS_LAMBDA(sgp_vid_t i){
             degrees(i) = g.graph.row_map(i + 1) - g.graph.row_map(i);
+            unassigned_vtx(i) = i;
         });
         sgp_eid_t threshold = g.nnz() / g.numRows();
 
@@ -136,12 +138,13 @@ namespace sgpar_kokkos {
                 tuple_idx(i) = i;
             });
 
-            Kokkos::parallel_for(n, KOKKOS_LAMBDA(const sgp_vid_t i){
-                int max_state = tuple_state(i);
-                sgp_eid_t max_degree = tuple_degree(i);
-                sgp_vid_t max_idx = tuple_idx(i);
+            Kokkos::parallel_for(unassigned, KOKKOS_LAMBDA(const sgp_vid_t i){
+                sgp_vid_t u = unassigned(i);
+                int max_state = tuple_state(u);
+                sgp_eid_t max_degree = tuple_degree(u);
+                sgp_vid_t max_idx = tuple_idx(u);
 
-                for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+                for (sgp_eid_t j = g.graph.row_map(u); j < g.graph.row_map(u + 1); j++) {
                     sgp_vid_t v = g.graph.entries(j);
                     bool is_max = false;
                     if (tuple_state(v) > max_state) {
@@ -158,7 +161,7 @@ namespace sgpar_kokkos {
                         }
                     }
                     //pretend edges between two vertices exceeding threshold do not exist
-                    if (degrees(i) > threshold && degrees(v) > threshold) {
+                    if (degrees(u) > threshold && degrees(v) > threshold) {
                         is_max = false;
                     }
                     if (is_max) {
@@ -167,32 +170,46 @@ namespace sgpar_kokkos {
                         max_idx = tuple_idx(v);
                     }
                 }
-                tuple_state_update(i) = max_state;
-                tuple_degree_update(i) = max_degree;
-                tuple_idx_update(i) = max_idx;
+                tuple_state_update(u) = max_state;
+                tuple_degree_update(u) = max_degree;
+                tuple_idx_update(u) = max_idx;
             });
 
-            Kokkos::parallel_for(n, KOKKOS_LAMBDA(const sgp_vid_t i){
-                tuple_state(i) = tuple_state_update(i);
-                tuple_degree(i) = tuple_degree_update(i);
-                tuple_idx(i) = tuple_idx_update(i);
+            Kokkos::parallel_for(unassigned, KOKKOS_LAMBDA(const sgp_vid_t i){
+                sgp_vid_t u = unassigned(i);
+                tuple_state(u) = tuple_state_update(u);
+                tuple_degree(u) = tuple_degree_update(u);
+                tuple_idx(u) = tuple_idx_update(u);
             });
 
             unassigned_total = 0;
-            Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & thread_sum){
-                if (state(i) == 0) {
-                    if (tuple_idx(i) == i) {
-                        state(i) = 1;
+            Kokkos::parallel_reduce(unassigned, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & thread_sum){
+                sgp_vid_t u = unassigned(i);
+                if (state(u) == 0) {
+                    if (tuple_idx(u) == i) {
+                        state(u) = 1;
                     }
                     //check if at least one of neighbors are in the IS or will be placed into the IS
-                    else if (tuple_state(i) == 1 || tuple_idx(tuple_idx(i)) == tuple_idx(i)) {
-                        state(i) = -1;
+                    else if (tuple_state(u) == 1 || tuple_idx(tuple_idx(u)) == tuple_idx(u)) {
+                        state(u) = -1;
                     }
                 }
-                if (state(i) == 0) {
+                if (state(u) == 0) {
                     thread_sum++;
                 }
             }, unassigned_total);
+
+            vtx_view_t next_unassigned("next unassigned", n);
+            Kokkos::parallel_scan("create next unassigned", unassigned, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & update, const bool final){
+                sgp_vid_t u = unassigned(i);
+                if (state(u) == 0) {
+                    if (final) {
+                        next_unassigned(update) = u;
+                    }
+                    update++;
+                }
+            });
+            unassigned = next_unassigned;
         }
         return state;
     }
