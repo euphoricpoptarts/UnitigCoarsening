@@ -116,10 +116,10 @@ namespace sgpar_kokkos {
 
         //gonna keep this as an edge view in case we wanna do weighted degree
         edge_view_t degrees("degrees", n);
-        vtx_view_t unassigned_vtx("unassigned vertices", n);
+        vtx_view_t unassigned("unassigned vertices", n);
         Kokkos::parallel_for("populate degrees", n, KOKKOS_LAMBDA(sgp_vid_t i){
             degrees(i) = g.graph.row_map(i + 1) - g.graph.row_map(i);
-            unassigned_vtx(i) = i;
+            unassigned(i) = i;
         });
         sgp_eid_t threshold = g.nnz() / g.numRows();
 
@@ -138,7 +138,7 @@ namespace sgpar_kokkos {
                 tuple_idx(i) = i;
             });
 
-            Kokkos::parallel_for(unassigned, KOKKOS_LAMBDA(const sgp_vid_t i){
+            Kokkos::parallel_for(unassigned_total, KOKKOS_LAMBDA(const sgp_vid_t i){
                 sgp_vid_t u = unassigned(i);
                 int max_state = tuple_state(u);
                 sgp_eid_t max_degree = tuple_degree(u);
@@ -175,15 +175,15 @@ namespace sgpar_kokkos {
                 tuple_idx_update(u) = max_idx;
             });
 
-            Kokkos::parallel_for(unassigned, KOKKOS_LAMBDA(const sgp_vid_t i){
+            Kokkos::parallel_for(unassigned_total, KOKKOS_LAMBDA(const sgp_vid_t i){
                 sgp_vid_t u = unassigned(i);
                 tuple_state(u) = tuple_state_update(u);
                 tuple_degree(u) = tuple_degree_update(u);
                 tuple_idx(u) = tuple_idx_update(u);
             });
 
-            unassigned_total = 0;
-            Kokkos::parallel_reduce(unassigned, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & thread_sum){
+            sgp_vid_t next_unassigned_total = 0;
+            Kokkos::parallel_reduce(unassigned_total, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & thread_sum){
                 sgp_vid_t u = unassigned(i);
                 if (state(u) == 0) {
                     if (tuple_idx(u) == i) {
@@ -197,10 +197,10 @@ namespace sgpar_kokkos {
                 if (state(u) == 0) {
                     thread_sum++;
                 }
-            }, unassigned_total);
+            }, next_unassigned_total);
 
-            vtx_view_t next_unassigned("next unassigned", n);
-            Kokkos::parallel_scan("create next unassigned", unassigned, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & update, const bool final){
+            vtx_view_t next_unassigned("next unassigned", next_unassigned_total);
+            Kokkos::parallel_scan("create next unassigned", unassigned_total, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & update, const bool final){
                 sgp_vid_t u = unassigned(i);
                 if (state(u) == 0) {
                     if (final) {
@@ -209,6 +209,7 @@ namespace sgpar_kokkos {
                     update++;
                 }
             });
+            unassigned_total = next_unassigned_total;
             unassigned = next_unassigned;
         }
         return state;
