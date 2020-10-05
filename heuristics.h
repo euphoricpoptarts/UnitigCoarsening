@@ -103,7 +103,7 @@ namespace sgpar_kokkos {
     Kokkos::View<int*> GOSH_clusters(const matrix_type& g) {
         //finds the central vertices for GOSH clusters
         //approximately this is a maximal independent set (if you pretend edges whose endpoints both exceed degree thresholds don't exist)
-        //IS vertices are preferred to be degrees with high degree, so it should be small
+        //IS vertices are preferred to be vertices with high degree, so it should be small
 
         sgp_vid_t n = g.numRows();
 
