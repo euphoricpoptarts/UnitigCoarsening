@@ -79,10 +79,14 @@ SGPAR_API int compute_transpose(const matrix_type& mtx,
 int write_g(const matrix_type& g, char* out_f, bool symmetric) {
     std::ostringstream out_s;
     sgp_vid_t n = g.numRows();
+    edge_mirror_t row_map = Kokkos::create_mirror(g.graph.row_map);
+    Kokkos::deep_copy(row_map, g.graph.row_map);
+    vtx_mirror_t entries = Kokkos::create_mirror(g.graph.entries);
+    Kokkos::deep_copy(entries, g.graph.entries);
     for (sgp_vid_t u = 0; u < n; u++)
     {
-        for (sgp_eid_t j = g.graph.row_map(u); j < g.graph.row_map(u+1); j++) {
-            sgp_vid_t v = g.graph.entries(j);
+        for (sgp_eid_t j = row_map(u); j < row_map(u+1); j++) {
+            sgp_vid_t v = entries(j);
             if (!symmetric || u > v) {
                 out_s << (u + 1) << " " << (v + 1) << std::endl;
             }
