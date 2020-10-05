@@ -325,7 +325,7 @@ namespace sgpar_kokkos {
                 for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
                     sgp_vid_t v = g.graph.entries(j);
                     sgp_eid_t degree = g.graph.row_map(v + 1) - g.graph.row_map(v);
-                    if (degree > max_degree) {
+                    if (colors(v) == first_color && degree > max_degree) {
                         max_degree = degree;
                         vcmap(i) = vcmap(v);
                     }
