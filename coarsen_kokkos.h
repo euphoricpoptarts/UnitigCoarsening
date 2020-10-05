@@ -8,7 +8,7 @@
 #include <ctime>
 #include <limits>
 #include <fstream>
-#include <stringstream>
+#include <sstream>
 
 #ifdef _OPENMP
 #include <omp.h>
