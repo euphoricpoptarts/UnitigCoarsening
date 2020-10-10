@@ -467,6 +467,76 @@ namespace sgpar_kokkos {
         return nc;
     }
 
+    sgp_vid_t parallel_map_construct_v2(vtx_view_t vcmap, const sgp_vid_t n, const vtx_view_t vperm, const vtx_view_t hn, const vtx_view_t ordering) {
+
+        sgp_vid_t remaining_total = n;
+        Kokkos::View<sgp_vid_t> nvertices_coarse("nvertices");
+
+        vtx_view_t remaining = vperm;
+
+        while (remaining_total > 0) {
+            vtx_view_t heavy_samples("heavy samples", n);
+            Kokkos::parallel_for("init heavy samples", n, KOKKOS_LAMBDA(sgp_vid_t u){
+                heavy_samples(u) = SGP_INFTY;
+            });
+            //for every vertex v which is the heavy neighbor for at least one other vertex u
+            //we arbitrarily "match" one of the u with v
+            //each u can therefore appear once in heavy_samples
+            Kokkos::parallel_for("fill heavy samples", remaining_total, KOKKOS_LAMBDA(sgp_vid_t i){
+                sgp_vid_t u = remaining(i);
+                sgp_vid_t v = ordering(hn(u));
+                Kokkos::atomic_compare_exchange_strong(&heavy_samples(v), SGP_INFTY, u);
+            });
+            Kokkos::View<sgp_vid_t> nvertices_coarse("nvertices");
+            vtx_view_t psuedo_locks("psuedo locks", n);
+
+            Kokkos::parallel_for("do matching", n, KOKKOS_LAMBDA(sgp_vid_t v){
+                sgp_vid_t u = heavy_samples(v);
+                sgp_vid_t first = u, second = v;
+                if (v < u) {
+                    first = v;
+                    second = u;
+                }
+                if (u != SGP_INFTY && Kokkos::atomic_fetch_add(&psuedo_locks(first), 1) == 0 && Kokkos::atomic_fetch_add(&psuedo_locks(second), 1) == 0)
+                {
+                    sgp_vid_t c_id = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
+                    vperm(u) = c_id;
+                    vperm(perm(v)) = c_id;
+                }
+            });
+
+            sgp_vid_t total_unmapped = 0;
+            Kokkos::parallel_reduce("handle unmatched", remaining_total, KOKKOS_LAMBDA(sgp_vid_t i, sgp_vid_t & sum){
+                sgp_vid_t u = remaining(i);
+                if (vperm(u) == SGP_INFTY) {
+                    sgp_vid_t v = hn(u);
+                    if (vperm(v) != SGP_INFTY) {
+                        vperm(u) = vperm(v);
+                    }
+                    else {
+                        sum++;
+                    }
+                }
+            }, total_unmapped);
+
+            vtx_view_t next_perm("next perm", total_unmapped);
+            Kokkos::parallel_scan("set unmapped aside", remaining_total, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & update, const bool final){
+                sgp_vid_t u = remaining(i);
+                if (vperm(u) == SGP_INFTY) {
+                    if (final) {
+                        next_perm(update) = u;
+                    }
+                    update++;
+                }
+            });
+
+            remaining_total = total_unmapped;
+            remaining = next_perm;
+        }
+
+        return nc;
+    }
+
     SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         sgp_vid_t* nvertices_coarse_ptr,
         const matrix_type& g,
