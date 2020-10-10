@@ -500,18 +500,18 @@ namespace sgpar_kokkos {
                 if (u != SGP_INFTY && Kokkos::atomic_fetch_add(&psuedo_locks(first), 1) == 0 && Kokkos::atomic_fetch_add(&psuedo_locks(second), 1) == 0)
                 {
                     sgp_vid_t c_id = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
-                    vperm(u) = c_id;
-                    vperm(perm(v)) = c_id;
+                    vcmap(u) = c_id;
+                    vcmap(vperm(v)) = c_id;
                 }
             });
 
             sgp_vid_t total_unmapped = 0;
             Kokkos::parallel_reduce("handle unmatched", remaining_total, KOKKOS_LAMBDA(sgp_vid_t i, sgp_vid_t & sum){
                 sgp_vid_t u = remaining(i);
-                if (vperm(u) == SGP_INFTY) {
+                if (vcmap(u) == SGP_INFTY) {
                     sgp_vid_t v = hn(u);
-                    if (vperm(v) != SGP_INFTY) {
-                        vperm(u) = vperm(v);
+                    if (vcmap(v) != SGP_INFTY) {
+                        vcmap(u) = vcmap(v);
                     }
                     else {
                         sum++;
@@ -522,7 +522,7 @@ namespace sgpar_kokkos {
             vtx_view_t next_perm("next perm", total_unmapped);
             Kokkos::parallel_scan("set unmapped aside", remaining_total, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & update, const bool final){
                 sgp_vid_t u = remaining(i);
-                if (vperm(u) == SGP_INFTY) {
+                if (vcmap(u) == SGP_INFTY) {
                     if (final) {
                         next_perm(update) = u;
                     }
@@ -534,6 +534,8 @@ namespace sgpar_kokkos {
             remaining = next_perm;
         }
 
+        sgp_vid_t nc = 0;
+        Kokkos::deep_copy(nc, nvertices_coarse);
         return nc;
     }
 
