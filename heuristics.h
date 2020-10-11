@@ -481,7 +481,7 @@ namespace sgpar_kokkos {
                     }
                 }
                 if (argmax != SGP_INFTY) {
-                    vcmap(i) = argmax;
+                    vcmap(i) = vcmap(argmax);
                 }
             }
         });
@@ -502,7 +502,7 @@ namespace sgpar_kokkos {
                     }
                 }
                 if (argmax != SGP_INFTY) {
-                    vcmap(i) = argmax;
+                    vcmap(i) = vcmap(argmax);
                 }
             }
         });
