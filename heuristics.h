@@ -379,7 +379,7 @@ namespace sgpar_kokkos {
 
         vtx_view_t match("match", n);
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
-            if (vcmap(i) != SGP_INFTY) {
+            if (vcmap(i) == SGP_INFTY) {
                 match(i) = SGP_INFTY;
             }
             else {
