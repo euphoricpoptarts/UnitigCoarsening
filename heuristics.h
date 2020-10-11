@@ -511,10 +511,9 @@ namespace sgpar_kokkos {
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
             if (vcmap(i) != SGP_INFTY) {
                 for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+                    sgp_vid_t v = g.graph.entries(j);
                     if (vcmap(v) == SGP_INFTY) {
-                        if (degree >= max_d) {
-                            vcmap(v) = vcmap(i);
-                        }
+                        vcmap(v) = vcmap(i);
                     }
                 }
             }
@@ -540,6 +539,8 @@ namespace sgpar_kokkos {
         });
 
         vtx_view_t hn("heaviest neighbors", n);
+
+        pool_t rand_pool(std::time(nullptr));
 
         Kokkos::parallel_for("fill hn", remaining_total, KOKKOS_LAMBDA(sgp_vid_t r_idx) {
             //select heaviest neighbor with ties randomly broken
