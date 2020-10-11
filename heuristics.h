@@ -487,7 +487,6 @@ namespace sgpar_kokkos {
                 sgp_vid_t v = ordering(hn(u));
                 Kokkos::atomic_compare_exchange_strong(&heavy_samples(v), SGP_INFTY, u);
             });
-            Kokkos::View<sgp_vid_t> nvertices_coarse("nvertices");
             vtx_view_t psuedo_locks("psuedo locks", n);
 
             Kokkos::parallel_for("do matching", n, KOKKOS_LAMBDA(sgp_vid_t v){
