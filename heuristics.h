@@ -375,6 +375,227 @@ namespace sgpar_kokkos {
         return EXIT_SUCCESS;
     }
 
+    sgp_vid_t parallel_map_construct_prefilled(vtx_view_t vcmap, const sgp_vid_t n, const vtx_view_t vperm, const vtx_view_t hn, Kokkos::View<sgp_vid_t> nvertices_coarse) {
+
+        vtx_view_t match("match", n);
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+            if (vcmap(i) != SGP_INFTY) {
+                match(i) = SGP_INFTY;
+            }
+            else {
+                match(i) = n + 1;
+            }
+        });
+        sgp_vid_t perm_length = vperm.extent(0);
+
+        //construct mapping using heaviest edges
+        int swap = 1;
+        vtx_view_t curr_perm = vperm;
+        while (perm_length > 0) {
+            vtx_view_t next_perm("next perm", perm_length);
+            Kokkos::View<sgp_vid_t> next_length("next_length");
+
+            Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
+                sgp_vid_t u = curr_perm(i);
+                sgp_vid_t v = hn(u);
+                int condition = u < v;
+                //need to enforce an ordering condition to allow hard-stall conditions to be broken
+                if (condition ^ swap) {
+                    if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
+                        if (u == v || Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
+                            sgp_vid_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
+                            vcmap(u) = cv;
+                            vcmap(v) = cv;
+                        }
+                        else {
+                            if (vcmap(v) < n) {
+                                vcmap(u) = vcmap(v);
+                            }
+                            else {
+                                match(u) = SGP_INFTY;
+                            }
+                        }
+                    }
+                }
+            });
+            Kokkos::fence();
+            //add the ones that failed to be reprocessed next round
+            //maybe count these then create next_perm to save memory?
+            Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(sgp_vid_t i){
+                sgp_vid_t u = curr_perm(i);
+                if (vcmap(u) >= n) {
+                    sgp_vid_t add_next = Kokkos::atomic_fetch_add(&next_length(), 1);
+                    next_perm(add_next) = u;
+                    //been noticing some memory erros on my machine, probably from memory overclock
+                    //this fixes the problem, and is lightweight
+                    match(u) = SGP_INFTY;
+                }
+            });
+            Kokkos::fence();
+            swap = swap ^ 1;
+            Kokkos::deep_copy(perm_length, next_length);
+            curr_perm = next_perm;
+        }
+        sgp_vid_t nc = 0;
+        Kokkos::deep_copy(nc, nvertices_coarse);
+        return nc;
+    }
+
+    SGPAR_API int sgp_coarsen_GOSH_v2(matrix_type& interp,
+        sgp_vid_t* nvertices_coarse_ptr,
+        const matrix_type& g,
+        const int coarsening_level,
+        sgp_pcg32_random_t* rng,
+        ExperimentLoggerUtil& experiment) {
+
+        sgp_vid_t n = g.numRows();
+
+        Kokkos::View<sgp_vid_t> nvc("nvertices_coarse");
+        Kokkos::View<sgp_vid_t*> vcmap("vcmap", n);
+
+        sgp_eid_t threshold_d = g.nnz() / (n * 2);
+        //create aggregates for large degree vtx
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+            if (g.graph.row_map(i + 1) - g.graph.row_map(i) > threshold_d) {
+                sgp_vid_t cv = Kokkos::atomic_fetch_add(&nvc(), 1);
+                vcmap(i) = cv;
+            }
+            else {
+                vcmap(i) = SGP_INFTY;
+            }
+        });
+
+        //add vertex to max wgt neighbor's aggregate
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+            if (vcmap(i) == SGP_INFTY) {
+                sgp_vid_t argmax = SGP_INFTY;
+                sgp_wgt_t max_w = 0;
+                for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+                    sgp_vid_t v = g.graph.entries(j);
+                    sgp_vid_t wgt = g.values(j);
+                    if (vcmap(v) != SGP_INFTY) {
+                        if (wgt >= max_w) {
+                            max_w = wgt;
+                            argmax = v;
+                        }
+                    }
+                }
+                if (argmax != SGP_INFTY) {
+                    vcmap(i) = argmax;
+                }
+            }
+        });
+
+        //add vertex to max degree neighbor's aggregate
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+            if (vcmap(i) == SGP_INFTY) {
+                sgp_vid_t argmax = SGP_INFTY;
+                sgp_eid_t max_d = 0;
+                for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+                    sgp_vid_t v = g.graph.entries(j);
+                    sgp_eid_t degree = g.graph.row_map(v + 1) - g.graph.row_map(v);
+                    if (vcmap(v) != SGP_INFTY) {
+                        if (degree >= max_d) {
+                            max_d = degree;
+                            argmax = v;
+                        }
+                    }
+                }
+                if (argmax != SGP_INFTY) {
+                    vcmap(i) = argmax;
+                }
+            }
+        });
+
+        //add neighbors of each aggregated vertex to aggregate
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
+            if (vcmap(i) != SGP_INFTY) {
+                for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+                    if (vcmap(v) == SGP_INFTY) {
+                        if (degree >= max_d) {
+                            vcmap(v) = vcmap(i);
+                        }
+                    }
+                }
+            }
+        });
+
+        sgp_vid_t remaining_total = 0;
+
+        Kokkos::parallel_reduce("count remaining", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & sum){
+            if (vcmap(i) == SGP_INFTY) {
+                sum++;
+            }
+        }, remaining_total);
+
+        vtx_view_t remaining("remaining vtx", remaining_total);
+
+        Kokkos::parallel_scan("count remaining", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & update, const bool final){
+            if (vcmap(i) == SGP_INFTY) {
+                if (final) {
+                    remaining(update) = i;
+                }
+                update++;
+            }
+        });
+
+        vtx_view_t hn("heaviest neighbors", n);
+
+        Kokkos::parallel_for("fill hn", remaining_total, KOKKOS_LAMBDA(sgp_vid_t r_idx) {
+            //select heaviest neighbor with ties randomly broken
+            sgp_vid_t i = remaining(r_idx);
+            sgp_vid_t hn_i = SGP_INFTY;
+            uint64_t max_rand = 0;
+            sgp_wgt_t max_ewt = 0;
+
+            sgp_eid_t end_offset = g.graph.row_map(i + 1);
+            for (sgp_eid_t j = g.graph.row_map(i); j < end_offset; j++) {
+                sgp_wgt_t wgt = g.values(j);
+                sgp_vid_t v = g.graph.entries(j);
+                gen_t generator = rand_pool.get_state();
+                uint64_t rand = generator.urand64();
+                rand_pool.free_state(generator);
+                bool choose = false;
+                if (max_ewt < wgt) {
+                    choose = true;
+                }
+                else if (max_ewt == wgt && max_rand <= rand) {
+                    choose = true;
+                }
+
+                if (choose) {
+                    max_ewt = wgt;
+                    max_rand = rand;
+                    hn_i = v;
+                }
+            }
+            hn(i) = hn_i;
+        });
+
+        sgp_vid_t nc = parallel_map_construct_prefilled(vcmap, n, remaining, hn, nvc);
+        Kokkos::deep_copy(nc, nvc);
+        *nvertices_coarse_ptr = nc;
+
+        edge_view_t row_map("interpolate row map", n + 1);
+
+        Kokkos::parallel_for(n + 1, KOKKOS_LAMBDA(sgp_vid_t u){
+            row_map(u) = u;
+        });
+
+        vtx_view_t entries("interpolate entries", n);
+        wgt_view_t values("interpolate values", n);
+        //compute the interpolation weights
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t u){
+            entries(u) = vcmap(u);
+            values(u) = 1.0;
+        });
+
+        graph_type graph(entries, row_map);
+        interp = matrix_type("interpolate", nc, values, graph);
+
+        return EXIT_SUCCESS;
+    }
+
     template <class in, class out>
     Kokkos::View<out*> sort_order(Kokkos::View<in*> array, in max, in min) {
         typedef Kokkos::BinOp1D< Kokkos::View<in*> > BinOp;
