@@ -108,7 +108,7 @@ int write_g(const matrix_type& g, char* out_f, bool symmetric) {
 }
 
 SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
-	vtx_view_t& c_vtx_w, const vtx_view_t f_vtx_w,
+    vtx_view_t& c_vtx_w, const vtx_view_t f_vtx_w,
     const matrix_type& interp_mtx,
     const matrix_type& g,
     const int coarsening_level) {
@@ -340,7 +340,7 @@ SGPAR_API int sgp_build_coarse_graph_spgemm(matrix_type& gc,
     graph_type gc_graph(entries_nonloop, row_map_nonloop);
     gc = matrix_type("gc", nc, values_nonloop, gc_graph);
 
-	c_vtx_w = vtx_view_t("coarse vtx weights", interp_mtx.numCols());
+    c_vtx_w = vtx_view_t("coarse vtx weights", interp_mtx.numCols());
     KokkosSparse::spmv("N", 1.0, interp_transpose, f_vtx_w, 0.0, c_vtx_w);
 
     return EXIT_SUCCESS;
@@ -514,7 +514,7 @@ struct functorHashmapAccumulator
 {
     typedef ExecutionSpace execution_space;
 
-	vtx_view_t remaining;
+    vtx_view_t remaining;
     edge_view_t row_map;
     vtx_view_t entries;
     wgt_view_t wgts;
@@ -533,7 +533,7 @@ struct functorHashmapAccumulator
         uniform_memory_pool_t memory_pool,
         const sgp_vid_t hash_size,
         const sgp_vid_t max_hash_entries,
-		vtx_view_t remaining)
+        vtx_view_t remaining)
         : row_map(row_map)
         , entries(entries)
         , wgts(wgts)
@@ -541,23 +541,23 @@ struct functorHashmapAccumulator
         , _memory_pool(memory_pool)
         , _hash_size(hash_size)
         , _max_hash_entries(max_hash_entries)
-		, remaining(remaining)
+        , remaining(remaining)
         , tokens(ExecutionSpace()){}
 
-	//reduces to find total number of rows that were too large
+    //reduces to find total number of rows that were too large
     KOKKOS_INLINE_FUNCTION
         void operator()(const sgp_vid_t idx_unrem, sgp_vid_t& thread_sum) const
     {
-		sgp_vid_t idx = remaining(idx_unrem);
+        sgp_vid_t idx = remaining(idx_unrem);
         typedef sgp_vid_t hash_size_type;
         typedef sgp_vid_t hash_key_type;
         typedef sgp_wgt_t hash_value_type;
 
-		//can't do this row at current hashmap size
-		if(row_map(idx + 1) - row_map(idx) >= _max_hash_entries){
-			thread_sum++;
-		   	return;
-		}
+        //can't do this row at current hashmap size
+        if(row_map(idx + 1) - row_map(idx) >= _max_hash_entries){
+            thread_sum++;
+            return;
+        }
         // Alternative to team_policy thread id
         auto tid = tokens.acquire();
 
@@ -697,8 +697,8 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         });
     });
     
-	//recount with edges only belonging to vertex of smaller degree
-	Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
+    //recount with edges only belonging to vertex of smaller degree
+    Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
         sgp_vid_t u = vcmap.graph.entries(thread.league_rank());
         sgp_eid_t start = g.graph.row_map(thread.league_rank());
         sgp_eid_t end = g.graph.row_map(thread.league_rank() + 1);
@@ -706,8 +706,8 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [=] (const sgp_eid_t idx, sgp_vid_t& local_sum) {
             sgp_vid_t v = vcmap.graph.entries(g.graph.entries(idx));
             mapped_edges(idx) = v;
-			bool degree_less = degree_initial(u) < degree_initial(v);
-			bool degree_equal = degree_initial(u) == degree_initial(v);
+            bool degree_less = degree_initial(u) < degree_initial(v);
+            bool degree_equal = degree_initial(u) == degree_initial(v);
             if (u != v && (degree_less || (degree_equal && u < v))) {
                 local_sum++;
             }
@@ -753,8 +753,8 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         sgp_eid_t end = g.graph.row_map(thread.league_rank() + 1);
         Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const sgp_eid_t idx) {
             sgp_vid_t v = mapped_edges(idx);
-			bool degree_less = degree_initial(u) < degree_initial(v);
-			bool degree_equal = degree_initial(u) == degree_initial(v);
+            bool degree_less = degree_initial(u) < degree_initial(v);
+            bool degree_equal = degree_initial(u) == degree_initial(v);
             if (u != v && (degree_less || (degree_equal && u < v))) {
                 sgp_eid_t offset = Kokkos::atomic_fetch_add(&edges_per_source(u), 1);
 
@@ -771,48 +771,48 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
 
 #ifdef HASHMAP
     
-	sgp_vid_t remaining_count = nc;
-	vtx_view_t remaining("remaining vtx", nc);
-	Kokkos::parallel_for(nc, KOKKOS_LAMBDA(const sgp_vid_t i){
-		remaining(i) = i;
-	});
-	do{
-	//figure out max size for hashmap
+    sgp_vid_t remaining_count = nc;
+    vtx_view_t remaining("remaining vtx", nc);
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(const sgp_vid_t i){
+        remaining(i) = i;
+    });
+    do{
+    //figure out max size for hashmap
     sgp_vid_t avg_entries = 0;
     if(typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space) && static_cast<double>(remaining_count) / static_cast<double>(nc) > 0.01){
-		Kokkos::parallel_reduce("calc average", remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& thread_sum){
-			sgp_vid_t u = remaining(i);
-        	sgp_vid_t degree = edges_per_source(u);
-    		thread_sum += degree;
-		}, avg_entries);
-		//degrees are often skewed so we want to err on the side of bigger hashmaps
-		avg_entries = avg_entries * 2 / remaining_count;
-		if(avg_entries < 50) avg_entries = 50;
-	} else {
-	Kokkos::parallel_reduce("calc average", remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& thread_max){
-		sgp_vid_t u = remaining(i);
+        Kokkos::parallel_reduce("calc average", remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& thread_sum){
+            sgp_vid_t u = remaining(i);
+            sgp_vid_t degree = edges_per_source(u);
+            thread_sum += degree;
+        }, avg_entries);
+        //degrees are often skewed so we want to err on the side of bigger hashmaps
+        avg_entries = avg_entries * 2 / remaining_count;
+        if(avg_entries < 50) avg_entries = 50;
+    } else {
+    Kokkos::parallel_reduce("calc average", remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& thread_max){
+        sgp_vid_t u = remaining(i);
         sgp_vid_t degree = edges_per_source(u);
-		if(degree > thread_max){
-    		thread_max = degree;
-		}
-	}, Kokkos::Max<sgp_vid_t, Kokkos::HostSpace>(avg_entries));
-	avg_entries++;
-	}
+        if(degree > thread_max){
+            thread_max = degree;
+        }
+    }, Kokkos::Max<sgp_vid_t, Kokkos::HostSpace>(avg_entries));
+    avg_entries++;
+    }
 
     typedef typename KokkosKernels::Impl::UniformMemoryPool<Kokkos::DefaultExecutionSpace, sgp_vid_t> uniform_memory_pool_t;
     // Set the hash_size as the next power of 2 bigger than hash_size_hint.
     // - hash_size must be a power of two since we use & rather than % (which is slower) for
     // computing the hash value for HashmapAccumulator.
-	sgp_vid_t max_entries = avg_entries;
+    sgp_vid_t max_entries = avg_entries;
     sgp_vid_t hash_size = 1;
     while (hash_size < max_entries) { hash_size *= 2; }
 
     // Create Uniform Initialized Memory Pool
     KokkosKernels::Impl::PoolType pool_type = KokkosKernels::Impl::ManyThread2OneChunk;
 
-	if(typeid(Kokkos::DefaultExecutionSpace::memory_space) == typeid(Kokkos::DefaultHostExecutionSpace::memory_space)){
-	//	pool_type = KokkosKernels::Impl::OneThread2OneChunk;
-	}
+    if(typeid(Kokkos::DefaultExecutionSpace::memory_space) == typeid(Kokkos::DefaultHostExecutionSpace::memory_space)){
+    //	pool_type = KokkosKernels::Impl::OneThread2OneChunk;
+    }
 
     // Determine memory chunk size for UniformMemoryPool
     sgp_vid_t mem_chunk_size = hash_size;      // for hash indices
@@ -823,43 +823,43 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     // our number of chunks at 32.
     sgp_vid_t mem_chunk_count = Kokkos::DefaultExecutionSpace::concurrency();
 
-	if(typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)){
-		//walk back number of mem_chunks if necessary
-		size_t mem_needed = static_cast<size_t>(mem_chunk_count) * static_cast<size_t>(mem_chunk_size) * sizeof(sgp_vid_t);
-		size_t max_mem_allowed = 536870912;//1073741824;
-		if(mem_needed > max_mem_allowed){
-			size_t chunk_dif = mem_needed - max_mem_allowed;
-			chunk_dif = chunk_dif / (static_cast<size_t>(mem_chunk_size) * sizeof(sgp_vid_t));
-			chunk_dif++;
-			mem_chunk_count -= chunk_dif;
-		}
-	}
+    if(typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)){
+        //walk back number of mem_chunks if necessary
+        size_t mem_needed = static_cast<size_t>(mem_chunk_count) * static_cast<size_t>(mem_chunk_size) * sizeof(sgp_vid_t);
+        size_t max_mem_allowed = 536870912;//1073741824;
+        if(mem_needed > max_mem_allowed){
+            size_t chunk_dif = mem_needed - max_mem_allowed;
+            chunk_dif = chunk_dif / (static_cast<size_t>(mem_chunk_size) * sizeof(sgp_vid_t));
+            chunk_dif++;
+            mem_chunk_count -= chunk_dif;
+        }
+    }
 
     uniform_memory_pool_t memory_pool(mem_chunk_count, mem_chunk_size, -1, pool_type);
 
     functorHashmapAccumulator<Kokkos::DefaultExecutionSpace, uniform_memory_pool_t>
         hashmapAccumulator(source_bucket_offset, dest_by_source, wgt_by_source, edges_per_source, memory_pool, hash_size, max_entries, remaining);
 
-	sgp_vid_t old_remaining_count = remaining_count;
+    sgp_vid_t old_remaining_count = remaining_count;
     Kokkos::parallel_reduce("hashmap time", old_remaining_count, hashmapAccumulator, remaining_count);
 
-	if(remaining_count > 0){
-		vtx_view_t new_remaining("new remaining vtx", remaining_count);
+    if(remaining_count > 0){
+        vtx_view_t new_remaining("new remaining vtx", remaining_count);
 
-		Kokkos::parallel_scan("move remaining vertices", old_remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& update, const bool final){
-			sgp_vid_t u = remaining(i);
-			if(edges_per_source(u) >= max_entries){
-				if(final){
-					new_remaining(update) = u;
-				}
-				update++;
-			}
-		});
+        Kokkos::parallel_scan("move remaining vertices", old_remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& update, const bool final){
+            sgp_vid_t u = remaining(i);
+            if(edges_per_source(u) >= max_entries){
+                if(final){
+                    new_remaining(update) = u;
+                }
+                update++;
+            }
+        });
 
-		remaining = new_remaining;
-	}
-	//printf("remaining count: %u\n", remaining_count);
-	} while(remaining_count > 0);
+        remaining = new_remaining;
+    }
+    //printf("remaining count: %u\n", remaining_count);
+    } while(remaining_count > 0);
 #elif defined(RADIX)
     Kokkos::Timer radix;
     KokkosSparse::Experimental::SortEntriesFunctor<Kokkos::DefaultExecutionSpace, sgp_eid_t, sgp_vid_t, edge_view_t, vtx_view_t>
@@ -910,20 +910,20 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Dedupe, timer.seconds());
     timer.reset();
 
-	//reused degree initial as degree final
-	vtx_view_t degree_final = degree_initial;
-	Kokkos::parallel_for(nc, KOKKOS_LAMBDA(const sgp_vid_t i){
-		degree_final(i) = edges_per_source(i);
-	});
+    //reused degree initial as degree final
+    vtx_view_t degree_final = degree_initial;
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(const sgp_vid_t i){
+        degree_final(i) = edges_per_source(i);
+    });
    
-	Kokkos::parallel_for(policy(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
+    Kokkos::parallel_for(policy(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
         sgp_vid_t u = thread.league_rank();
         sgp_eid_t start = source_bucket_offset(u);
         sgp_eid_t end = start + edges_per_source(u);
         Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=] (const sgp_eid_t idx) {
             sgp_vid_t v = dest_by_source(idx);
-   			//increment other vertex
-			Kokkos::atomic_fetch_add(&degree_final(v), 1);
+            //increment other vertex
+            Kokkos::atomic_fetch_add(&degree_final(v), 1);
         });
     });
 
@@ -938,7 +938,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         update += val_i;
         if (final) {
             source_offsets(i + 1) = update; // only update array on final pass
-			degree_final(i) = 0;
+            degree_final(i) = 0;
         }
     });
 
@@ -953,11 +953,11 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         sgp_eid_t u_origin = source_bucket_offset(u);
         sgp_eid_t u_dest_offset = source_offsets(u);
         Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, edges_per_source(u)), [=](const sgp_eid_t u_idx) {
-			sgp_vid_t v = dest_by_source(u_origin + u_idx);
-			sgp_wgt_t wgt = wgt_by_source(u_origin + u_idx);
-			sgp_eid_t v_dest_offset = source_offsets(v);
-			sgp_eid_t v_dest = v_dest_offset + Kokkos::atomic_fetch_add(&degree_final(v), 1);
-			sgp_eid_t u_dest = u_dest_offset + Kokkos::atomic_fetch_add(&degree_final(u), 1);
+            sgp_vid_t v = dest_by_source(u_origin + u_idx);
+            sgp_wgt_t wgt = wgt_by_source(u_origin + u_idx);
+            sgp_eid_t v_dest_offset = source_offsets(v);
+            sgp_eid_t v_dest = v_dest_offset + Kokkos::atomic_fetch_add(&degree_final(v), 1);
+            sgp_eid_t u_dest = u_dest_offset + Kokkos::atomic_fetch_add(&degree_final(u), 1);
 
             dest_idx(u_dest) = v;
             wgts(u_dest) = wgt;
@@ -992,7 +992,7 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
 #else
     sgp_coarsen_GOSH(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
 #endif
-	experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
 
     timer.reset();
 #ifdef SPGEMM
@@ -1059,7 +1059,7 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
 
         vtx_weights_list.push_back(coarse_vtx_weights);
 
-		if(coarse_graphs.size() > 200) break;
+        if(coarse_graphs.size() > 200) break;
 #ifdef DEBUG
         sgp_real_t coarsen_ratio = (sgp_real_t) coarse_graphs.rbegin()->numRows() / (sgp_real_t) (++coarse_graphs.rbegin())->numRows();
         printf("Coarsening ratio: %.8f\n", coarsen_ratio);
