@@ -981,12 +981,14 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
 
     Kokkos::Timer timer;
     sgp_vid_t nvertices_coarse;
-#ifdef HEC
+#if defined HEC || defined HEC_V2
     sgp_coarsen_HEC(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
 #elif defined PUREMATCH || MTMETIS
     sgp_coarsen_match(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
 #elif defined MIS
     sgp_coarsen_mis_2(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
+#elif defined GOSH_V2
+    sgp_coarsen_GOSH_v2(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
 #else
     sgp_coarsen_GOSH(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
 #endif

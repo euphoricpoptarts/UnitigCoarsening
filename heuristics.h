@@ -453,7 +453,10 @@ namespace sgpar_kokkos {
         Kokkos::View<sgp_vid_t> nvc("nvertices_coarse");
         Kokkos::View<sgp_vid_t*> vcmap("vcmap", n);
 
-        sgp_eid_t threshold_d = g.nnz() / (n * 2);
+        sgp_eid_t threshold_d = g.nnz() / n;
+		if(threshold_d < 50){
+			threshold_d = 50;
+		}
         //create aggregates for large degree vtx
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
             if (g.graph.row_map(i + 1) - g.graph.row_map(i) > threshold_d) {
@@ -829,7 +832,11 @@ namespace sgpar_kokkos {
         }
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Heavy, timer.seconds());
         timer.reset();
+#ifdef HEC_V2
+        sgp_vid_t nc = parallel_map_construct_v2(vcmap, n, vperm, hn, reverse_map);
+#else
         sgp_vid_t nc = parallel_map_construct(vcmap, n, vperm, hn, reverse_map);
+#endif
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct, timer.seconds());
         timer.reset();
 
