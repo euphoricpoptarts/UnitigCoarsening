@@ -464,7 +464,7 @@ struct functorDedupeAfterSort
         , wgtsOut(wgtsOut)
         , dedupe_edge_count(dedupe_edge_count) {}
 
-    KOKKOS_INLINE_FUNCTION
+/*    KOKKOS_INLINE_FUNCTION
         void operator()(const member& thread, sgp_eid_t& thread_sum) const
     {
         sgp_vid_t u = thread.league_rank();
@@ -487,7 +487,7 @@ struct functorDedupeAfterSort
             });
         thread_sum += dedupe_edge_count(u);
     }
-
+*/
     KOKKOS_INLINE_FUNCTION
         void operator()(const sgp_vid_t& u, sgp_eid_t& thread_sum) const
     {
@@ -671,6 +671,7 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
 
     sgp_eid_t gc_nedges = 0;
 
+    vtx_view_t degree_initial("edges_per_source", nc);
     vtx_view_t edges_per_source("edges_per_source", nc);
 
     Kokkos::Timer timer;
@@ -691,8 +692,28 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
             }
         }, nonLoopEdgesTotal);
         Kokkos::single(Kokkos::PerTeam(thread), [=]() {
-            Kokkos::atomic_add(&edges_per_source(u), nonLoopEdgesTotal);
+            Kokkos::atomic_add(&degree_initial(u), nonLoopEdgesTotal);
             Kokkos::atomic_add(&c_vtx_w(u), f_vtx_w(thread.league_rank()));
+        });
+    });
+    
+	//recount with edges only belonging to vertex of smaller degree
+	Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
+        sgp_vid_t u = vcmap.graph.entries(thread.league_rank());
+        sgp_eid_t start = g.graph.row_map(thread.league_rank());
+        sgp_eid_t end = g.graph.row_map(thread.league_rank() + 1);
+        sgp_vid_t nonLoopEdgesTotal = 0;
+        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [=] (const sgp_eid_t idx, sgp_vid_t& local_sum) {
+            sgp_vid_t v = vcmap.graph.entries(g.graph.entries(idx));
+            mapped_edges(idx) = v;
+			bool degree_less = degree_initial(u) < degree_initial(v);
+			bool degree_equal = degree_initial(u) == degree_initial(v);
+            if (u != v && (degree_less || (degree_equal && u < v))) {
+                local_sum++;
+            }
+        }, nonLoopEdgesTotal);
+        Kokkos::single(Kokkos::PerTeam(thread), [=]() {
+            Kokkos::atomic_add(&edges_per_source(u), nonLoopEdgesTotal);
         });
     });
 
@@ -732,7 +753,9 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
         sgp_eid_t end = g.graph.row_map(thread.league_rank() + 1);
         Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const sgp_eid_t idx) {
             sgp_vid_t v = mapped_edges(idx);
-            if (u != v) {
+			bool degree_less = degree_initial(u) < degree_initial(v);
+			bool degree_equal = degree_initial(u) == degree_initial(v);
+            if (u != v && (degree_less || (degree_equal && u < v))) {
                 sgp_eid_t offset = Kokkos::atomic_fetch_add(&edges_per_source(u), 1);
 
                 offset += source_bucket_offset(u);
@@ -887,35 +910,59 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Dedupe, timer.seconds());
     timer.reset();
 
+	//reused degree initial as degree final
+	vtx_view_t degree_final = degree_initial;
+	Kokkos::parallel_for(nc, KOKKOS_LAMBDA(const sgp_vid_t i){
+		degree_final(i) = edges_per_source(i);
+	});
+   
+	Kokkos::parallel_for(policy(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
+        sgp_vid_t u = thread.league_rank();
+        sgp_eid_t start = source_bucket_offset(u);
+        sgp_eid_t end = start + edges_per_source(u);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=] (const sgp_eid_t idx) {
+            sgp_vid_t v = dest_by_source(idx);
+   			//increment other vertex
+			Kokkos::atomic_fetch_add(&degree_final(v), 1);
+        });
+    });
+
     edge_view_t source_offsets("source_offsets", nc + 1);
 
     Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
         sgp_eid_t & update, const bool final) {
         // Load old value in case we update it before accumulating
-        const sgp_eid_t val_i = edges_per_source(i);
+        const sgp_eid_t val_i = degree_final(i);
         // For inclusive scan,
         // change the update value before updating array.
         update += val_i;
         if (final) {
             source_offsets(i + 1) = update; // only update array on final pass
+			degree_final(i) = 0;
         }
     });
 
-#ifdef HASHMAP
     Kokkos::View<sgp_eid_t> edge_total_subview = Kokkos::subview(source_offsets, nc);
     Kokkos::deep_copy(gc_nedges, edge_total_subview);
-#endif
 
     vtx_view_t dest_idx("dest_idx", gc_nedges);
     wgt_view_t wgts("wgts", gc_nedges);
 
     Kokkos::parallel_for(policy(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
         sgp_vid_t u = thread.league_rank();
-        sgp_eid_t start_origin = source_bucket_offset(u);
-        sgp_eid_t start_dest = source_offsets(u);
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, edges_per_source(u)), [=](const sgp_eid_t idx) {
-            dest_idx(start_dest + idx) = dest_by_source(start_origin + idx);
-            wgts(start_dest + idx) = wgt_by_source(start_origin + idx);
+        sgp_eid_t u_origin = source_bucket_offset(u);
+        sgp_eid_t u_dest_offset = source_offsets(u);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, edges_per_source(u)), [=](const sgp_eid_t u_idx) {
+			sgp_vid_t v = dest_by_source(u_origin + u_idx);
+			sgp_wgt_t wgt = wgt_by_source(u_origin + u_idx);
+			sgp_eid_t v_dest_offset = source_offsets(v);
+			sgp_eid_t v_dest = v_dest_offset + Kokkos::atomic_fetch_add(&degree_final(v), 1);
+			sgp_eid_t u_dest = u_dest_offset + Kokkos::atomic_fetch_add(&degree_final(u), 1);
+
+            dest_idx(u_dest) = v;
+            wgts(u_dest) = wgt;
+            dest_idx(v_dest) = u;
+            wgts(v_dest) = wgt;
         });
     });
 
