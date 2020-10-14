@@ -1118,7 +1118,7 @@ SGPAR_API int sgp_build_coarse_graph(matrix_type& gc,
         sgp_build_skew(gc, vcmap, g, mapped_edges, degree_initial, experiment, timer);
     }
     else {
-        sgp_build_unskew(gc, vcmap, g, mapped_edges, degree_initial, experiment, timer);
+        sgp_build_nonskew(gc, vcmap, g, mapped_edges, degree_initial, experiment, timer);
     }
 
     return EXIT_SUCCESS;
