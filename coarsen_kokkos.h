@@ -1102,13 +1102,13 @@ SGPAR_API int sgp_build_coarse_graph(matrix_type& gc,
     sgp_eid_t total_unduped = 0;
     sgp_vid_t max_unduped = 0;
 
-    Kokkos::parallel_reduce("find max", nc, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t l_max){
+    Kokkos::parallel_reduce("find max", nc, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& l_max){
         if (l_max <= degree_initial(i)) {
             l_max = degree_initial(i);
         }
     }, Kokkos::Max<sgp_vid_t, Kokkos::HostSpace>(max_unduped));
 
-    Kokkos::parallel_reduce("find total", nc, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_eid_t sum){
+    Kokkos::parallel_reduce("find total", nc, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_eid_t& sum){
         sum += degree_initial(i);
     }, total_unduped);
 
