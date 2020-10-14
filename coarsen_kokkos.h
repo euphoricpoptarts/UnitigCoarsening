@@ -804,6 +804,9 @@ void sgp_build_skew(matrix_type& gc,
     ExperimentLoggerUtil& experiment,
     Kokkos::Timer& timer) {
 
+    sgp_vid_t n = g.numRows();
+    sgp_vid_t nc = vcmap.numCols();
+
     edge_view_t source_bucket_offset("source_bucket_offsets", nc + 1);
 
     sgp_eid_t gc_nedges = 0;
@@ -959,6 +962,7 @@ SGPAR_API int sgp_build_coarse_graph(matrix_type& gc,
     const vtx_view_t& f_vtx_w,
     const int coarsening_level,
     ExperimentLoggerUtil& experiment) {
+
     sgp_vid_t n = g.numRows();
     sgp_vid_t nc = vcmap.numCols();
 
