@@ -1141,7 +1141,7 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
     sgp_coarsen_mis_2(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
 #elif defined GOSH_V2
     sgp_coarsen_GOSH_v2(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
-#else
+#elif defined GOSH
     sgp_coarsen_GOSH(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
 #endif
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
