@@ -651,7 +651,152 @@ struct functorHashmapAccumulator
 
 };  // functorHashmapAccumulator
 
-SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
+void sgp_deduplicate_graph(const sgp_vid_t n, const sgp_vid_t nc,
+    vtx_view_t edges_per_source, vtx_view_t dest_by_source, wgt_view_t wgt_by_source,
+    edge_view_t source_bucket_offset, ExperimentLoggerUtil& experiment, sgp_eid_t& gc_nedges) {
+
+#ifdef HASHMAP
+
+    sgp_vid_t remaining_count = nc;
+    vtx_view_t remaining("remaining vtx", nc);
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(const sgp_vid_t i){
+        remaining(i) = i;
+    });
+    do {
+        //figure out max size for hashmap
+        sgp_vid_t avg_entries = 0;
+        if (typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space) && static_cast<double>(remaining_count) / static_cast<double>(nc) > 0.01) {
+            Kokkos::parallel_reduce("calc average", remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & thread_sum){
+                sgp_vid_t u = remaining(i);
+                sgp_vid_t degree = edges_per_source(u);
+                thread_sum += degree;
+            }, avg_entries);
+            //degrees are often skewed so we want to err on the side of bigger hashmaps
+            avg_entries = avg_entries * 2 / remaining_count;
+            if (avg_entries < 50) avg_entries = 50;
+        }
+        else {
+            Kokkos::parallel_reduce("calc average", remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & thread_max){
+                sgp_vid_t u = remaining(i);
+                sgp_vid_t degree = edges_per_source(u);
+                if (degree > thread_max) {
+                    thread_max = degree;
+                }
+            }, Kokkos::Max<sgp_vid_t, Kokkos::HostSpace>(avg_entries));
+            avg_entries++;
+        }
+
+        typedef typename KokkosKernels::Impl::UniformMemoryPool<Kokkos::DefaultExecutionSpace, sgp_vid_t> uniform_memory_pool_t;
+        // Set the hash_size as the next power of 2 bigger than hash_size_hint.
+        // - hash_size must be a power of two since we use & rather than % (which is slower) for
+        // computing the hash value for HashmapAccumulator.
+        sgp_vid_t max_entries = avg_entries;
+        sgp_vid_t hash_size = 1;
+        while (hash_size < max_entries) { hash_size *= 2; }
+
+        // Create Uniform Initialized Memory Pool
+        KokkosKernels::Impl::PoolType pool_type = KokkosKernels::Impl::ManyThread2OneChunk;
+
+        if (typeid(Kokkos::DefaultExecutionSpace::memory_space) == typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
+            //	pool_type = KokkosKernels::Impl::OneThread2OneChunk;
+        }
+
+        // Determine memory chunk size for UniformMemoryPool
+        sgp_vid_t mem_chunk_size = hash_size;      // for hash indices
+        mem_chunk_size += hash_size;            // for hash begins
+        mem_chunk_size += max_entries;     // for hash nexts
+        // Set a cap on # of chunks to 32.  In application something else should be done
+        // here differently if we're OpenMP vs. GPU but for this example we can just cap
+        // our number of chunks at 32.
+        sgp_vid_t mem_chunk_count = Kokkos::DefaultExecutionSpace::concurrency();
+
+        if (typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
+            //walk back number of mem_chunks if necessary
+            size_t mem_needed = static_cast<size_t>(mem_chunk_count) * static_cast<size_t>(mem_chunk_size) * sizeof(sgp_vid_t);
+            size_t max_mem_allowed = 536870912;//1073741824;
+            if (mem_needed > max_mem_allowed) {
+                size_t chunk_dif = mem_needed - max_mem_allowed;
+                chunk_dif = chunk_dif / (static_cast<size_t>(mem_chunk_size) * sizeof(sgp_vid_t));
+                chunk_dif++;
+                mem_chunk_count -= chunk_dif;
+            }
+        }
+
+        uniform_memory_pool_t memory_pool(mem_chunk_count, mem_chunk_size, -1, pool_type);
+
+        functorHashmapAccumulator<Kokkos::DefaultExecutionSpace, uniform_memory_pool_t>
+            hashmapAccumulator(source_bucket_offset, dest_by_source, wgt_by_source, edges_per_source, memory_pool, hash_size, max_entries, remaining);
+
+        sgp_vid_t old_remaining_count = remaining_count;
+        Kokkos::parallel_reduce("hashmap time", old_remaining_count, hashmapAccumulator, remaining_count);
+
+        if (remaining_count > 0) {
+            vtx_view_t new_remaining("new remaining vtx", remaining_count);
+
+            Kokkos::parallel_scan("move remaining vertices", old_remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t & update, const bool final){
+                sgp_vid_t u = remaining(i);
+                if (edges_per_source(u) >= max_entries) {
+                    if (final) {
+                        new_remaining(update) = u;
+                    }
+                    update++;
+                }
+            });
+
+            remaining = new_remaining;
+        }
+        //printf("remaining count: %u\n", remaining_count);
+    } while (remaining_count > 0);
+#elif defined(RADIX)
+    Kokkos::Timer radix;
+    KokkosSparse::Experimental::SortEntriesFunctor<Kokkos::DefaultExecutionSpace, sgp_eid_t, sgp_vid_t, edge_view_t, vtx_view_t>
+        sortEntries(source_bucket_offset, dest_by_source, wgt_by_source);
+    Kokkos::parallel_for("radix sort time", policy(nc, Kokkos::AUTO), sortEntries);
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixSort, radix.seconds());
+    radix.reset();
+
+    functorDedupeAfterSort<Kokkos::DefaultExecutionSpace>
+        deduper(source_bucket_offset, dest_by_source, wgt_by_source, wgt_by_source, edges_per_source);
+    Kokkos::parallel_reduce("deduplicated sorted", nc, deduper, gc_nedges);
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixDedupe, radix.seconds());
+    radix.reset();
+#else
+    //sort by dest and deduplicate
+    Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const sgp_vid_t u, sgp_eid_t & thread_sum) {
+        sgp_eid_t bottom = source_bucket_offset(u);
+        sgp_eid_t top = source_bucket_offset(u + 1);
+#if 0
+        sgp_eid_t next_offset = bottom;
+        Kokkos::UnorderedMap<sgp_vid_t, sgp_eid_t> map(top - bottom);
+        //hashing sort
+        for (sgp_eid_t i = bottom; i < top; i++) {
+
+            sgp_vid_t v = dest_by_source(i);
+
+            if (map.exists(v)) {
+                uint32_t key = map.find(v);
+                sgp_eid_t idx = map.value_at(key);
+
+                wgt_by_source(idx) += wgt_by_source(i);
+            }
+            else {
+                map.insert(v, next_offset);
+                dest_by_source(next_offset) = dest_by_source(i);
+                wgt_by_source(next_offset) = wgt_by_source(i);
+                next_offset++;
+            }
+        }
+
+        edges_per_source(u) = next_offset - bottom;
+#endif
+        heap_deduplicate(bottom, top, dest_by_source, wgt_by_source, edges_per_source(u));
+        thread_sum += edges_per_source(u);
+    }, gc_nedges);
+#endif
+
+}
+
+SGPAR_API int sgp_build_coarse_graph(matrix_type& gc,
     vtx_view_t& c_vtx_w,
     const matrix_type& vcmap,
     const matrix_type& g,
@@ -769,143 +914,9 @@ SGPAR_API int sgp_build_coarse_graph_msd(matrix_type& gc,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
     timer.reset();
 
-#ifdef HASHMAP
-    
-    sgp_vid_t remaining_count = nc;
-    vtx_view_t remaining("remaining vtx", nc);
-    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(const sgp_vid_t i){
-        remaining(i) = i;
-    });
-    do{
-    //figure out max size for hashmap
-    sgp_vid_t avg_entries = 0;
-    if(typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space) && static_cast<double>(remaining_count) / static_cast<double>(nc) > 0.01){
-        Kokkos::parallel_reduce("calc average", remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& thread_sum){
-            sgp_vid_t u = remaining(i);
-            sgp_vid_t degree = edges_per_source(u);
-            thread_sum += degree;
-        }, avg_entries);
-        //degrees are often skewed so we want to err on the side of bigger hashmaps
-        avg_entries = avg_entries * 2 / remaining_count;
-        if(avg_entries < 50) avg_entries = 50;
-    } else {
-    Kokkos::parallel_reduce("calc average", remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& thread_max){
-        sgp_vid_t u = remaining(i);
-        sgp_vid_t degree = edges_per_source(u);
-        if(degree > thread_max){
-            thread_max = degree;
-        }
-    }, Kokkos::Max<sgp_vid_t, Kokkos::HostSpace>(avg_entries));
-    avg_entries++;
-    }
-
-    typedef typename KokkosKernels::Impl::UniformMemoryPool<Kokkos::DefaultExecutionSpace, sgp_vid_t> uniform_memory_pool_t;
-    // Set the hash_size as the next power of 2 bigger than hash_size_hint.
-    // - hash_size must be a power of two since we use & rather than % (which is slower) for
-    // computing the hash value for HashmapAccumulator.
-    sgp_vid_t max_entries = avg_entries;
-    sgp_vid_t hash_size = 1;
-    while (hash_size < max_entries) { hash_size *= 2; }
-
-    // Create Uniform Initialized Memory Pool
-    KokkosKernels::Impl::PoolType pool_type = KokkosKernels::Impl::ManyThread2OneChunk;
-
-    if(typeid(Kokkos::DefaultExecutionSpace::memory_space) == typeid(Kokkos::DefaultHostExecutionSpace::memory_space)){
-    //	pool_type = KokkosKernels::Impl::OneThread2OneChunk;
-    }
-
-    // Determine memory chunk size for UniformMemoryPool
-    sgp_vid_t mem_chunk_size = hash_size;      // for hash indices
-    mem_chunk_size += hash_size;            // for hash begins
-    mem_chunk_size += max_entries;     // for hash nexts
-    // Set a cap on # of chunks to 32.  In application something else should be done
-    // here differently if we're OpenMP vs. GPU but for this example we can just cap
-    // our number of chunks at 32.
-    sgp_vid_t mem_chunk_count = Kokkos::DefaultExecutionSpace::concurrency();
-
-    if(typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)){
-        //walk back number of mem_chunks if necessary
-        size_t mem_needed = static_cast<size_t>(mem_chunk_count) * static_cast<size_t>(mem_chunk_size) * sizeof(sgp_vid_t);
-        size_t max_mem_allowed = 536870912;//1073741824;
-        if(mem_needed > max_mem_allowed){
-            size_t chunk_dif = mem_needed - max_mem_allowed;
-            chunk_dif = chunk_dif / (static_cast<size_t>(mem_chunk_size) * sizeof(sgp_vid_t));
-            chunk_dif++;
-            mem_chunk_count -= chunk_dif;
-        }
-    }
-
-    uniform_memory_pool_t memory_pool(mem_chunk_count, mem_chunk_size, -1, pool_type);
-
-    functorHashmapAccumulator<Kokkos::DefaultExecutionSpace, uniform_memory_pool_t>
-        hashmapAccumulator(source_bucket_offset, dest_by_source, wgt_by_source, edges_per_source, memory_pool, hash_size, max_entries, remaining);
-
-    sgp_vid_t old_remaining_count = remaining_count;
-    Kokkos::parallel_reduce("hashmap time", old_remaining_count, hashmapAccumulator, remaining_count);
-
-    if(remaining_count > 0){
-        vtx_view_t new_remaining("new remaining vtx", remaining_count);
-
-        Kokkos::parallel_scan("move remaining vertices", old_remaining_count, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t& update, const bool final){
-            sgp_vid_t u = remaining(i);
-            if(edges_per_source(u) >= max_entries){
-                if(final){
-                    new_remaining(update) = u;
-                }
-                update++;
-            }
-        });
-
-        remaining = new_remaining;
-    }
-    //printf("remaining count: %u\n", remaining_count);
-    } while(remaining_count > 0);
-#elif defined(RADIX)
-    Kokkos::Timer radix;
-    KokkosSparse::Experimental::SortEntriesFunctor<Kokkos::DefaultExecutionSpace, sgp_eid_t, sgp_vid_t, edge_view_t, vtx_view_t>
-        sortEntries(source_bucket_offset, dest_by_source, wgt_by_source);
-    Kokkos::parallel_for("radix sort time", policy(nc, Kokkos::AUTO), sortEntries);
-    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixSort, radix.seconds());
-    radix.reset();
-
-    functorDedupeAfterSort<Kokkos::DefaultExecutionSpace>
-        deduper(source_bucket_offset, dest_by_source, wgt_by_source, wgt_by_source, edges_per_source);
-    Kokkos::parallel_reduce("deduplicated sorted", nc, deduper, gc_nedges);
-    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixDedupe, radix.seconds());
-    radix.reset();
-#else
-    //sort by dest and deduplicate
-    Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const sgp_vid_t u, sgp_eid_t & thread_sum) {
-        sgp_eid_t bottom = source_bucket_offset(u);
-        sgp_eid_t top = source_bucket_offset(u + 1);
-#if 0
-        sgp_eid_t next_offset = bottom;
-        Kokkos::UnorderedMap<sgp_vid_t, sgp_eid_t> map(top - bottom);
-        //hashing sort
-        for (sgp_eid_t i = bottom; i < top; i++) {
-
-            sgp_vid_t v = dest_by_source(i);
-
-            if (map.exists(v)) {
-                uint32_t key = map.find(v);
-                sgp_eid_t idx = map.value_at(key);
-
-                wgt_by_source(idx) += wgt_by_source(i);
-            }
-            else {
-                map.insert( v, next_offset );
-                dest_by_source(next_offset) = dest_by_source(i);
-                wgt_by_source(next_offset) = wgt_by_source(i);
-                next_offset++;
-            }
-        }
-
-        edges_per_source(u) = next_offset - bottom;
-#endif
-        heap_deduplicate(bottom, top, dest_by_source, wgt_by_source, edges_per_source(u));
-        thread_sum += edges_per_source(u);
-    }, gc_nedges);
-#endif
+    sgp_deduplicate_graph(n, nc,
+        edges_per_source, dest_by_source, wgt_by_source,
+        source_bucket_offset, experiment, gc_nedges);
 
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Dedupe, timer.seconds());
     timer.reset();
@@ -998,7 +1009,7 @@ SGPAR_API int sgp_coarsen_one_level(matrix_type& gc, matrix_type& interpolation_
 #ifdef SPGEMM
     sgp_build_coarse_graph_spgemm(gc, c_vtx_w, f_vtx_w, interpolation_graph, g, coarsening_level);
 #else
-    sgp_build_coarse_graph_msd(gc, c_vtx_w, interpolation_graph, g, f_vtx_w, coarsening_level, experiment);
+    sgp_build_coarse_graph(gc, c_vtx_w, interpolation_graph, g, f_vtx_w, coarsening_level, experiment);
 #endif
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Build, timer.seconds());
     timer.reset();
