@@ -979,6 +979,9 @@ SGPAR_API int sgp_build_coarse_graph(matrix_type& gc,
 
     graph_type gc_graph(dest_idx, source_offsets);
     gc = matrix_type("gc", nc, wgts, gc_graph);
+    
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::WriteGraph, timer.seconds());
+    timer.reset();
 
     return EXIT_SUCCESS;
 }
