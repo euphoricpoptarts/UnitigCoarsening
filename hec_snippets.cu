@@ -7,6 +7,8 @@
 namespace cg = cooperative_groups;
 using namespace cg;
 
+#define GPU_DEBUG 0
+
 #define NUM_THREADS_PER_BLOCK 128
 #define INFTY INT_MAX
 
@@ -156,9 +158,11 @@ __global__ void findH_thr_per_vertex(int * __restrict__ const H,
         const int adj_end   = num_edges[i+1];
         const int degree = adj_end - adj_start;
         unsigned int x = (curand(&localState) & mask);
-        const int offset = (x % degree);
+        const int offset = (x % degree); // modulo is expensive
+#if GPU_DEBUG
         assert(offset < degree);
         assert(offset >= 0);
+#endif
         int vm = adj[adj_start + offset];
 #if 0
         int vm = adj[adj_start];
@@ -217,8 +221,10 @@ __global__ void HEC_mapping(int * __restrict__ M,
 
     for (int u = start; u < n; u += incr) {
         int v = H[u];
+#if GPU_DEBUG
         assert(v >= 0);
         assert(v < INFTY);
+#endif
         atomicCAS(&X[v], INFTY, u);
     }
 
@@ -244,9 +250,9 @@ __global__ void HEC_mapping(int * __restrict__ M,
             if (cv != INFTY) {
                 M[u] = cv;
             } else { /* we give up :( */
-                int nc = atomicAdd(&ncoarse, 1);
-                M[u] = nc;
-                M[v] = nc;
+                int nc = atomicAdd(&ncoarse, 1); // we should also track the "new" verts
+                M[u] = nc; // this should probably be AtomicCAS
+                M[v] = nc; // and so does this one
             }
         }
     }
@@ -254,9 +260,11 @@ __global__ void HEC_mapping(int * __restrict__ M,
     g.sync();
 
     // Just a check 
+#if GPU_DEBUG
     for (int u = start; u < n; u += incr) {
         assert(M[u] != INFTY);
     }
+#endif
 
     if (start == 0) {
         *d_nc = ncoarse;
