@@ -796,6 +796,109 @@ void sgp_deduplicate_graph(const sgp_vid_t n, const sgp_vid_t nc,
 
 }
 
+void sgp_build_nonskew(matrix_type& gc,
+    const matrix_type vcmap,
+    const matrix_type g,
+    const vtx_view_t mapped_edges,
+    vtx_view_t edges_per_source,
+    ExperimentLoggerUtil& experiment,
+    Kokkos::Timer& timer) {
+
+    sgp_vid_t n = g.numRows();
+    sgp_vid_t nc = vcmap.numCols();
+    edge_view_t source_bucket_offset("source_bucket_offsets", nc + 1);
+    sgp_eid_t gc_nedges = 0;
+
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Count, timer.seconds());
+    timer.reset();
+
+    Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
+        sgp_eid_t & update, const bool final) {
+        // Load old value in case we update it before accumulating
+        const sgp_eid_t val_i = edges_per_source(i);
+        // For inclusive scan,
+        // change the update value before updating array.
+        update += val_i;
+        if (final) {
+            source_bucket_offset(i + 1) = update; // only update array on final pass
+        }
+    });
+
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
+        edges_per_source(i) = 0; // will use as counter again
+    });
+
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Prefix, timer.seconds());
+    timer.reset();
+
+    Kokkos::View<sgp_eid_t> sbo_subview = Kokkos::subview(source_bucket_offset, nc);
+    sgp_eid_t size_sbo = 0;
+    Kokkos::deep_copy(size_sbo, sbo_subview);
+
+    vtx_view_t dest_by_source("dest_by_source", size_sbo);
+    wgt_view_t wgt_by_source("wgt_by_source", size_sbo);
+
+    Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
+        sgp_vid_t u = vcmap.graph.entries(thread.league_rank());
+        sgp_eid_t start = g.graph.row_map(thread.league_rank());
+        sgp_eid_t end = g.graph.row_map(thread.league_rank() + 1);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const sgp_eid_t idx) {
+            sgp_vid_t v = mapped_edges(idx);
+            if (u != v) {
+                sgp_eid_t offset = Kokkos::atomic_fetch_add(&edges_per_source(u), 1);
+
+                offset += source_bucket_offset(u);
+
+                dest_by_source(offset) = v;
+                wgt_by_source(offset) = g.values(idx);
+            }
+            });
+    });
+
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
+    timer.reset();
+
+    sgp_deduplicate_graph(n, nc,
+        edges_per_source, dest_by_source, wgt_by_source,
+        source_bucket_offset, experiment, gc_nedges);
+
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Dedupe, timer.seconds());
+    timer.reset();
+
+    edge_view_t source_offsets("source_offsets", nc + 1);
+
+    Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
+        sgp_eid_t & update, const bool final) {
+        // Load old value in case we update it before accumulating
+        const sgp_eid_t val_i = edges_per_source(i);
+        // For inclusive scan,
+        // change the update value before updating array.
+        update += val_i;
+        if (final) {
+            source_offsets(i + 1) = update; // only update array on final pass
+        }
+    });
+
+    Kokkos::View<sgp_eid_t> edge_total_subview = Kokkos::subview(source_offsets, nc);
+    Kokkos::deep_copy(gc_nedges, edge_total_subview);
+
+    vtx_view_t dest_idx("dest_idx", gc_nedges);
+    wgt_view_t wgts("wgts", gc_nedges);
+
+    Kokkos::parallel_for(policy(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
+        sgp_vid_t u = thread.league_rank();
+        sgp_eid_t start_origin = source_bucket_offset(u);
+        sgp_eid_t start_dest = source_offsets(u);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, edges_per_source(u)), [=](const sgp_eid_t idx) {
+            dest_idx(start_dest + idx) = dest_by_source(start_origin + idx);
+            wgts(start_dest + idx) = wgt_by_source(start_origin + idx);
+            });
+    });
+
+    graph_type gc_graph(dest_idx, source_offsets);
+    gc = matrix_type("gc", nc, wgts, gc_graph);
+}
+
 void sgp_build_skew(matrix_type& gc,
     const matrix_type vcmap,
     const matrix_type g,
@@ -995,8 +1098,28 @@ SGPAR_API int sgp_build_coarse_graph(matrix_type& gc,
             Kokkos::atomic_add(&c_vtx_w(u), f_vtx_w(thread.league_rank()));
         });
     });
+
+    sgp_eid_t total_unduped = 0;
+    sgp_vid_t max_unduped = 0;
+
+    Kokkos::parallel_reduce("find max", nc, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_vid_t l_max){
+        if (l_max <= degree_initial(i)) {
+            l_max = degree_initial(i);
+        }
+    }, Kokkos::Max<sgp_vid_t, Kokkos::HostSpace>(max_unduped));
+
+    Kokkos::parallel_reduce("find total", nc, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_eid_t sum){
+        sum += degree_initial(i);
+    }, total_unduped);
+
+    sgp_eid_t avg_unduped = total_unduped / nc;
     
-    sgp_build_skew(gc, vcmap, g, mapped_edges, degree_initial, experiment, timer);
+    if (avg_unduped > 50 && (max_unduped / 10) > avg_unduped) {
+        sgp_build_skew(gc, vcmap, g, mapped_edges, degree_initial, experiment, timer);
+    }
+    else {
+        sgp_build_unskew(gc, vcmap, g, mapped_edges, degree_initial, experiment, timer);
+    }
 
     return EXIT_SUCCESS;
 }
