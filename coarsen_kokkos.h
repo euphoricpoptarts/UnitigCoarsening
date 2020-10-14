@@ -1114,7 +1114,9 @@ SGPAR_API int sgp_build_coarse_graph(matrix_type& gc,
 
     sgp_eid_t avg_unduped = total_unduped / nc;
     
-    if (avg_unduped > 50 && (max_unduped / 10) > avg_unduped) {
+    //only do if graph is sufficiently irregular
+    //don't do optimizations if running on CPU (the default host space)
+    if (avg_unduped > 50 && (max_unduped / 10) > avg_unduped && typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
         sgp_build_skew(gc, vcmap, g, mapped_edges, degree_initial, experiment, timer);
     }
     else {
