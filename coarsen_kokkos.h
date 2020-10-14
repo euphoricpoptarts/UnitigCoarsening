@@ -796,59 +796,27 @@ void sgp_deduplicate_graph(const sgp_vid_t n, const sgp_vid_t nc,
 
 }
 
-SGPAR_API int sgp_build_coarse_graph(matrix_type& gc,
-    vtx_view_t& c_vtx_w,
-    const matrix_type& vcmap,
-    const matrix_type& g,
-    const vtx_view_t& f_vtx_w,
-    const int coarsening_level,
-    ExperimentLoggerUtil& experiment) {
-    sgp_vid_t n = g.numRows();
-    sgp_vid_t nc = vcmap.numCols();
-
-    //radix sort source vertices, then sort edges
-    Kokkos::View<const sgp_eid_t> rm_subview = Kokkos::subview(g.graph.row_map, n);
-    sgp_eid_t size_rm = 0;
-    Kokkos::deep_copy(size_rm, rm_subview);
-    vtx_view_t mapped_edges("mapped edges", size_rm);
+void sgp_build_skew(matrix_type& gc,
+    const matrix_type vcmap,
+    const matrix_type g,
+    const vtx_view_t mapped_edges,
+    vtx_view_t degree_initial,
+    ExperimentLoggerUtil& experiment,
+    Kokkos::Timer& timer) {
 
     edge_view_t source_bucket_offset("source_bucket_offsets", nc + 1);
 
     sgp_eid_t gc_nedges = 0;
 
-    vtx_view_t degree_initial("edges_per_source", nc);
     vtx_view_t edges_per_source("edges_per_source", nc);
 
-    Kokkos::Timer timer;
-
-    c_vtx_w = vtx_view_t("coarse vertex weights", nc);
-
-    //count edges per vertex
-    Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
-        sgp_vid_t u = vcmap.graph.entries(thread.league_rank());
-        sgp_eid_t start = g.graph.row_map(thread.league_rank());
-        sgp_eid_t end = g.graph.row_map(thread.league_rank() + 1);
-        sgp_vid_t nonLoopEdgesTotal = 0;
-        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [=] (const sgp_eid_t idx, sgp_vid_t& local_sum) {
-            sgp_vid_t v = vcmap.graph.entries(g.graph.entries(idx));
-            mapped_edges(idx) = v;
-            if (u != v) {
-                local_sum++;
-            }
-        }, nonLoopEdgesTotal);
-        Kokkos::single(Kokkos::PerTeam(thread), [=]() {
-            Kokkos::atomic_add(&degree_initial(u), nonLoopEdgesTotal);
-            Kokkos::atomic_add(&c_vtx_w(u), f_vtx_w(thread.league_rank()));
-        });
-    });
-    
     //recount with edges only belonging to vertex of smaller degree
-    Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
+    Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
         sgp_vid_t u = vcmap.graph.entries(thread.league_rank());
         sgp_eid_t start = g.graph.row_map(thread.league_rank());
         sgp_eid_t end = g.graph.row_map(thread.league_rank() + 1);
         sgp_vid_t nonLoopEdgesTotal = 0;
-        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [=] (const sgp_eid_t idx, sgp_vid_t& local_sum) {
+        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [=](const sgp_eid_t idx, sgp_vid_t& local_sum) {
             sgp_vid_t v = vcmap.graph.entries(g.graph.entries(idx));
             mapped_edges(idx) = v;
             bool degree_less = degree_initial(u) < degree_initial(v);
@@ -856,10 +824,10 @@ SGPAR_API int sgp_build_coarse_graph(matrix_type& gc,
             if (u != v && (degree_less || (degree_equal && u < v))) {
                 local_sum++;
             }
-        }, nonLoopEdgesTotal);
+            }, nonLoopEdgesTotal);
         Kokkos::single(Kokkos::PerTeam(thread), [=]() {
             Kokkos::atomic_add(&edges_per_source(u), nonLoopEdgesTotal);
-        });
+            });
     });
 
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Count, timer.seconds());
@@ -892,7 +860,7 @@ SGPAR_API int sgp_build_coarse_graph(matrix_type& gc,
     vtx_view_t dest_by_source("dest_by_source", size_sbo);
     wgt_view_t wgt_by_source("wgt_by_source", size_sbo);
 
-    Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
+    Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
         sgp_vid_t u = vcmap.graph.entries(thread.league_rank());
         sgp_eid_t start = g.graph.row_map(thread.league_rank());
         sgp_eid_t end = g.graph.row_map(thread.league_rank() + 1);
@@ -908,7 +876,7 @@ SGPAR_API int sgp_build_coarse_graph(matrix_type& gc,
                 dest_by_source(offset) = v;
                 wgt_by_source(offset) = g.values(idx);
             }
-        });
+            });
     });
 
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
@@ -926,16 +894,16 @@ SGPAR_API int sgp_build_coarse_graph(matrix_type& gc,
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(const sgp_vid_t i){
         degree_final(i) = edges_per_source(i);
     });
-   
-    Kokkos::parallel_for(policy(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
+
+    Kokkos::parallel_for(policy(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
         sgp_vid_t u = thread.league_rank();
         sgp_eid_t start = source_bucket_offset(u);
         sgp_eid_t end = start + edges_per_source(u);
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=] (const sgp_eid_t idx) {
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const sgp_eid_t idx) {
             sgp_vid_t v = dest_by_source(idx);
             //increment other vertex
             Kokkos::atomic_fetch_add(&degree_final(v), 1);
-        });
+            });
     });
 
     edge_view_t source_offsets("source_offsets", nc + 1);
@@ -959,7 +927,7 @@ SGPAR_API int sgp_build_coarse_graph(matrix_type& gc,
     vtx_view_t dest_idx("dest_idx", gc_nedges);
     wgt_view_t wgts("wgts", gc_nedges);
 
-    Kokkos::parallel_for(policy(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
+    Kokkos::parallel_for(policy(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
         sgp_vid_t u = thread.league_rank();
         sgp_eid_t u_origin = source_bucket_offset(u);
         sgp_eid_t u_dest_offset = source_offsets(u);
@@ -974,14 +942,57 @@ SGPAR_API int sgp_build_coarse_graph(matrix_type& gc,
             wgts(u_dest) = wgt;
             dest_idx(v_dest) = u;
             wgts(v_dest) = wgt;
-        });
+            });
     });
 
     graph_type gc_graph(dest_idx, source_offsets);
     gc = matrix_type("gc", nc, wgts, gc_graph);
-    
+
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::WriteGraph, timer.seconds());
     timer.reset();
+}
+
+SGPAR_API int sgp_build_coarse_graph(matrix_type& gc,
+    vtx_view_t& c_vtx_w,
+    const matrix_type& vcmap,
+    const matrix_type& g,
+    const vtx_view_t& f_vtx_w,
+    const int coarsening_level,
+    ExperimentLoggerUtil& experiment) {
+    sgp_vid_t n = g.numRows();
+    sgp_vid_t nc = vcmap.numCols();
+
+    //radix sort source vertices, then sort edges
+    Kokkos::View<const sgp_eid_t> rm_subview = Kokkos::subview(g.graph.row_map, n);
+    sgp_eid_t size_rm = 0;
+    Kokkos::deep_copy(size_rm, rm_subview);
+    vtx_view_t mapped_edges("mapped edges", size_rm);
+
+    Kokkos::Timer timer;
+
+    vtx_view_t degree_initial("edges_per_source", nc);
+    c_vtx_w = vtx_view_t("coarse vertex weights", nc);
+
+    //count edges per vertex
+    Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
+        sgp_vid_t u = vcmap.graph.entries(thread.league_rank());
+        sgp_eid_t start = g.graph.row_map(thread.league_rank());
+        sgp_eid_t end = g.graph.row_map(thread.league_rank() + 1);
+        sgp_vid_t nonLoopEdgesTotal = 0;
+        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [=] (const sgp_eid_t idx, sgp_vid_t& local_sum) {
+            sgp_vid_t v = vcmap.graph.entries(g.graph.entries(idx));
+            mapped_edges(idx) = v;
+            if (u != v) {
+                local_sum++;
+            }
+        }, nonLoopEdgesTotal);
+        Kokkos::single(Kokkos::PerTeam(thread), [=]() {
+            Kokkos::atomic_add(&degree_initial(u), nonLoopEdgesTotal);
+            Kokkos::atomic_add(&c_vtx_w(u), f_vtx_w(thread.league_rank()));
+        });
+    });
+    
+    sgp_build_skew(gc, vcmap, g, mapped_edges, degree_initial, experiment, timer);
 
     return EXIT_SUCCESS;
 }
