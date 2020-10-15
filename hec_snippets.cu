@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <cooperative_groups.h>
+#include <cooperative_groups/reduce.h>
 #include <curand_kernel.h>
 
 namespace cg = cooperative_groups;
@@ -9,10 +10,11 @@ using namespace cg;
 
 #define GPU_DEBUG 0
 
-#define NUM_THREADS_PER_BLOCK 128
+#define NUM_THREADS_PER_BLOCK 32
 #define INFTY INT_MAX
 
 static __device__ int ncoarse;
+// static __device__ int nrand_accesses;
 
 /* using ints throughout for simplicity */
 typedef struct {
@@ -133,6 +135,7 @@ __global__ void triad(int * const __restrict C,
     grid_group g = this_grid();
     const int start = g.thread_rank();
     const int incr  = g.size();
+    // 4 + 4 + 4 bytes
     for (int i = start; i < array_size; i += incr) { 
         C[i] = A[i] + B[i];
     }
@@ -152,7 +155,25 @@ __global__ void findH_thr_per_vertex(int * __restrict__ const H,
     curandStatePhilox4_32_10_t localState = state[start];
     // unsigned int x = curand(&localState);
 
+    // This piece of code is to compute the max load imbalance with
+    // the assumed striped distribution of vertices. This value might be much
+    // lower than max degree / avg. degree. 
+#if 1
+    int load = 0;
+    for (int i = start; i < n; i += incr) {
+        load += (num_edges[i+1] - num_edges[i]);
+    }
+    g.sync();
+    coalesced_group active = coalesced_threads();
+    int max_load = reduce(active, load, greater<int>());
+    if (start == 0) {
+        printf("Max imbalance: %.3f\n", max_load / ((2.0 * m) / incr));
+    }
+    g.sync();
+#endif
+
     unsigned int mask = INT_MAX;
+    // 4 + 32 + 32 bytes
     for (int i = start; i < n; i += incr) {
         const int adj_start = num_edges[i];
         const int adj_end   = num_edges[i+1];
@@ -163,7 +184,7 @@ __global__ void findH_thr_per_vertex(int * __restrict__ const H,
         assert(offset < degree);
         assert(offset >= 0);
 #endif
-        int vm = adj[adj_start + offset];
+        int vm = adj[adj_start + offset]; // random read
 #if 0
         int vm = adj[adj_start];
         int wm = eweights[adj_start];
@@ -178,7 +199,8 @@ __global__ void findH_thr_per_vertex(int * __restrict__ const H,
             j++;
         }
 #endif
-        H[i] = vm; 
+        H[i] = vm; // these writes aren't getting coalesced
+                   // maybe write to shared memory first
     }
 }
 
@@ -190,8 +212,6 @@ __global__ void rng_init(curandStatePhilox4_32_10_t *state) {
 }
 
 __global__ void HEC_mapping(int * __restrict__ M,
-                int * __restrict__ X,
-                int * __restrict__ Y,
                 int * __restrict__ d_nc,
                 const int * __restrict__ const H,
                 const int * __restrict__ const num_edges, 
@@ -202,61 +222,71 @@ __global__ void HEC_mapping(int * __restrict__ M,
     grid_group g = this_grid();
     const int start = g.thread_rank();
     const int incr  = g.size();
+    
+    const int tid   = g.thread_rank();
 
-    if (start == 0) {
+    if (tid == 0) {
         ncoarse = 0;
-    }
-
-    for (int i = start; i < n; i += incr) {
-        M[i] = INFTY;
-        X[i] = INFTY;
-        Y[i] = 0;
-    }
-
-    if (start == 0) {
+        // nrand_accesses = 0;
         d_nc[0] = 0;
     }
 
+    // cyclic distribution of threads to vertices
+    // each thread processes n/nthreads vertices
+    // 4 bytes
+    for (int i = start; i < n; i += incr) {
+        M[i] = INFTY;
+    }
+    
     g.sync();
 
+    // 4 + 32 + 32 * mapped_frac bytes
     for (int u = start; u < n; u += incr) {
         int v = H[u];
 #if GPU_DEBUG
         assert(v >= 0);
         assert(v < INFTY);
 #endif
-        atomicCAS(&X[v], INFTY, u);
+        if (M[v] == INFTY) // atomic write or extra random read?
+            atomicCAS(&M[v], INFTY, v); // random atomic write
     }
 
     g.sync();
 
-    for (int v = start; v < n; v += incr) {
-        int u = X[v];
-        if (u != INFTY) {
-            if ((atomicAdd(&Y[u], 1) == 0) && (atomicAdd(&Y[v], 1) == 0)) {
-                int nc = atomicAdd(&ncoarse, 1);
-                M[u] = nc;
-                M[v] = nc;
-            }
-        } 
-    }
-
-    g.sync();
-
+    // 4 + 32 * unmapped_frac bytes
     for (int u = start; u < n; u += incr) {
-        int v = H[u];
         if (M[u] == INFTY) {
-            int cv = M[v];
-            if (cv != INFTY) {
-                M[u] = cv;
-            } else { /* we give up :( */
-                int nc = atomicAdd(&ncoarse, 1); // we should also track the "new" verts
-                M[u] = nc; // this should probably be AtomicCAS
-                M[v] = nc; // and so does this one
-            }
+            int v = H[u]; // random read
+            M[u] = M[v];
         }
     }
+    
+    g.sync();
 
+    // finish up
+    // 4 * mapped_frac + 32 * unmapped_frac + 32 * nrand_accesses (between 1-3) bytes
+    for (int u = start; u < n; u += incr) {
+        int p = u;
+        int x = M[p];
+        if (p != x) {
+            while (p != (x = M[p])) { // random read
+                p = M[x];             // random read
+                // atomicAdd(&nrand_accesses, 2);
+            }
+            // atomicAdd(&nrand_accesses, 1);
+            M[u] = p; // write may not be coalesced
+        }
+    }
+    g.sync();
+
+    // determine ncoarse
+    // 4 bytes
+    for (int u = start; u < n; u += incr) {
+        if (M[u] == u) {
+            atomicAdd(&ncoarse, 1);
+        }
+    }
+    
     g.sync();
 
     // Just a check 
@@ -444,8 +474,8 @@ int main(int argc, char **argv) {
         assert(err == 0);
 
         float elt = timer.stopTimer();
-        fprintf(stdout, "Find H (per vertex) time: %.3f ms, throughput: %.3f ME/s or %.3f MV/s\n", 
-                    elt * 1e3, (d_g.m * 1e-6) / elt, (d_g.n * 1e-6) / elt);
+        fprintf(stdout, "Find H (per vertex) time: %.3f ms, throughput: %.3f ME/s or %.3f MV/s, BW: %.3f GB/s\n", 
+                    elt * 1e3, (d_g.m * 1e-6) / elt, (d_g.n * 1e-6) / elt, (68.0 * d_g.n * 1e-9) / elt);
         i++;
     }
   
@@ -454,31 +484,31 @@ int main(int argc, char **argv) {
                                                   numThreads, dev);
     fprintf(stdout, "Recommended number of blocks for HEC mapping kernel: %d, planned: %d\n", 
                     numBlocksPerSmRecommended, numBlocks/numSM);
-    assert(numBlocksPerSmRecommended >= (numBlocks/numSM));
-    
+    if (numBlocksPerSmRecommended != (numBlocks/numSM)) {
+        fprintf(stderr, "Warning: changing number of blocks based on recommendation.\n");
+        numBlocks = numSM * numBlocksPerSmRecommended;
+    }
+    dim3 dimGrid3(numBlocks, 1, 1);
+
     int *d_M;
-    int *d_X;
-    int *d_Y;
     int *d_nc;
     assert(cudaMalloc(&d_M, g.n * sizeof(int)) == cudaSuccess);
-    assert(cudaMalloc(&d_X, g.n * sizeof(int)) == cudaSuccess);
-    assert(cudaMalloc(&d_Y, g.n * sizeof(int)) == cudaSuccess);
     assert(cudaMalloc(&d_nc, sizeof(int)) == cudaSuccess);
 
     while (i < numTrials) { 
         gpuTimer timer;
         timer.startTimer();
 
-        void *kernelArgs[] = {&d_M, &d_X, &d_Y, &d_nc, 
+        void *kernelArgs[] = {&d_M, &d_nc, 
                               &d_H, &(d_g.num_edges), &(d_g.adj), 
                               &(d_g.eweights), &(d_g.n)};
         cudaError_t err = cudaLaunchCooperativeKernel(((void *) HEC_mapping), 
-                        dimGrid2, dimBlock, kernelArgs);
+                        dimGrid3, dimBlock, kernelArgs);
         assert(err == 0);
 
         float elt = timer.stopTimer();
-        fprintf(stdout, "HEC time: %.3f ms, throughput: %.3f ME/s or %.3f MV/s\n", 
-                    elt * 1e3, (d_g.m * 1e-6) / elt, (d_g.n * 1e-6) / elt);
+        fprintf(stdout, "HEC time: %.3f ms, throughput: %.3f ME/s or %.3f MV/s, BW: %.3f GB/s\n", 
+                    elt * 1e3, (d_g.m * 1e-6) / elt, (d_g.n * 1e-6) / elt, (208 * d_g.n * 1e-9) / elt);
         i++;
 
         int nc = 0;
