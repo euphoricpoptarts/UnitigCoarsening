@@ -8,44 +8,121 @@ import secrets
 import json
 from pathlib import Path
 from itertools import zip_longest
+import math
 
-stemParse = r"(.+)_fm_(.+)_(.+)_Sampling_Data"
+stemParse = r"(.+)_(fm|spec)_(.*)_Sampling_Data"
 lineParse = "{}mean={}, median={}, min={}, max={}, std-dev={}"
 #fieldHeaders = "Graph, HEC, MIS, Match, MT"
-fieldHeaders = "Graph, method, 1, 2, 4, 8, 16, 32"
+fieldHeaders = "{Graph} & {hec} & {match} & {mtmetis} & {gosh} & {mis2}"
 
-def textStatsToCSV(stem, filepath, relevantLines):
-    graphStats = []
-    parsedLines = []
+def getStats(filepath):
     with open(filepath,"r") as f:
-        for line in f:
-            parsed = parse(lineParse,line)
-            parsedLines.append(parsed)
+       return json.load(f) 
 
-    if len(parsedLines) < 11:
-        return stem
+def gpuBuildTable(graphs,data,outFile):
+    with open(outFile,"w+") as f:
+        print(fieldHeaders, file=f)
+        for graph in graphs:
+            graphSanitized = graph.replace("_","\\textunderscore ")
+            l = [graphSanitized]
+            values = data[graph]
+            exp = values[("spec","hec")]
+            exp_gemm = values[("spec","hec_gemm")]
+            exp_map = values[("spec","hec_hashmap")]
+            l.append("{:.2f}".format(exp["coarsen-duration-seconds"]["median"]))
+            l.append("{:.2f}".format(exp["coarsen-build-duration-seconds"]["median"] / exp["coarsen-duration-seconds"]["median"]))
+            l.append("{:.2f}".format(exp_map["coarsen-build-duration-seconds"]["median"] / exp["coarsen-build-duration-seconds"]["median"]))
+            l.append("{:.2f}".format(exp_gemm["coarsen-build-duration-seconds"]["median"] / exp["coarsen-build-duration-seconds"]["median"]))
+            print(" & ".join(l) + " \\\\", file=f)
 
-    desiredStats = [2,5]
-    for line in relevantLines:
-        parsed = parsedLines[line]
+def cpuBuildTable(graphs,data,outFile):
+    with open(outFile,"a+") as f:
+        print(fieldHeaders, file=f)
+        for graph in graphs:
+            graphSanitized = graph.replace("_","\\textunderscore ")
+            l = [graphSanitized]
+            values = data[graph]
+            exp = values[("spec","hecCPU")]
+            l.append("{:.2f}".format(exp["coarsen-duration-seconds"]["median"]))
+            l.append("{:.2f}".format(exp["coarsen-build-duration-seconds"]["median"] / exp["coarsen-duration-seconds"]["median"]))
+            try:
+                exp_map = values[("spec","hecCPU_hashmap")]
+                l.append("{:.2f}".format(exp_map["coarsen-build-duration-seconds"]["median"] / exp["coarsen-build-duration-seconds"]["median"]))
+            except KeyError:
+                l.append("DNF")
+            try:
+                exp_gemm = values[("spec","hecCPU_gemm")]
+                l.append("{:.2f}".format(exp_gemm["coarsen-build-duration-seconds"]["median"] / exp["coarsen-build-duration-seconds"]["median"]))
+            except KeyError:
+                l.append("DNF")
+            print(" & ".join(l) + " \\\\", file=f)
 
-        chosenStats = []
-        if parsed is not None:
-            parsed = list(parsed)
-            for stat in desiredStats:
-                chosenStats.append(parsed[stat])
-        else:
-            for stat in desiredStats:
-                chosenStats.append("nan")
-        graphStats.append(chosenStats)
-    return graphStats
+def gpuvcpuTable(graphs,data,outFile):
+    with open(outFile,"a+") as f:
+        print(fieldHeaders, file=f)
+        for graph in graphs:
+            graphSanitized = graph.replace("_","\\textunderscore ")
+            l = [graphSanitized]
+            values = data[graph]
+            gpu = values[("spec","hec")]
+            cpu = values[("spec","hecCPU")]
+            l.append("{:.2f}".format(cpu["coarsen-duration-seconds"]["median"] / gpu["coarsen-duration-seconds"]["median"]))
+            l.append("{:.2f}".format(cpu["coarsen-build-duration-seconds"]["median"] / gpu["coarsen-build-duration-seconds"]["median"]))
+            try:
+                serial = values[("spec","hecCPUSerial")]
+                l.append("{:.2f}".format(serial["coarsen-duration-seconds"]["median"] / cpu["coarsen-duration-seconds"]["median"]))
+                l.append("{:.2f}".format(serial["coarsen-build-duration-seconds"]["median"] / cpu["coarsen-build-duration-seconds"]["median"]))
+            except KeyError:
+                l.append("DNF")
+                l.append("DNF")
+            print(" & ".join(l) + " \\\\", file=f)
+
+def methodsCompTable(graphs,data,outFile):
+    with open(outFile,"a+") as f:
+        print(fieldHeaders, file=f)
+        for graph in graphs:
+            graphSanitized = graph.replace("_","\\textunderscore ")
+            l = [graphSanitized]
+            values = data[graph]
+            main = values[("spec","hec")]
+            otherExps = ["match","mtmetis","gosh","mis2"]
+            for other in otherExps:
+                try:
+                    exp = values[("spec",other)]
+                    l.append("{:.2f}".format(exp["coarsen-duration-seconds"]["median"] / main["coarsen-duration-seconds"]["median"]))
+                except KeyError:
+                    l.append("DNF")
+            
+            l.append("{:.2f}".format(main["number-coarse-levels"]["median"]))
+            for other in otherExps:
+                try:
+                    exp = values[("spec",other)]
+                    l.append("{:.0f}".format(exp["number-coarse-levels"]["median"]))
+                except KeyError:
+                    l.append("DNF")
+            
+            hecCoarseLevels = main["coarse-levels"]
+            hecCoarsenRate = hecCoarseLevels[-1]["number-vertices"]["median"] / hecCoarseLevels[0]["number-vertices"]["median"]
+            hecCoarsenRate = math.pow(hecCoarsenRate, 1/(main["number-coarse-levels"]["median"] - 1))
+            l.append("{:.2f}".format(hecCoarsenRate))
+           
+            try:
+                mtmetis = values[("spec","mtmetis")]
+                mtCL = mtmetis["coarse-levels"]
+                mtCR = mtCL[-1]["number-vertices"]["median"] / mtCL[0]["number-vertices"]["median"]
+                mtCR = math.pow(mtCR, 1/(mtmetis["number-coarse-levels"]["median"] - 1))
+                l.append("{:.2f}".format(mtCR))
+            except KeyError:
+                l.append("DNF")
+
+            print(" & ".join(l) + " \\\\", file=f)
 
 def main():
 
     logDir = sys.argv[1]
     outFile = sys.argv[2]
 
-    globMatch = "{}/*.txt".format(logDir)
+    globMatch = "{}/*.json".format(logDir)
 
     data = {}
     for file in glob(globMatch):
@@ -53,30 +130,18 @@ def main():
         stem = Path(filepath).stem
         stemMatch = re.match(stemParse, stem)
         if stemMatch is not None:
-            graph = (stemMatch.groups()[0],stemMatch.groups()[1])
-            experiment = stemMatch.groups()[2]
+            graph = stemMatch.groups()[0]
+            experiment = (stemMatch.groups()[1], stemMatch.groups()[2])
             if graph not in data:
                 data[graph] = {}
-            #if experiment in ["HEC", "MIS"]:
-            #    data[graph][experiment] = textStatsToCSV(stem, filepath, [0,1,2,3,8,9])
-            #else:
-            #0 is total, 1 is all coarsen, 2 is coarsen map, 3 is coarsen build, 12 is refine time, 13 is cutsize
-            data[graph][experiment] = textStatsToCSV(stem, filepath, [0,1,2,3,12,13,15])
+            data[graph][experiment] = getStats(filepath)
 
-    experiments = ["1","2","4","8","16","32"]#["hec","mis","match","mt"]
-    with open(outFile,"w") as f:
-        print(fieldHeaders, file=f)
-        for graph, values in data.items():
-            l = [graph[0], graph[1]]
-            for experiment in experiments:
-                if experiment in values:
-                    l.append("{}".format(values[experiment][1][0]))
-                else:
-                    l.append("DNF")
-            #for experimentName, experiment in values.items():
-            #    print(",".join([graph, experimentName[0], experimentName[1], experiment[2][0]]), file=f)
-            print(",".join(l), file=f)
-
+    graphsSorted = [key for key in data]
+    graphsSorted = sorted(graphsSorted, key = str.casefold)
+    gpuBuildTable(graphsSorted, data, outFile)
+    cpuBuildTable(graphsSorted, data, outFile)
+    gpuvcpuTable(graphsSorted, data, outFile)
+    methodsCompTable(graphsSorted, data, outFile)
 
 if __name__ == "__main__":
     main()
