@@ -765,10 +765,7 @@ namespace sgpar_kokkos {
 
     sgp_vid_t parallel_map_construct_v3(vtx_view_t vcmap, const sgp_vid_t n, const vtx_view_t vperm, const vtx_view_t hn, const vtx_view_t ordering) {
 
-        sgp_vid_t remaining_total = n;
         Kokkos::View<sgp_vid_t> nvertices_coarse("nvertices");
-
-        vtx_view_t remaining = vperm;
 
         vtx_view_t m("matches", n);
         Kokkos::parallel_for("init heavy samples", n, KOKKOS_LAMBDA(sgp_vid_t u){
@@ -793,7 +790,7 @@ namespace sgpar_kokkos {
         Kokkos::parallel_for("do matching", n, KOKKOS_LAMBDA(sgp_vid_t u){
             sgp_vid_t p = m(u);
             while (m(p) != p) {
-                p = m(p);
+                p = m(m(p));
             }
             m(u) = p;
         });
@@ -820,6 +817,8 @@ namespace sgpar_kokkos {
             }
         }, Kokkos::Max<sgp_vid_t, Kokkos::HostSpace>(nc));
 
+        //nc is the largest vertex id, it needs to be one larger
+        nc++;
         return nc;
     }
 
@@ -879,9 +878,12 @@ namespace sgpar_kokkos {
                             local.val = wgt;
                             local.loc = idx;
                         }
+                    
                     }, Kokkos::MaxLoc<sgp_wgt_t, sgp_eid_t,Device>(argmax));
-                    sgp_vid_t h = g.graph.entries(argmax.loc);
-                    hn(i) = h;
+                    Kokkos::single(Kokkos::PerTeam(thread), [=](){
+                        sgp_vid_t h = g.graph.entries(argmax.loc);
+                        hn(i) = h;
+                    });
                 } else {
                     gen_t generator = rand_pool.get_state();
                     hn(i) = generator.urand64() % n;
