@@ -362,7 +362,7 @@ void fm_create_ds(const eigenview_t& partition_device, const matrix_type& g_devi
 }
 
 struct imbCut {
-    sgp_eid_t cut = 0;
+    int64_t cut = 0;
     int64_t imb = 0;
     sgp_vid_t idx = 0;
 };
@@ -370,28 +370,36 @@ struct imbCut {
 struct bestImbCut
 {
 
-    edge_view_t scan_cuts;
+	Kokkos::View<int64_t*> scan_cuts;
     Kokkos::View<int64_t*> scan_imbs;
-    sgp_eid_t start_cut;
-    int64_t start_imb;
+    int64_t start_cut;
+    int64_t start_imb, target_imb;
+	Kokkos::View<imbCut> result;
+	sgp_vid_t end_of_range;
 
-    bestImbCut(edge_view_t scan_cuts,
+    bestImbCut(Kokkos::View<int64_t*> scan_cuts,
         Kokkos::View<int64_t*> scan_imbs,
-        sgp_eid_t start_cut,
-        int64_t start_imb)
+        int64_t start_cut,
+        int64_t start_imb,
+		int64_t target_imb,
+		Kokkos::View<imbCut> result,
+		sgp_vid_t end_of_range)
         : scan_cuts(scan_cuts)
         , scan_imbs(scan_imbs)
         , start_cut(start_cut)
-        , start_imb(start_imb) {}
+        , start_imb(start_imb)
+		, target_imb(target_imb)
+   		, result(result)
+   		, end_of_range(end_of_range) {}
 
     KOKKOS_INLINE_FUNCTION
-        void operator()(const sgp_vid_t i, imbCut& update) const
+        void operator()(const sgp_vid_t i, imbCut& update, const bool final) const
     {
         bool swap = false;
-        if (abs(update.imb) >= abs(scan_imbs(i)) && update.cut >= scan_cuts(i)) {
+        if (abs(scan_imbs(i)) <= target_imb && update.cut >= scan_cuts(i)) {
             swap = true;
         } 
-        else if (abs(update.imb) > abs(scan_imbs(i)) && 1.05 * update.cut > scan_cuts(i)) {
+        else if (abs(update.imb) > abs(scan_imbs(i)) && 1.2 * update.cut > scan_cuts(i)) {
             swap = true;
         }
         if (swap) {
@@ -400,16 +408,26 @@ struct bestImbCut
             //idx is exclusive of last vtx to be swapped
             update.idx = i + 1;
         }
+
+		if(final && i == end_of_range){
+			result() = update;
+			//result().imb = update.imb;
+			//result().cut = update.cut;
+			//result().idx = update.idx;
+		}
     }
 
     KOKKOS_INLINE_FUNCTION
         void join(volatile imbCut& update, const volatile imbCut& compare) const
     {
         bool swap = false;
-        if (abs(update.imb) >= abs(compare.imb) && update.cut >= compare.cut) {
+		if(abs(compare.imb) <= target_imb && update.cut >= compare.cut){
+			swap = true;
+		}
+		else if (abs(update.imb) >= abs(compare.imb) && update.cut > compare.cut) {
             swap = true;
         }
-        else if (abs(update.imb) > abs(compare.imb) && 1.05 * update.cut > compare.cut) {
+        else if (abs(update.imb) > abs(compare.imb) && 1.2 * update.cut > compare.cut) {
             swap = true;
         }
         if (swap) {
@@ -447,7 +465,7 @@ struct scanVtxWgt
         if (final) {
             imbScan(i) = update;
         }
-        update += v_wgt(u);
+        update += 2*v_wgt(u);
     }
 };
 
@@ -606,6 +624,30 @@ vtx_view_t interleave_for_balance(const eigenview_t& partition, const vtx_view_t
     part1 = vtx_view_t("part 1", part1_size);
     sortPart part1_sort(rand_perm, part1, partition, 1.0);
     Kokkos::parallel_scan("move part 1", n, part1_sort);
+    vtx_view_t perm("swap order", n);
+
+	/*sgp_vid_t x = 0, y = 0;
+	int64_t imb = start_imb;
+	while(x < part0_size || y < part1_size){
+		if(x < part0_size && y < part1_size){
+			if(imb > 0){
+				perm(x + y) = part0(x);
+				imb -= 2*vtx_w(part0(x));
+				x++;
+			} else {
+				perm(x + y) = part1(y);
+				imb += 2*vtx_w(part1(y));
+				y++;
+			}
+		} else if(x < part0_size){
+			perm(x + y) = part0(x);
+			x++;
+		} else {
+			perm(x + y) = part1(y);
+			y++;
+		}
+	}
+	return perm;*/
 
     //compute location of interleave
     int64_t target_imb = abs(start_imb) / 10;
@@ -629,7 +671,6 @@ vtx_view_t interleave_for_balance(const eigenview_t& partition, const vtx_view_t
         Kokkos::parallel_reduce("find interleave", part1_size, find_interleave, interleave);
     }
 
-    vtx_view_t perm("swap order", n);
     sgp_vid_t interleave_size = 0;
     if (start_imb > 0) {
         interleaveParts interleave_parts = interleaveParts(part0, part1, perm, interleave);
@@ -711,7 +752,9 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
                 else {
                     pre_commit_chosen(i) = SGP_INFTY;
                 }
-            }
+            } else {
+                pre_commit_chosen(i) = SGP_INFTY;
+			}
         }, chosen);
 
         //this can be optimized to be only on the chosen range
@@ -747,9 +790,10 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
         reverse_map(mid_perm(i)) = i;
     });
 
-    Kokkos::parallel_for("remove bad gains", chosen_host, KOKKOS_LAMBDA(const sgp_vid_t i){
-        int64_t gain = 0, gainLost = 0;
+    Kokkos::parallel_for("remove bad gains", n, KOKKOS_LAMBDA(const sgp_vid_t i){
+		int64_t gain = 0, gainLost = 0;
         sgp_vid_t u = mid_perm(i);
+		if(chosen_at(u) < n){
         for (sgp_eid_t j = g.graph.row_map(u); j < g.graph.row_map(u + 1); j++) {
             sgp_vid_t v = g.graph.entries(j);
             sgp_wgt_t wgt = g.values(j);
@@ -788,6 +832,7 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
             sgp_vid_t write_loc = n - 1 - Kokkos::atomic_fetch_add(&end_write(), 1);
             end_perm(write_loc) = u;
         }
+		}
     });
 
     //this might not be necessary if we only interleave on the chosen range
@@ -809,11 +854,11 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
     });
 
     Kokkos::View<int64_t*> gains("gains", n);
-    edge_view_t scan_cuts("scan cuts", n);
+	Kokkos::View<int64_t*> scan_cuts("scan cuts", n);
     Kokkos::View<int64_t*> scan_imbs("scan imbs", n);
-    sgp_eid_t start_cut = 0;
+    int64_t start_cut = 0;
 
-    Kokkos::parallel_reduce("calculate gains and starting cut", n, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_eid_t & local_cut){
+    Kokkos::parallel_reduce("calculate gains and starting cut", n, KOKKOS_LAMBDA(const sgp_vid_t i, int64_t & local_cut){
         int64_t gain = 0;
         sgp_eid_t cut = 0;
         for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
@@ -842,6 +887,8 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
         gains(i) = 2*gain;
         local_cut += cut;
     }, start_cut);
+    
+	printf("Level %i; Unrefined balance: %li, cutsize: %li\n", level, start_imb, start_cut);
 
     Kokkos::parallel_scan("cut scan", n, KOKKOS_LAMBDA(const sgp_vid_t i, int64_t & update, const bool final){
         sgp_vid_t u = perm(i);
@@ -865,13 +912,46 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
             scan_imbs(i) = start_imb + update;
         }
     });
-
-    bestImbCut findBest(scan_cuts, scan_imbs, start_cut, start_imb);
-
+/*	for(sgp_vid_t i = 0; i < n; i++){
+		printf("perm(%u): %u, imb: %li, cut: %li\n", i, perm(i), scan_imbs(i), scan_cuts(i));
+		printf("part(%u): %.1f\n", perm(i), partition(perm(i)));
+	}
+*/
     imbCut result;
+	result.imb = abs(start_imb);
+	result.cut = start_cut;
+	result.idx = 0;
+	Kokkos::View<imbCut> dev_result("dev result");
+	Kokkos::deep_copy(dev_result, result);
 
-    Kokkos::parallel_reduce("find best partition", n, findBest, result);
+	int64_t target_imb = abs(start_imb)/10;
+	if(target_imb < 20) target_imb = 20;
+    bestImbCut findBest(scan_cuts, scan_imbs, start_cut, start_imb, target_imb, dev_result, n - 1);
 
+	/*for(sgp_vid_t i = 0; i < n; i++){
+		bool choose = false;
+		if(abs(scan_imbs(i)) <= target_imb && scan_cuts(i) < result.cut){
+			choose = true;
+		}
+		else if(abs(scan_imbs(i)) > target_imb)
+		{
+			if (abs(scan_imbs(i)) < result.imb && scan_cuts(i) < 1.05 * result.cut) {
+        		choose = true;
+			}
+        	else if (abs(scan_imbs(i)) <= result.imb && scan_cuts(i) <= result.cut) {
+        		choose = true;
+			}
+		}
+		if(choose){
+			result.imb = abs(scan_imbs(i));
+			result.cut = scan_cuts(i);
+			result.idx = i + 1;
+		}
+	}*/
+    Kokkos::parallel_scan("find best partition", n, findBest);
+	Kokkos::deep_copy(result, dev_result);
+
+	if(result.idx > 0){
     Kokkos::parallel_for("perform swaps", result.idx, KOKKOS_LAMBDA(const sgp_vid_t i){
         sgp_vid_t u = perm(i);
         if (partition(u) == 0.0) {
@@ -881,8 +961,9 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
             partition(u) = 0.0;
         }
     });
+	}
 
-    printf("Level %i; Refined balance: %li, cutsize: %lu\n", level, result.imb, result.cut);
+    printf("Level %i; Refined balance: %li, cutsize: %li, swaps: %u\n", level, result.imb, result.cut, result.idx);
     return result.cut;
 }
 
@@ -890,7 +971,9 @@ sgp_eid_t fm_refine_par(eigenview_t& partition, const matrix_type& g, const vtx_
 //also we assume ALL coarse edge weights are integral
 //this code is DISGUSTING, you've been warned
 sgp_eid_t fm_refine(eigenview_t& partition_device, const matrix_type& g_device, const vtx_view_t& vtx_w_device, ExperimentLoggerUtil& experiment, const int level) {
-    sgp_vid_t n = g_device.numRows();
+    //return fm_refine_par(partition_device, g_device, vtx_w_device, experiment, level);
+	
+	sgp_vid_t n = g_device.numRows();
 
     sgp_eid_t maxE = 0;
 
@@ -1147,7 +1230,8 @@ sgp_eid_t fm_refine(eigenview_t& partition_device, const matrix_type& g_device, 
         }
     }
 
-    printf("Level %i; Refined balance: %li, cutsize: %lu\n", level, min_imb, min_cut);
+    printf("Level %i; Unrefined balance: %li, cutsize: %li\n", level, balance, start_cut);
+    printf("Level %i; Refined balance: %li, cutsize: %u\n", level, min_imb, min_cut);
     Kokkos::deep_copy(partition_device, partition);
 
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::FMRefine, timer.seconds());
@@ -1293,8 +1377,8 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
     sgp_eid_t last_cut = min_cut;
     eigenview_t fine_part = partition;
     printf("recoarsening level %d\n", refine_layer);
-    while(true){
-        last_cut = min_cut;
+    bool was_top = top;
+	while(true){
         matrix_type gc;
         matrix_type interpolation_graph;
         sgp_vid_t nvertices_coarse;
@@ -1307,7 +1391,7 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
         	sgp_recoarsen_HEC(interpolation_graph, &nvertices_coarse, g, fine_part);
 		}
 
-        sgp_build_coarse_graph_msd(gc, c_vtx_w, interpolation_graph, g, f_vtx_w, 2, throwaway);
+        sgp_build_coarse_graph(gc, c_vtx_w, interpolation_graph, g, f_vtx_w, 2, throwaway);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::FMRecoarsen, timer.seconds());
         timer.reset();
 
@@ -1329,7 +1413,7 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
             out_cut = min_cut;
             printf("stop recoarsening level %d\n", refine_layer);
             return fine_part;
-        } else if (gc.numRows() < 30) {
+        } else if (gc.numRows() < 30 || gc.numRows() == g.numRows()) {
             printf("stop recoarsening level %d\n", refine_layer);
             return fine_part;
         }
@@ -1361,7 +1445,6 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
                 last_cut2 = min_cut;
                 min_cut = fm_refine(coarse_part, gc, c_vtx_w, experiment, refine_layer + 1);
             } while(last_cut2 != min_cut);
-            //only explore on first run
         } else {
             //continue doing whatever we're doing
             coarse_part = sgp_recoarsen_one_level(gc, c_vtx_w, coarse_part, min_cut, min_cut, refine_layer + 1, experiment, mt, auto_replace, false);
@@ -1384,11 +1467,26 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
             fine_part = fine_recoarsened;
             out_cut = min_cut;
         }
-        if(!top && min_cut > 0.999*last_cut) {
+		//the closer tol is to 1, the smaller that the cut decrease must be before quitting
+		double tol = 0.99;
+		if(refine_layer >= 1 && refine_layer <= 1){
+			tol = 0.999;
+		} else if(refine_layer > 1){
+			tol = 0.9999;
+		}
+        if(!top && min_cut > tol*last_cut) {
             printf("stop recoarsening level %d\n", refine_layer);
             return fine_part;
         }
-        top = false;
+        //only explore on first run
+        if(was_top && min_cut < tol*last_cut){
+			top = true;
+		} else {
+			top = false;
+		}
+        if(auto_replace || min_cut < last_cut){
+			last_cut = min_cut;
+        }
     }
 }
 
@@ -1423,7 +1521,9 @@ SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graph
 
     int refine_layer = graphs.size();
     //there is always one more refinement than interpolation
-    sgp_eid_t cutsize = SGP_INFTY;
+#ifdef FM
+	sgp_eid_t cutsize = SGP_INFTY;
+#endif
     while (graph_iter != end) {
         //refine
 #ifdef FM

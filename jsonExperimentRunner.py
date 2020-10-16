@@ -39,7 +39,7 @@ serialCalls = [("./mp_build/hec_spec","spec_hecCPUSerial"),
 specialspgemm = ("./mp_build/hec_spec_spgemm","spec_hecCPU_gemm")
 
 rateLimit = BoundedSemaphore(value = 1)
-waitLimit = 600
+waitLimit = 3600
 
 def printStat(fieldTitle, statList, outfile):
     min_s = min(statList)
@@ -148,27 +148,32 @@ def runExperiment(executable, filepath, metricDir, logFile, t_count):
     myenv = os.environ.copy()
     myenv['OMP_NUM_THREADS'] = str(t_count)
 
-    metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
-    call = [executable, filepath, metricsPath, "base_config.txt"]
-    call_str = " ".join(call)
-    with rateLimit:
-        print("running {}".format(call_str), flush=True)
-        stdout_f = "/var/tmp/sgpar_log.txt"
-        with open(stdout_f, 'w') as fp:
-            process = subprocess.Popen(call, stdout=fp, stderr=subprocess.DEVNULL, env=myenv)
-        try:
-            returncode = process.wait(timeout = waitLimit)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            print("Timeout reached by {}".format(call_str), flush=True)
-            return
+    giveup = False
+    while giveup is not True:
+        metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
+        call = [executable, filepath, metricsPath, "base_config.txt"]
+        call_str = " ".join(call)
+        with rateLimit:
+            print("running {}".format(call_str), flush=True)
+            stdout_f = "/var/tmp/sgpar_log.txt"
+            with open(stdout_f, 'w') as fp:
+                process = subprocess.Popen(call, stdout=fp, stderr=subprocess.DEVNULL, env=myenv)
+            try:
+                returncode = process.wait(timeout = waitLimit)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                print("Timeout reached by {}".format(call_str), flush=True)
+                return
 
-    if(returncode != 0):
-        print("error code: {}".format(returncode))
-        print("error produced by:")
-        print(call_str, flush=True)
-    else:
-        analyzeMetrics(metricsPath, logFile)
+        if(returncode != 0):
+            if returncode != -11:
+                giveup = True
+            print("error code: {}".format(returncode))
+            print("error produced by:")
+            print(call_str, flush=True)
+        else:
+            analyzeMetrics(metricsPath, logFile)
+            return
 
 def runExperimentSpecial(executable, filepath, metricDir, logFile, t_count):
 
@@ -208,7 +213,6 @@ def processGraph(filepath, metricDir, logFileTemplate):
     for call, name in allCalls:
         logFile = logFileTemplate.format(name)
         runExperiment(call, filepath, metricDir, logFile, 64)
-    
     for call, name in serialCalls:
         logFile = logFileTemplate.format(name)
         runExperiment(call, filepath, metricDir, logFile, 1)

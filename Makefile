@@ -6,7 +6,7 @@ CFLAGS   = -Wall -O3 -std=c11
 OMPFLAGS = -fopenmp
 LDLIBS   = 
 
-KOKKOS_PATH = ${HOME}/kokkos
+KOKKOS_PATH = ${HOME}/workspace/kokkos
 KOKKOS_DEVICES = "OpenMP"
 KOKKOS_ARCH = "BDW"
 

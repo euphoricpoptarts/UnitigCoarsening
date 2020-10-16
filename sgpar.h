@@ -2014,9 +2014,15 @@ SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
     sgp_vid_t imbr = floor(max_part_size*(1.0 + perc_imbalance_allowed/100.0));
     sgp_vid_t imbl = n - imbr;
     for (sgp_vid_t i=0; i<imbl; i++) {
+        if(vu_pair[i].u >= n){
+            return EXIT_FAILURE;
+        }
         part[vu_pair[i].u] = 0;
     }
     for (sgp_vid_t i=imbl; i<n; i++) {
+        if(vu_pair[i].u >= n){
+            return EXIT_FAILURE;
+        }
         part[vu_pair[i].u] = 1;
     }
 
@@ -2389,10 +2395,11 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     //I don't feel like redoing the timing stuff rn
     double fin_refine_time = sgp_timer();
 
-    sgp_compute_partition(part, config->num_partitions, edge_cut,
+    //retry in case of spurious memory errors
+    while(sgp_compute_partition(part, config->num_partitions, edge_cut,
         perc_imbalance_allowed,
         config->local_search_alg,
-        eigenvec, g);
+        eigenvec, g) != EXIT_SUCCESS);
 
     free(eigenvec);
     experiment.setTotalDurationSeconds(fin_final_level_time - start_time);

@@ -872,10 +872,14 @@ namespace sgpar_kokkos {
                 sgp_vid_t adj_size = g.graph.row_map(i + 1) - g.graph.row_map(i);
                 if(adj_size > 0){
                     sgp_eid_t end = g.graph.row_map(i + 1);
-                    Kokkos::MaxLoc<sgp_wgt_t,sgp_eid_t, Kokkos::HostSpace>::value_type argmax;
-                    Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g.graph.row_map(i), end), [=](const sgp_eid_t idx, sgp_wgt_t& local_wgt) {
-                        local_wgt = g.values(idx);
-                    }, Kokkos::MaxLoc<sgp_wgt_t, sgp_eid_t, Kokkos::HostSpace>(argmax));
+                    Kokkos::MaxLoc<sgp_wgt_t,sgp_eid_t,Device>::value_type argmax;
+                    Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g.graph.row_map(i), end), [=](const sgp_eid_t idx, Kokkos::ValLocScalar<sgp_wgt_t,sgp_eid_t>& local) {
+                        sgp_wgt_t wgt = g.values(idx);
+                        if(wgt >= local.val){
+                            local.val = wgt;
+                            local.loc = idx;
+                        }
+                    }, Kokkos::MaxLoc<sgp_wgt_t, sgp_eid_t,Device>(argmax));
                     sgp_vid_t h = g.graph.entries(argmax.loc);
                     hn(i) = h;
                 } else {
