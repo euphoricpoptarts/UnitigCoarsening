@@ -763,6 +763,66 @@ namespace sgpar_kokkos {
         return nc;
     }
 
+    sgp_vid_t parallel_map_construct_v3(vtx_view_t vcmap, const sgp_vid_t n, const vtx_view_t vperm, const vtx_view_t hn, const vtx_view_t ordering) {
+
+        sgp_vid_t remaining_total = n;
+        Kokkos::View<sgp_vid_t> nvertices_coarse("nvertices");
+
+        vtx_view_t remaining = vperm;
+
+        vtx_view_t m("matches", n);
+        Kokkos::parallel_for("init heavy samples", n, KOKKOS_LAMBDA(sgp_vid_t u){
+            m(u) = SGP_INFTY;
+        });
+        //for every vertex v which is the heavy neighbor for at least one other vertex u
+        //we arbitrarily "match" one of the u with v
+        //each u can therefore appear once in heavy_samples
+        Kokkos::parallel_for("fill heavy samples", n, KOKKOS_LAMBDA(sgp_vid_t u){
+            sgp_vid_t v = ordering(hn(u));
+            if (m(v) == SGP_INFTY) {
+                Kokkos::atomic_compare_exchange_strong(&m(v), SGP_INFTY, v);
+            }
+        });
+        Kokkos::parallel_for("fill heavy samples", n, KOKKOS_LAMBDA(sgp_vid_t u){
+            if (m(u) == SGP_INFTY) {
+                sgp_vid_t v = ordering(hn(u));
+                m(u) = m(v);
+            }
+        });
+
+        Kokkos::parallel_for("do matching", n, KOKKOS_LAMBDA(sgp_vid_t u){
+            sgp_vid_t p = m(u);
+            while (m(p) != p) {
+                p = m(p);
+            }
+            m(u) = p;
+        });
+
+        vtx_view_t dense_map("dense map", n);
+        Kokkos::parallel_for("do matching", n, KOKKOS_LAMBDA(sgp_vid_t u){
+            Kokkos::atomic_increment(&dense_map(m(u)));
+        });
+
+        Kokkos::parallel_scan("relabel", n, KOKKOS_LAMBDA(const sgp_vid_t u, sgp_vid_t & update, const bool final){
+            if (dense_map(u) > 0) {
+                if (final) {
+                    dense_map(u) = update;
+                }
+                update++;
+            }
+        });
+
+        sgp_vid_t nc = 0;
+        Kokkos::parallel_reduce("assign coarse vertices", n, KOKKOS_LAMBDA(sgp_vid_t u, sgp_vid_t& local_max){
+            vcmap(u) = dense_map(m(u));
+            if (local_max <= vcmap(u)) {
+                local_max = vcmap(u);
+            }
+        }, Kokkos::Max<sgp_vid_t, Kokkos::HostSpace>(nc));
+
+        return nc;
+    }
+
     SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
         sgp_vid_t* nvertices_coarse_ptr,
         const matrix_type& g,
@@ -807,22 +867,17 @@ namespace sgpar_kokkos {
             });
         }
         else {
-            Kokkos::parallel_for("Heaviest HN", n, KOKKOS_LAMBDA(sgp_vid_t i) {
+            Kokkos::parallel_for("Heaviest HN", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
+                sgp_vid_t i = thread.league_rank();
                 sgp_vid_t adj_size = g.graph.row_map(i + 1) - g.graph.row_map(i);
                 if(adj_size > 0){
-                sgp_vid_t hn_i = g.graph.entries(g.graph.row_map(i));
-                sgp_wgt_t max_ewt = g.values(g.graph.row_map(i));
-
-                sgp_eid_t end_offset = g.graph.row_map(i + 1);// +g.edges_per_source[i];
-
-                for (sgp_eid_t j = g.graph.row_map(i) + 1; j < end_offset; j++) {
-                    if (max_ewt < g.values(j)) {
-                        max_ewt = g.values(j);
-                        hn_i = g.graph.entries(j);
-                    }
-
-                }
-                hn(i) = hn_i;
+                    sgp_eid_t end = g.graph.row_map(i + 1);
+                    Kokkos::MaxLoc<sgp_wgt_t,sgp_eid_t, Kokkos::HostSpace>::value_type argmax;
+                    Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g.graph.row_map(i), end), [=](const sgp_eid_t idx, sgp_wgt_t& local_wgt) {
+                        local_wgt = g.values(idx);
+                    }, Kokkos::MaxLoc<sgp_wgt_t, sgp_eid_t, Kokkos::HostSpace>(argmax));
+                    sgp_vid_t h = g.graph.entries(argmax.loc);
+                    hn(i) = h;
                 } else {
                     gen_t generator = rand_pool.get_state();
                     hn(i) = generator.urand64() % n;
@@ -834,6 +889,8 @@ namespace sgpar_kokkos {
         timer.reset();
 #ifdef HEC_V2
         sgp_vid_t nc = parallel_map_construct_v2(vcmap, n, vperm, hn, reverse_map);
+#elif defined HEC_V3
+        sgp_vid_t nc = parallel_map_construct_v3(vcmap, n, vperm, hn, reverse_map);
 #else
         sgp_vid_t nc = parallel_map_construct(vcmap, n, vperm, hn, reverse_map);
 #endif
