@@ -3,10 +3,17 @@
 #include <assert.h>
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
+
 #include <curand_kernel.h>
+
+#define CUB_STDERR
+#include <cub/util_allocator.cuh>
+#include <cub/device/device_radix_sort.cuh>
 
 namespace cg = cooperative_groups;
 using namespace cg;
+
+using namespace cub;
 
 #define GPU_DEBUG 0
 
@@ -15,6 +22,9 @@ using namespace cg;
 
 static __device__ int ncoarse;
 // static __device__ int nrand_accesses;
+
+bool g_verbose = false;
+CachingDeviceAllocator g_allocator(true);
 
 /* using ints throughout for simplicity */
 typedef struct {
@@ -141,8 +151,47 @@ __global__ void triad(int * const __restrict C,
     }
 }
 
+__global__ void rng_init(curandStatePhilox4_32_10_t *state) {
+
+    grid_group g = this_grid();
+    const int tid = g.thread_rank();
+    curand_init(1234, tid, 0, &state[tid]);
+}
+
+__global__ void gen_rng_for_perm(unsigned int * __restrict__ R, int * __restrict__ P, 
+                const int n, curandStatePhilox4_32_10_t *state) {
+
+    grid_group g    = this_grid();
+    const int start = g.thread_rank();
+    const int incr  = g.size();
+
+    curandStatePhilox4_32_10_t localState = state[start];
+    // unsigned int x = curand(&localState);
+
+    for (int i = start; i < n; i += incr) {
+        R[i] = curand(&localState);
+        P[i] = i;
+    } 
+    
+    state[start] = localState;
+}
+
+// P becomes O, R becomes P
+__global__ void gen_perm(unsigned int * __restrict__ R, int * __restrict__ P, 
+                const int n) {
+
+    grid_group g    = this_grid();
+    const int start = g.thread_rank();
+    const int incr  = g.size();
+
+    for (int i = start; i < n; i += incr) {
+        R[P[i]] = i;
+    } 
+} 
+
 __global__ void findH_thr_per_vertex(int * __restrict__ const H,
                 curandStatePhilox4_32_10_t *state,
+                const int * __restrict__ const O,
                 const int * __restrict__ const num_edges, 
                 const int * __restrict__ const adj, 
                 const int * __restrict__ const eweights,
@@ -199,16 +248,14 @@ __global__ void findH_thr_per_vertex(int * __restrict__ const H,
             j++;
         }
 #endif
-        H[i] = vm; // these writes aren't getting coalesced
-                   // maybe write to shared memory first
+        // applying permutation here itself
+        H[i] = O[vm]; // these writes aren't getting coalesced
+                      // maybe write to shared memory first
     }
-}
 
-__global__ void rng_init(curandStatePhilox4_32_10_t *state) {
+    // save rng state
+    state[start] = localState;
 
-    grid_group g = this_grid();
-    const int tid = g.thread_rank();
-    curand_init(1234, tid, 0, &state[tid]);
 }
 
 __global__ void HEC_mapping(int * __restrict__ M,
@@ -443,6 +490,88 @@ int main(int argc, char **argv) {
                       dimGrid2, dimBlock, kernelArgs);
     assert(err == 0);
 
+    unsigned int *d_R;
+    assert(cudaMalloc(&d_R, g.n * sizeof(unsigned int)) == cudaSuccess);
+    int *d_P;
+    assert(cudaMalloc(&d_P, g.n * sizeof(int)) == cudaSuccess);
+
+    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocksPerSmRecommended, gen_rng_for_perm, 
+                                                  numThreads, dev);
+    fprintf(stdout, "Recommended number of blocks for gen_rng kernel: %d, planned: %d\n", 
+                    numBlocksPerSmRecommended, numBlocks/numSM);
+    assert(numBlocksPerSmRecommended >= (numBlocks/numSM));
+   
+    i = 0;
+
+    while (i < numTrials) { 
+        gpuTimer timer;
+        timer.startTimer();
+    
+        void *kernelArgs[] = {&d_R, &d_P, &(d_g.n), &devPHILOXStates};
+        err = cudaLaunchCooperativeKernel(
+                      (void *) gen_rng_for_perm,
+                      dimGrid2, dimBlock, kernelArgs);
+        assert(err == 0);
+
+        float elt = timer.stopTimer();
+        fprintf(stdout, "Gen-rng time: %.3f ms, throughput: %.3f ME/s or %.3f MV/s, BW: %.3f GB/s\n", 
+                    elt * 1e3, (d_g.m * 1e-6) / elt, (d_g.n * 1e-6) / elt, (8.0 * d_g.n * 1e-9) / elt);
+        i++;
+    }
+
+    unsigned int *d_R_out;
+    assert(cudaMalloc(&d_R_out, g.n * sizeof(unsigned int)) == cudaSuccess);
+    int *d_P_out;
+    assert(cudaMalloc(&d_P_out, g.n * sizeof(int)) == cudaSuccess);
+
+    size_t  temp_storage_bytes  = 0;
+    void    *d_temp_storage     = NULL;
+    CubDebugExit(DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_R, d_R_out, 
+                            d_P, d_P_out, d_g.n));
+    CubDebugExit(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
+    
+    i = 0; 
+    while (i < numTrials) { 
+        gpuTimer timer;
+        timer.startTimer();
+        
+        CubDebugExit(DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, 
+                                d_R, d_R_out, d_P, d_P_out, d_g.n));
+        float elt = timer.stopTimer();
+        fprintf(stdout, "CUB sort time: %.3f ms, throughput: %.3f Gpairs/s, BW: %.3f GB/s\n", 
+                    elt * 1e3, (d_g.n * 1e-9) / elt,  (8 * d_g.n * 1e-9) / elt);
+        i++;
+    }
+    
+    CubDebugExit(g_allocator.DeviceFree(d_temp_storage)); 
+    cudaFree(d_R); cudaFree(d_P);
+
+    i = 0; 
+    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocksPerSmRecommended, gen_perm, 
+                                                  numThreads, dev);
+    fprintf(stdout, "Recommended number of blocks for gen_perm kernel: %d, planned: %d\n", 
+                    numBlocksPerSmRecommended, numBlocks/numSM);
+    if (numBlocksPerSmRecommended != (numBlocks/numSM)) {
+        fprintf(stderr, "Warning: changing number of blocks based on recommendation.\n");
+        numBlocks = numSM * numBlocksPerSmRecommended;
+    }
+    dim3 dimGrid3(numBlocks, 1, 1);
+
+    while (i < numTrials) { 
+        gpuTimer timer;
+        timer.startTimer();
+
+        void *kernelArgs[] = {&d_R_out, &d_P_out, &(d_g.n)};
+        cudaError_t err = cudaLaunchCooperativeKernel(((void *) gen_perm), 
+                        dimGrid3, dimBlock, kernelArgs);
+        assert(err == 0);
+
+        float elt = timer.stopTimer();
+        fprintf(stdout, "gen_perm time: %.3f ms, BW: %.3f GB/s\n", 
+                    elt * 1e3, (36 * d_g.n * 1e-9) / elt);
+        i++;
+    }
+ 
 
     int *H = (int *) malloc(g.n * sizeof(int));
     assert(H != NULL);
@@ -467,7 +596,7 @@ int main(int argc, char **argv) {
         gpuTimer timer;
         timer.startTimer();
 
-        void *kernelArgs[] = {&d_H, &devPHILOXStates, &(d_g.num_edges), &(d_g.adj), 
+        void *kernelArgs[] = {&d_H, &devPHILOXStates, &d_P_out, &(d_g.num_edges), &(d_g.adj), 
                               &(d_g.eweights), &(d_g.n), &(d_g.m)};
         cudaError_t err = cudaLaunchCooperativeKernel(((void *) findH_thr_per_vertex), 
                         dimGrid2, dimBlock, kernelArgs);
@@ -488,7 +617,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Warning: changing number of blocks based on recommendation.\n");
         numBlocks = numSM * numBlocksPerSmRecommended;
     }
-    dim3 dimGrid3(numBlocks, 1, 1);
+    // dimGrid3(numBlocks, 1, 1);
 
     int *d_M;
     int *d_nc;
@@ -515,9 +644,44 @@ int main(int argc, char **argv) {
         assert(cudaMemcpy(&nc, d_nc, sizeof(int), cudaMemcpyDeviceToHost) == cudaSuccess);
         fprintf(stdout, "ncoarse %d\n", nc);
     }
- 
+
+
+    /* Graph construction */
+#if 0
+    graph_t d_gc;
+    int d_gc.n = nc;
+
+    i = 0;
+    while (i < numTrials) { 
+        gpuTimer timer;
+        timer.startTimer();
+
+        void *kernelArgs[] = {&(d_gc.num_edges), &(d_gc.adj), &(d_gc.eweights),
+                              &d_M, &nc, 
+                              &(d_g.num_edges), &(d_g.adj), &(d_g.eweights),
+                              &(d_g.n), &(d_g.m)}; 
+        cudaError_t err = cudaLaunchCooperativeKernel(((void *) construct_coarsegraph_s1), 
+                        dimGrid3, dimBlock, kernelArgs);
+        assert(err == 0);
+
+        float elt = timer.stopTimer();
+        fprintf(stdout, "Graph construct time: %.3f ms, throughput: %.3f ME/s or %.3f MV/s, BW: %.3f GB/s\n", 
+                    elt * 1e3, (d_g.m * 1e-6) / elt, (d_g.n * 1e-6) / elt, (208 * d_g.n * 1e-9) / elt);
+        i++;
+
+        int nc = 0;
+        assert(cudaMemcpy(&nc, d_nc, sizeof(int), cudaMemcpyDeviceToHost) == cudaSuccess);
+        fprintf(stdout, "ncoarse %d\n", nc);
+    }
+#endif
+
+
     free_graph_from_device(&d_g);
+    cudaFree(d_R_out);
+    cudaFree(d_P_out);
     cudaFree(d_H);
+    cudaFree(d_M);
+    cudaFree(d_nc);
 
     free_graph(&g);
     free(H);
