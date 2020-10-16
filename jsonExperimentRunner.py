@@ -11,17 +11,35 @@ from threading import Thread, BoundedSemaphore
 from itertools import zip_longest
 
 cudaCall = "./sgpar.cuda"
-hecCall = "./sgpar.hec"
-mtCall = "./sgpar.mt"
-mpCall = "./sgpar.mp"
-matchCall = "./sgpar.match"
-misCall = "./sgpar.mis"
-serialCall = "./sgpar_serial"
-bigParCall = "./sgpar_hg_exp"
-bigSerialCall = "./sgpar_hg_serial"
+allCalls = [("./build/hec_spec","spec_hec"),
+("./mp_build/hec_spec","spec_hecCPU"),
+("./build/hec2_spec","spec_hec2"),
+("./build/hec_spec_spgemm","spec_hec_gemm"),
+("./build/hec_spec_hashmap","spec_hec_hashmap"),
+("./mp_build/hec_spec_hashmap","spec_hecCPU_hashmap"),
+("./build/mtmetis_spec","spec_mtmetis"),
+("./build/match_spec","spec_match"),
+("./build/mis_spec","spec_mis2"),
+("./build/gosh_spec","spec_gosh"),
+("./build/gosh2_spec","spec_gosh2"),
+("./build/hec_fm","fm_hec"),
+("./mp_build/hec_fm","fm_hecCPU"),
+("./build/hec2_fm","fm_hec2"),
+("./build/mtmetis_fm","fm_mtmetis"),
+("./build/match_fm","fm_match"),
+("./build/mis_fm","fm_mis2"),
+("./build/gosh2_fm","fm_gosh2"),
+("./build/gosh_fm","fm_gosh")]
+
+#first one used for timing
+#second one used only for cutsize
+serialCalls = [("./mp_build/hec_spec","spec_hecCPUSerial"),
+("./mp_build/hec_fm","fm_hecCPUSerial")]
+
+specialspgemm = ("./mp_build/hec_spec_spgemm","spec_hecCPU_gemm")
 
 rateLimit = BoundedSemaphore(value = 1)
-waitLimit = 10800
+waitLimit = 600
 
 def printStat(fieldTitle, statList, outfile):
     min_s = min(statList)
@@ -47,23 +65,23 @@ def listToStats(statList):
 def dictToStats(data):
     output = {}
     for key, value in data.items():
-        if isinstance(value[0], dict):
+        if len(value) > 0 and isinstance(value[0], dict):
             d = []
             for datum in value:
                 d.append(dictToStats(datum))
             output[key] = d
-        else:
+        elif len(value) > 0:
             output[key] = listToStats(value)
     return output
 
 
 def printDict(data, outfile):
     for key, value in data.items():
-        if isinstance(value[0], dict):
+        if len(value) > 0 and isinstance(value[0], dict):
             for idx, datum in enumerate(value):
                 print("{} Level {}:".format(key, idx), file=outfile)
                 printDict(datum, outfile)
-        else:
+        elif len(value) > 0:
             printStat(key, value, outfile)
 
 def transposeListOfDicts(data):
@@ -92,7 +110,7 @@ def transposeListOfDicts(data):
     return transposed
 
 def analyzeMetrics(metricsPath, logFile):
-    with open(metricsPath) as fp:
+    with open(metricsPath, "r") as fp:
         data = json.load(fp)
 
     data = transposeListOfDicts(data)
@@ -105,58 +123,23 @@ def analyzeMetrics(metricsPath, logFile):
     with open(jsonFile, "w") as output:
         json.dump(statsDict, output)
 
-def analyzeMetricsOld(metricsPath, logFile):
-    with open(metricsPath) as fp:
-        data = json.load(fp)
+def analyzeMetricsSpecial(metrics, logFile):
+    data = []
+    for metric in metrics:
+        with open(metric, "r") as fp:
+            data2 = json.load(fp)
+        if data2 is not None and isinstance(data2, list):
+            data.append(data2[0])
 
-    times = [d['total-duration-seconds'] for d in data]
-    coarsenTimes = [d['coarsen-duration-seconds'] for d in data]
-    coarsenCountTimes = [d['coarsen-count-duration-seconds'] for d in data]
-    coarsenPrefixSumTimes = [d['coarsen-prefix-sum-duration-seconds'] for d in data]
-    coarsenBucketTimes = [d['coarsen-bucket-duration-seconds'] for d in data]
-    coarsenDedupeTimes = [d['coarsen-dedupe-duration-seconds'] for d in data]
-    coarsenMapTimes = [d['coarsen-map-duration-seconds'] for d in data]
-    coarsenBuildTimes = [d['coarsen-build-duration-seconds'] for d in data]
-    coarsenPermuteTimes = [d['coarsen-permute-duration-seconds'] for d in data]
-    coarsenMapConstructTimes = [d['coarsen-map-construct-duration-seconds'] for d in data]
-    coarsenRadixSortTimes = [d['coarsen-radix-sort-duration-seconds'] for d in data]
-    coarsenRadixDedupeTimes = [d['coarsen-radix-dedupe-duration-seconds'] for d in data]
-    refineTimes = [d['refine-duration-seconds'] for d in data]
-    edgeCuts = [d['edge-cut'] for d in data]
-    edgeCuts4way = [d['edge-cut-four-way'] for d in data]
-    coarseLevels = list(zip_longest(*[reversed(d['coarse-levels']) for d in data]))
-    numCoarseLevels = [d['number-coarse-levels'] for d in data]
-    numCoarseLevels = list(map(lambda x: x - 1, numCoarseLevels))
+    data = transposeListOfDicts(data)
 
     with open(logFile, "w") as output:
-        printStat("Total duration", times, output)
-        printStat("Coarsening duration", coarsenTimes, output)
-        printStat("Coarsening mapping duration", coarsenMapTimes, output)
-        printStat("Coarsening building duration", coarsenBuildTimes, output)
-        printStat("Coarsening counting duration", coarsenCountTimes, output)
-        printStat("Coarsening prefix sum duration", coarsenPrefixSumTimes, output)
-        printStat("Coarsening bucketing duration", coarsenBucketTimes, output)
-        printStat("Coarsening deduping duration", coarsenDedupeTimes, output)
-        printStat("Coarsening permuting duration", coarsenPermuteTimes, output)
-        printStat("Coarsening map constructing duration", coarsenMapConstructTimes, output)
-        printStat("Coarsening radix sorting duration", coarsenRadixSortTimes, output)
-        printStat("Coarsening radix deduping duration", coarsenRadixDedupeTimes, output)
-        printStat("Refine duration", refineTimes, output)
-        printStat("Edge cut", edgeCuts, output)
-        printStat("Four partition edge cut", edgeCuts4way, output)
-        printStat("Coarse levels", numCoarseLevels, output)
-        
-        for levelIdx in range(0,len(coarseLevels)):
-            level = coarseLevels[levelIdx]
-            level = list(filter(None, level))
-            numVertices = [l['number-vertices'] for l in level]
-            if levelIdx > 0:
-                fineLevelVertices = [l['number-vertices'] for l in coarseLevels[levelIdx-1]]
-                ratios = [ i / j for i, j in zip(numVertices, fineLevelVertices)]
-                printStat("Coarse level {} coarsening ratio".format(levelIdx), ratios, output)
-            printStat("Coarse level {} number of vertices".format(levelIdx), numVertices, output)
-            printStat("Coarse level {} refine iterations".format(levelIdx), [l['refine-iterations'] for l in level], output)
-            printStat("Coarse level {} unrefined edge cuts".format(levelIdx), [l['unrefined-edge-cut'] for l in level], output)
+        printDict(data, output)
+
+    statsDict = dictToStats(data)
+    jsonFile = os.path.splitext(logFile)[0] + ".json"
+    with open(jsonFile, "w") as output:
+        json.dump(statsDict, output)
 
 def runExperiment(executable, filepath, metricDir, logFile, t_count):
 
@@ -187,20 +170,51 @@ def runExperiment(executable, filepath, metricDir, logFile, t_count):
     else:
         analyzeMetrics(metricsPath, logFile)
 
+def runExperimentSpecial(executable, filepath, metricDir, logFile, t_count):
+
+    if(os.path.exists(logFile)):
+        return
+    myenv = os.environ.copy()
+    myenv['OMP_NUM_THREADS'] = str(t_count)
+
+    metrics = []
+    for x in range(10):
+        metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
+        metrics.append(metricsPath)
+        call = [executable, filepath, metricsPath, "one_config.txt"]
+        call_str = " ".join(call)
+        with rateLimit:
+            print("running {}".format(call_str), flush=True)
+            stdout_f = "/var/tmp/sgpar_log.txt"
+            with open(stdout_f, 'w') as fp:
+                process = subprocess.Popen(call, stdout=fp, stderr=subprocess.DEVNULL, env=myenv)
+            try:
+                returncode = process.wait(timeout = waitLimit)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                print("Timeout reached by {}".format(call_str), flush=True)
+                return
+
+        if(returncode != 0):
+            print("error code: {}".format(returncode))
+            print("error produced by:")
+            print(call_str, flush=True)
+    
+    analyzeMetricsSpecial(metrics, logFile)
+
 def processGraph(filepath, metricDir, logFileTemplate):
     
     #for t in [1,2,4,8,16,32]:
-    logFile = logFileTemplate.format("spec_hec")#.format(t))
-    runExperiment(cudaCall, filepath, metricDir, logFile, 64)
-        #logFile = logFileTemplate.format("fm_mt_{}".format(t))
-        #runExperiment(mtCall, filepath, metricDir, logFile, t)
-        #logFile = logFileTemplate.format("fm_match_{}".format(t))
-        #runExperiment(matchCall, filepath, metricDir, logFile, t)
-        #logFile = logFileTemplate.format("fm_mis_{}".format(t))
-        #runExperiment(misCall, filepath, metricDir, logFile, t)
+    for call, name in allCalls:
+        logFile = logFileTemplate.format(name)
+        runExperiment(call, filepath, metricDir, logFile, 64)
+    
+    for call, name in serialCalls:
+        logFile = logFileTemplate.format(name)
+        runExperiment(call, filepath, metricDir, logFile, 1)
 
-    #logFile = logFileTemplate.format("serialHEC")
-    #runExperiment(serialCall, filepath, metricDir, logFile, t_count)
+    logFile = logFileTemplate.format(specialspgemm[1])
+    runExperimentSpecial(specialspgemm[0], filepath, metricDir, logFile, 64)
 
     print("end {} processing".format(filepath), flush=True)
 
