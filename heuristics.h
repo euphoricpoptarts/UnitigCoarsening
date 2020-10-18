@@ -770,19 +770,22 @@ namespace sgpar_kokkos {
         vtx_view_t m("matches", n);
         Kokkos::parallel_for("init heavy samples", n, KOKKOS_LAMBDA(sgp_vid_t u){
             m(u) = SGP_INFTY;
+            if(hn(hn(u)) == u){
+                m(u) = u;
+                if(hn(u) < u){
+                    m(u) = hn(u);
+                }
+            }
         });
-        //for every vertex v which is the heavy neighbor for at least one other vertex u
-        //we arbitrarily "match" one of the u with v
-        //each u can therefore appear once in heavy_samples
         Kokkos::parallel_for("fill heavy samples", n, KOKKOS_LAMBDA(sgp_vid_t u){
-            sgp_vid_t v = ordering(hn(u));
+            sgp_vid_t v = hn(u);
             if (m(v) == SGP_INFTY) {
                 Kokkos::atomic_compare_exchange_strong(&m(v), SGP_INFTY, v);
             }
         });
         Kokkos::parallel_for("fill heavy samples", n, KOKKOS_LAMBDA(sgp_vid_t u){
             if (m(u) == SGP_INFTY) {
-                sgp_vid_t v = ordering(hn(u));
+                sgp_vid_t v = hn(u);
                 m(u) = m(v);
             }
         });
