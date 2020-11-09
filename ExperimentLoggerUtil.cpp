@@ -81,11 +81,21 @@ private:
 	double coarsenPrefixSumDurationSeconds = 0;
 	double coarsenMapDurationSeconds = 0;
 	double coarsenBuildDurationSeconds = 0;
+    double mapPasses[2] = {0,0};
+    double mapFirstPassRate[2] = {0,0};
+    int callCount = 0;
 
 public:
 	ExperimentLoggerUtil() :
 		measurements(static_cast<int>(Measurement::END), 0.0)
 	{}
+
+    void addMapPassData(double assignRate, double passes){
+        if(callCount > 1) return;
+        mapPasses[callCount] = passes;
+        mapFirstPassRate[callCount] = assignRate;
+        callCount++;
+    }
 
 	void addCoarseLevel(int refineIterations, bool iterationMaxReached, uint64_t unrefinedEdgeCut) {
 		coarseLevels.emplace_back(refineIterations, iterationMaxReached, unrefinedEdgeCut);
@@ -148,6 +158,10 @@ public:
 			f << "\"coarsen-duration-seconds\":" << coarsenDurationSeconds << ',';
 			f << "\"refine-duration-seconds\":" << refineDurationSeconds << ',';
 			f << "\"number-coarse-levels\":" << numCoarseLevels << ',';
+			f << "\"level-1-first-two-passes-assign-rate\":" << mapFirstPassRate[0] << ',';
+			f << "\"level-1-total-passes\":" << mapPasses[0] << ',';
+			f << "\"level-2-first-two-passes-assign-rate\":" << mapFirstPassRate[1] << ',';
+			f << "\"level-2-total-passes\":" << mapPasses[1] << ',';
 			for (int i = 0; i < static_cast<int>(Measurement::END); i++) {
 				f << "\"" << measurementNames[i] << "-duration-seconds\":" << measurements[i] << ",";
 			}
