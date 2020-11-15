@@ -653,7 +653,7 @@ struct functorHashmapAccumulator
 
 void sgp_deduplicate_graph(const sgp_vid_t n, const sgp_vid_t nc,
     vtx_view_t edges_per_source, vtx_view_t dest_by_source, wgt_view_t wgt_by_source,
-    edge_view_t source_bucket_offset, ExperimentLoggerUtil& experiment, sgp_eid_t& gc_nedges) {
+    const edge_view_t source_bucket_offset, ExperimentLoggerUtil& experiment, sgp_eid_t& gc_nedges) {
 
 #ifdef HASHMAP
 
@@ -902,7 +902,7 @@ void sgp_build_nonskew(matrix_type& gc,
 void sgp_build_skew(matrix_type& gc,
     const matrix_type vcmap,
     const matrix_type g,
-    const vtx_view_t mapped_edges,
+    vtx_view_t mapped_edges,
     vtx_view_t degree_initial,
     ExperimentLoggerUtil& experiment,
     Kokkos::Timer& timer) {
@@ -915,16 +915,34 @@ void sgp_build_skew(matrix_type& gc,
     sgp_eid_t gc_nedges = 0;
 
     vtx_view_t edges_per_source("edges_per_source", nc);
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Count, timer.seconds());
+    timer.reset();
+    
+    vtx_view_t dedupe_count("dedupe count", n);
+    wgt_view_t values_copy("values copy", g.nnz());
+    edge_view_t row_map_copy("row map copy", n + 1);
+    Kokkos::deep_copy(values_copy, g.values);
+    Kokkos::deep_copy(row_map_copy, g.graph.row_map);
+
+    //deduplicate coarse adjacencies within each fine row
+    sgp_deduplicate_graph(n, n,
+        dedupe_count, mapped_edges, values_copy,
+        row_map_copy, experiment, gc_nedges);
+    gc_nedges = 0;
+
+    Kokkos::resize(row_map_copy,0);
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Dedupe, timer.seconds());
+    timer.reset();
 
     //recount with edges only belonging to vertex of smaller degree
-    Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
-        sgp_vid_t u = vcmap.graph.entries(thread.league_rank());
-        sgp_eid_t start = g.graph.row_map(thread.league_rank());
-        sgp_eid_t end = g.graph.row_map(thread.league_rank() + 1);
+    Kokkos::parallel_for("recount edges per source", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
+        sgp_vid_t outer_idx = thread.league_rank();
+        sgp_vid_t u = vcmap.graph.entries(outer_idx);
+        sgp_eid_t start = g.graph.row_map(outer_idx);
+        sgp_eid_t end = start + dedupe_count(outer_idx);
         sgp_vid_t nonLoopEdgesTotal = 0;
         Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [=](const sgp_eid_t idx, sgp_vid_t& local_sum) {
-            sgp_vid_t v = vcmap.graph.entries(g.graph.entries(idx));
-            mapped_edges(idx) = v;
+            sgp_vid_t v = mapped_edges(idx);
             bool degree_less = degree_initial(u) < degree_initial(v);
             bool degree_equal = degree_initial(u) == degree_initial(v);
             if (u != v && (degree_less || (degree_equal && u < v))) {
@@ -967,9 +985,10 @@ void sgp_build_skew(matrix_type& gc,
     wgt_view_t wgt_by_source("wgt_by_source", size_sbo);
 
     Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
-        sgp_vid_t u = vcmap.graph.entries(thread.league_rank());
-        sgp_eid_t start = g.graph.row_map(thread.league_rank());
-        sgp_eid_t end = g.graph.row_map(thread.league_rank() + 1);
+        sgp_vid_t outer_idx = thread.league_rank();
+        sgp_vid_t u = vcmap.graph.entries(outer_idx);
+        sgp_eid_t start = g.graph.row_map(outer_idx);
+        sgp_eid_t end = start + dedupe_count(outer_idx);
         Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const sgp_eid_t idx) {
             sgp_vid_t v = mapped_edges(idx);
             bool degree_less = degree_initial(u) < degree_initial(v);
@@ -980,10 +999,13 @@ void sgp_build_skew(matrix_type& gc,
                 offset += source_bucket_offset(u);
 
                 dest_by_source(offset) = v;
-                wgt_by_source(offset) = g.values(idx);
+                wgt_by_source(offset) = values_copy(idx);
             }
             });
     });
+    //"delete" these three views
+    Kokkos::resize(mapped_edges, 0);
+    Kokkos::resize(values_copy, 0);
 
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
     timer.reset();
