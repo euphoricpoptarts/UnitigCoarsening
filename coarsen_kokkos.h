@@ -909,37 +909,18 @@ void sgp_build_skew(matrix_type& gc,
 
     sgp_vid_t n = g.numRows();
     sgp_vid_t nc = vcmap.numCols();
-
-    edge_view_t source_bucket_offset("source_bucket_offsets", nc + 1);
-
     sgp_eid_t gc_nedges = 0;
 
-    vtx_view_t edges_per_source("edges_per_source", nc);
-    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Count, timer.seconds());
-    timer.reset();
     
     vtx_view_t dedupe_count("dedupe count", n);
-    wgt_view_t values_copy("values copy", g.nnz());
     edge_view_t row_map_copy("row map copy", n + 1);
-    Kokkos::deep_copy(values_copy, g.values);
-    Kokkos::deep_copy(row_map_copy, g.graph.row_map);
 
-    //deduplicate coarse adjacencies within each fine row
-    sgp_deduplicate_graph(n, n,
-        dedupe_count, mapped_edges, values_copy,
-        row_map_copy, experiment, gc_nedges);
-    gc_nedges = 0;
-
-    Kokkos::resize(row_map_copy,0);
-    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Dedupe, timer.seconds());
-    timer.reset();
-
-    //recount with edges only belonging to vertex of smaller degree
-    Kokkos::parallel_for("recount edges per source", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
+    //recount with edges only belonging to fine vertex of coarse vertex of smaller degree
+    Kokkos::parallel_for("recount edges", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
         sgp_vid_t outer_idx = thread.league_rank();
         sgp_vid_t u = vcmap.graph.entries(outer_idx);
         sgp_eid_t start = g.graph.row_map(outer_idx);
-        sgp_eid_t end = start + dedupe_count(outer_idx);
+        sgp_eid_t end = g.graph.row_map(outer_idx + 1);
         sgp_vid_t nonLoopEdgesTotal = 0;
         Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [=](const sgp_eid_t idx, sgp_vid_t& local_sum) {
             sgp_vid_t v = mapped_edges(idx);
@@ -950,13 +931,73 @@ void sgp_build_skew(matrix_type& gc,
             }
             }, nonLoopEdgesTotal);
         Kokkos::single(Kokkos::PerTeam(thread), [=]() {
-            Kokkos::atomic_add(&edges_per_source(u), nonLoopEdgesTotal);
-            });
+            dedupe_count(outer_idx) = nonLoopEdgesTotal;
+        });
     });
 
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Count, timer.seconds());
     timer.reset();
 
+    Kokkos::parallel_scan(n, KOKKOS_LAMBDA(const sgp_vid_t i,
+        sgp_eid_t & update, const bool final) {
+        // Load old value in case we update it before accumulating
+        const sgp_eid_t val_i = dedupe_count(i);
+        // For inclusive scan,
+        // change the update value before updating array.
+        update += val_i;
+        if (final) {
+            row_map_copy(i + 1) = update; // only update array on final pass
+        }
+    });
+
+    Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i) {
+        dedupe_count(i) = 0; // will use as counter again
+    });
+
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Prefix, timer.seconds());
+    timer.reset();
+
+    Kokkos::View<sgp_eid_t> fine_recount_subview = Kokkos::subview(row_map_copy, n);
+    sgp_eid_t fine_recount = 0;
+    Kokkos::deep_copy(fine_recount, fine_recount_subview);
+
+    vtx_view_t dest_fine("fine to coarse dests", fine_recount);
+    wgt_view_t wgt_fine("fine to coarse wgts", fine_recount);
+
+    Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
+        sgp_vid_t outer_idx = thread.league_rank();
+        sgp_vid_t u = vcmap.graph.entries(outer_idx);
+        sgp_eid_t start = g.graph.row_map(outer_idx);
+        sgp_eid_t end = g.graph.row_map(outer_idx + 1);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const sgp_eid_t idx) {
+            sgp_vid_t v = mapped_edges(idx);
+            bool degree_less = degree_initial(u) < degree_initial(v);
+            bool degree_equal = degree_initial(u) == degree_initial(v);
+            if (u != v && (degree_less || (degree_equal && u < v))) {
+                sgp_eid_t offset = Kokkos::atomic_fetch_add(&dedupe_count(outer_idx), 1);
+
+                offset += row_map_copy(outer_idx);
+
+                dest_fine(offset) = v;
+                wgt_fine(offset) = g.values(idx);
+            }
+            });
+    });
+    //"delete" these views
+    Kokkos::resize(mapped_edges, 0);
+    
+    //deduplicate coarse adjacencies within each fine row
+    sgp_deduplicate_graph(n, n,
+        dedupe_count, dest_fine, wgt_fine,
+        row_map_copy, experiment, gc_nedges);
+
+    edge_view_t source_bucket_offset("source_bucket_offsets", nc + 1);
+    vtx_view_t edges_per_source("edges_per_source", nc);
+
+    Kokkos::parallel_for("sum fine row sizes", n, KOKKOS_LAMBDA(const sgp_vid_t i){
+        sgp_vid_t u = vcmap.graph.entries(i);
+        Kokkos::atomic_fetch_add(&edges_per_source(u), dedupe_count(i));
+    });
     Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const sgp_vid_t i,
         sgp_eid_t & update, const bool final) {
         // Load old value in case we update it before accumulating
@@ -968,44 +1009,33 @@ void sgp_build_skew(matrix_type& gc,
             source_bucket_offset(i + 1) = update; // only update array on final pass
         }
     });
-
-
-    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(sgp_vid_t i) {
-        edges_per_source(i) = 0; // will use as counter again
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(const sgp_vid_t i){
+        edges_per_source(i) = 0;
     });
-
-    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Prefix, timer.seconds());
-    timer.reset();
-
-    Kokkos::View<sgp_eid_t> sbo_subview = Kokkos::subview(source_bucket_offset, nc);
-    sgp_eid_t size_sbo = 0;
-    Kokkos::deep_copy(size_sbo, sbo_subview);
-
-    vtx_view_t dest_by_source("dest_by_source", size_sbo);
-    wgt_view_t wgt_by_source("wgt_by_source", size_sbo);
-
-    Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
+    vtx_view_t dest_by_source("dest by source", gc_nedges);
+    wgt_view_t wgt_by_source("wgt by source", gc_nedges);
+    Kokkos::parallel_for("combine deduped fine rows", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
         sgp_vid_t outer_idx = thread.league_rank();
         sgp_vid_t u = vcmap.graph.entries(outer_idx);
-        sgp_eid_t start = g.graph.row_map(outer_idx);
+        sgp_eid_t start = row_map_copy(outer_idx);
         sgp_eid_t end = start + dedupe_count(outer_idx);
         Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const sgp_eid_t idx) {
-            sgp_vid_t v = mapped_edges(idx);
+            sgp_vid_t v = dest_fine(idx);
             bool degree_less = degree_initial(u) < degree_initial(v);
             bool degree_equal = degree_initial(u) == degree_initial(v);
-            if (u != v && (degree_less || (degree_equal && u < v))) {
+            if (degree_less || (degree_equal && u < v)) {
                 sgp_eid_t offset = Kokkos::atomic_fetch_add(&edges_per_source(u), 1);
 
                 offset += source_bucket_offset(u);
 
                 dest_by_source(offset) = v;
-                wgt_by_source(offset) = values_copy(idx);
+                wgt_by_source(offset) = wgt_fine(idx);
             }
             });
     });
-    //"delete" these three views
-    Kokkos::resize(mapped_edges, 0);
-    Kokkos::resize(values_copy, 0);
+    gc_nedges = 0;
+    Kokkos::resize(dest_fine, 0);
+    Kokkos::resize(wgt_fine, 0);
 
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
     timer.reset();
