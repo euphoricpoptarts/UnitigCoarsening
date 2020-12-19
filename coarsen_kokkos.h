@@ -663,6 +663,7 @@ void sgp_deduplicate_graph(const sgp_vid_t n, const sgp_vid_t nc,
         remaining(i) = i;
     });
     do {
+        Kokkos::Timer pass;
         //figure out max size for hashmap
         sgp_vid_t avg_entries = 0;
         if (typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space) && static_cast<double>(remaining_count) / static_cast<double>(nc) > 0.01) {
@@ -685,6 +686,7 @@ void sgp_deduplicate_graph(const sgp_vid_t n, const sgp_vid_t nc,
             }, Kokkos::Max<sgp_vid_t, Kokkos::HostSpace>(avg_entries));
             avg_entries++;
         }
+        printf("Dedupe size for current pass: %u\n", avg_entries);
 
         typedef typename KokkosKernels::Impl::UniformMemoryPool<Kokkos::DefaultExecutionSpace, sgp_vid_t> uniform_memory_pool_t;
         // Set the hash_size as the next power of 2 bigger than hash_size_hint.
@@ -745,8 +747,13 @@ void sgp_deduplicate_graph(const sgp_vid_t n, const sgp_vid_t nc,
 
             remaining = new_remaining;
         }
-        //printf("remaining count: %u\n", remaining_count);
+        printf("remaining count: %u\n", remaining_count);
+        printf("Pass duration: %.4f\n", pass.seconds());
+        pass.reset();
     } while (remaining_count > 0);
+    Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_eid_t& sum){
+        sum += edges_per_source(i);
+    }, gc_nedges);
 #elif defined(RADIX)
     Kokkos::Timer radix;
     KokkosSparse::Experimental::SortEntriesFunctor<Kokkos::DefaultExecutionSpace, sgp_eid_t, sgp_vid_t, edge_view_t, vtx_view_t>
@@ -910,6 +917,8 @@ void sgp_build_skew(matrix_type& gc,
     sgp_vid_t n = g.numRows();
     sgp_vid_t nc = vcmap.numCols();
     sgp_eid_t gc_nedges = 0;
+
+    printf("Number of coarse rows: %u\n", nc);
 
     
     vtx_view_t dedupe_count("dedupe count", n);
@@ -1168,7 +1177,7 @@ SGPAR_API int sgp_build_coarse_graph(matrix_type& gc,
     
     //only do if graph is sufficiently irregular
     //don't do optimizations if running on CPU (the default host space)
-    if (avg_unduped > 50 && (max_unduped / 10) > avg_unduped && typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
+    if (avg_unduped > 50 && (max_unduped / 5) > avg_unduped && typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
         sgp_build_skew(gc, vcmap, g, mapped_edges, degree_initial, experiment, timer);
     }
     else {
@@ -1246,6 +1255,7 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
 
     printf("Fine graph copy to device time: %.8f\n", timer.seconds());
 
+#ifndef NOCOARSEN
     int coarsening_level = 0;
     while (coarse_graphs.rbegin()->numRows() > SGPAR_COARSENING_VTX_CUTOFF) {
         printf("Calculating coarse graph %ld\n", coarse_graphs.size());
@@ -1279,6 +1289,7 @@ SGPAR_API int sgp_generate_coarse_graphs(const sgp_graph_t* fine_g, std::list<ma
         vtx_weights_list.pop_back();
         coarsening_level--;
     }
+#endif
 
     return EXIT_SUCCESS;
 }
