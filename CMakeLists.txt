@@ -1,13 +1,13 @@
 #IMPORTANT: Use the cmake flag -DCMAKE_CXX_COMPILER=/path/to/your/nvcc_wrapper
 cmake_minimum_required(VERSION 3.13)
 project(sgpar CXX)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 #change the first parameter to wherever your kokkos and kokkos-kernels are located
-add_subdirectory(../kokkos bin_kokkos/)
-add_subdirectory(../kokkos-kernels bin_kernels/)
-#find_package(KokkosKernels REQUIRED)
+#add_subdirectory(../kokkos bin_kokkos/)
+#add_subdirectory(../kokkos-kernels bin_kernels/)
+find_package(KokkosKernels REQUIRED)
 link_libraries(Kokkos::kokkos Kokkos::kokkoskernels)
 add_compile_options(-O3)
 #add_compile_options(-g -DDEBUG)
@@ -32,10 +32,11 @@ add_executable(gosh2_fm sgpar.cpp)
 add_executable(gosh_fm sgpar.cpp)
 add_executable(hec_recoarsen sgpar.cpp)
 add_executable(mt_recoarsen sgpar.cpp)
+add_executable(nocoarsen sgpar.cpp)
 
 #possible flags are FM, RADIX, HASHMAP, RECOARSEN, MTMETIS, EXPERIMENT, USE_GNU_PARALLELMODE, _KOKKOS
 #add_compile_definitions(_KOKKOS EXPERIMENT USE_GNU_PARALLELMODE RADIX RECOARSEN)
-target_compile_definitions(hec_spec PUBLIC _KOKKOS EXPERIMENT USE_GNU_PARALLELMODE HEC RADIX)
+target_compile_definitions(hec_spec PUBLIC _KOKKOS EXPERIMENT USE_GNU_PARALLELMODE HEC HASHMAP)
 target_compile_definitions(hec2_spec PUBLIC _KOKKOS EXPERIMENT USE_GNU_PARALLELMODE HEC_V2 RADIX)
 target_compile_definitions(hec3_spec PUBLIC _KOKKOS EXPERIMENT USE_GNU_PARALLELMODE HEC_V3 RADIX)
 target_compile_definitions(hec_spec_spgemm PUBLIC _KOKKOS EXPERIMENT USE_GNU_PARALLELMODE HEC SPGEMM)
@@ -55,3 +56,4 @@ target_compile_definitions(gosh_fm PUBLIC _KOKKOS EXPERIMENT USE_GNU_PARALLELMOD
 target_compile_definitions(gosh2_fm PUBLIC _KOKKOS EXPERIMENT USE_GNU_PARALLELMODE GOSH_V2 RADIX FM)
 target_compile_definitions(hec_recoarsen PUBLIC _KOKKOS EXPERIMENT USE_GNU_PARALLELMODE HEC MTMETIS RADIX FM RECOARSEN)
 target_compile_definitions(mt_recoarsen PUBLIC _KOKKOS EXPERIMENT USE_GNU_PARALLELMODE MTMETIS RADIX FM RECOARSEN)
+target_compile_definitions(nocoarsen PUBLIC _KOKKOS EXPERIMENT USE_GNU_PARALLELMODE NOCOARSEN FM)

@@ -509,6 +509,7 @@ struct functorDedupeAfterSort
     }
 };
 
+#ifdef HASHMAP
 template<typename ExecutionSpace, typename uniform_memory_pool_t>
 struct functorHashmapAccumulator
 {
@@ -650,6 +651,7 @@ struct functorHashmapAccumulator
     }   // operator()
 
 };  // functorHashmapAccumulator
+#endif
 
 void sgp_deduplicate_graph(const sgp_vid_t n, const sgp_vid_t nc,
     vtx_view_t edges_per_source, vtx_view_t dest_by_source, wgt_view_t wgt_by_source,
@@ -749,9 +751,7 @@ void sgp_deduplicate_graph(const sgp_vid_t n, const sgp_vid_t nc,
     } while (remaining_count > 0);
 #elif defined(RADIX)
     Kokkos::Timer radix;
-    KokkosSparse::Experimental::SortEntriesFunctor<Kokkos::DefaultExecutionSpace, sgp_eid_t, sgp_vid_t, edge_view_t, vtx_view_t>
-        sortEntries(source_bucket_offset, dest_by_source, wgt_by_source);
-    Kokkos::parallel_for("radix sort time", policy(nc, Kokkos::AUTO), sortEntries);
+    KokkosKernels::Impl::sort_crs_matrix<Kokkos::DefaultExecutionSpace, edge_view_t, vtx_view_t, wgt_view_t>(source_bucket_offset, dest_by_source, wgt_by_source);
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixSort, radix.seconds());
     radix.reset();
 
