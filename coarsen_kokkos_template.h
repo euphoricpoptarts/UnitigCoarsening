@@ -47,6 +47,7 @@ private:
     using wgt_view_t = typename Kokkos::View<scalar_t>;
     using edge_view_t = typename Kokkos::View<edge_offset_t>;
     bool use_hashmap = false;
+
 //assumes that matrix has one entry-per row, not valid for general matrices
 int compute_transpose(const matrix_t& mtx,
     matrix_t& transpose) {
@@ -570,7 +571,7 @@ void sgp_deduplicate_graph(const ordinal_t n, const ordinal_t nc,
                     if (degree > thread_max) {
                         thread_max = degree;
                     }
-                }, Kokkos::Max<sgp_vid_t, Kokkos::HostSpace>(avg_entries));
+                }, Kokkos::Max<ordinal_t, Kokkos::HostSpace>(avg_entries));
                 avg_entries++;
             }
 
@@ -600,11 +601,11 @@ void sgp_deduplicate_graph(const ordinal_t n, const ordinal_t nc,
 
             if (typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
                 //walk back number of mem_chunks if necessary
-                size_t mem_needed = static_cast<size_t>(mem_chunk_count) * static_cast<size_t>(mem_chunk_size) * sizeof(sgp_vid_t);
+                size_t mem_needed = static_cast<size_t>(mem_chunk_count) * static_cast<size_t>(mem_chunk_size) * sizeof(ordinal_t);
                 size_t max_mem_allowed = 536870912;//1073741824;
                 if (mem_needed > max_mem_allowed) {
                     size_t chunk_dif = mem_needed - max_mem_allowed;
-                    chunk_dif = chunk_dif / (static_cast<size_t>(mem_chunk_size) * sizeof(sgp_vid_t));
+                    chunk_dif = chunk_dif / (static_cast<size_t>(mem_chunk_size) * sizeof(ordinal_t));
                     chunk_dif++;
                     mem_chunk_count -= chunk_dif;
                 }
