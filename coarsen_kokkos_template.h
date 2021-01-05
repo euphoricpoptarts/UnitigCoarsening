@@ -1000,7 +1000,8 @@ coarse_level_triple sgp_build_coarse_graph(const coarse_level_triple level,
     Kokkos::Timer timer;
 
     vtx_view_t degree_initial("edges_per_source", nc);
-    c_vtx_w = vtx_view_t("coarse vertex weights", nc);
+    vtx_view_t f_vtx_w = level.coarse_vtx_wgts;
+    vtx_view_t c_vtx_w = vtx_view_t("coarse vertex weights", nc);
 
     //count edges per vertex
     Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
@@ -1046,7 +1047,7 @@ coarse_level_triple sgp_build_coarse_graph(const coarse_level_triple level,
         next_level = sgp_build_nonskew(g, vcmap, mapped_edges, degree_initial, experiment, timer);
     }
 
-    next_level.coarse_vtx_wgts = f_vtx_w;
+    next_level.coarse_vtx_wgts = c_vtx_w;
     next_level.level = level.level + 1;
     next_level.interp_mtx = vcmap;
     return next_level;
@@ -1098,7 +1099,7 @@ std::list<coarse_level_triple> sgp_generate_coarse_graphs(const matrix_t fine_g,
     coarse_level_triple finest;
     finest.coarse_mtx = fine_g;
     finest.level = 0;
-    vtw_view_t vtx_weights("vertex weights", fine_n);
+    vtx_view_t vtx_weights("vertex weights", fine_n);
     Kokkos::parallel_for(fine_n, KOKKOS_LAMBDA(const ordinal_t i){
         vtx_weights(i) = 1;
     });
