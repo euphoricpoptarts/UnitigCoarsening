@@ -763,7 +763,7 @@ coarse_level_triple sgp_build_nonskew(const matrix_t g,
     });
 
     graph_type gc_graph(dest_idx, source_offsets);
-    gc = matrix_type("gc", nc, wgts, gc_graph);
+    matrix_t gc = matrix_type("gc", nc, wgts, gc_graph);
 
     coarse_level_triple next_level;
     next_level.coarse_mtx = gc;
@@ -973,7 +973,7 @@ coarse_level_triple sgp_build_skew(const matrix_t g,
     });
 
     graph_type gc_graph(dest_idx, source_offsets);
-    gc = matrix_type("gc", nc, wgts, gc_graph);
+    matrix_t gc = matrix_type("gc", nc, wgts, gc_graph);
 
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::WriteGraph, timer.seconds());
     timer.reset();
@@ -1109,7 +1109,7 @@ std::list<coarse_level_triple> sgp_generate_coarse_graphs(const matrix_t fine_g,
     while (levels.rbegin()->coarse_mtx.numRows() > SGPAR_COARSENING_VTX_CUTOFF) {
         printf("Calculating coarse graph %ld\n", levels.size());
 
-        coarse_level_triple next_level = sgp_coarsen_one_level(*levels.rbegin(), experiment));
+        coarse_level_triple next_level = sgp_coarsen_one_level(*levels.rbegin(), experiment);
 
         levels.push_back(next_level);
 
