@@ -48,7 +48,7 @@ private:
         return sorter.get_permute_vector();
     }
 
-    Kokkos::View<int*> mis_2(const matrix_type& g) {
+    Kokkos::View<int*> mis_2(const matrix_t& g) {
 
         ordinal_t n = g.numRows();
 
@@ -143,7 +143,7 @@ private:
         return state;
     }
 
-    Kokkos::View<int*> GOSH_clusters(const matrix_type& g) {
+    Kokkos::View<int*> GOSH_clusters(const matrix_t& g) {
         //finds the central vertices for GOSH clusters
         //approximately this is a maximal independent set (if you pretend edges whose endpoints both exceed degree thresholds don't exist)
         //IS vertices are preferred to be vertices with high degree, so it should be small
@@ -259,9 +259,9 @@ private:
     }
 
 public:
-    int sgp_coarsen_mis_2(matrix_type& interp,
+    int sgp_coarsen_mis_2(matrix_t& interp,
         ordinal_t* nvertices_coarse_ptr,
-        const matrix_type& g,
+        const matrix_t& g,
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.numRows();
@@ -346,14 +346,14 @@ public:
         });
 
         graph_type graph(entries, row_map);
-        interp = matrix_type("interpolate", nc, values, graph);
+        interp = matrix_t("interpolate", nc, values, graph);
 
         return EXIT_SUCCESS;
     }
 
-    SGPAR_API int sgp_coarsen_GOSH(matrix_type& interp,
+    SGPAR_API int sgp_coarsen_GOSH(matrix_t& interp,
         ordinal_t* nvertices_coarse_ptr,
-        const matrix_type& g,
+        const matrix_t& g,
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.numRows();
@@ -410,7 +410,7 @@ public:
         });
 
         graph_type graph(entries, row_map);
-        interp = matrix_type("interpolate", nc, values, graph);
+        interp = matrix_t("interpolate", nc, values, graph);
 
         return EXIT_SUCCESS;
     }
@@ -481,9 +481,9 @@ public:
         return nc;
     }
 
-    SGPAR_API int sgp_coarsen_GOSH_v2(matrix_type& interp,
+    SGPAR_API int sgp_coarsen_GOSH_v2(matrix_t& interp,
         ordinal_t* nvertices_coarse_ptr,
-        const matrix_type& g,
+        const matrix_t& g,
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.numRows();
@@ -633,7 +633,7 @@ public:
         });
 
         graph_type graph(entries, row_map);
-        interp = matrix_type("interpolate", nc, values, graph);
+        interp = matrix_t("interpolate", nc, values, graph);
 
         return EXIT_SUCCESS;
     }
@@ -833,9 +833,9 @@ public:
         return nc;
     }
 
-    SGPAR_API int sgp_coarsen_HEC(matrix_type& interp,
+    SGPAR_API int sgp_coarsen_HEC(matrix_t& interp,
         ordinal_t* nvertices_coarse_ptr,
-        const matrix_type& g,
+        const matrix_t& g,
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.numRows();
@@ -929,14 +929,14 @@ public:
         });
 
         graph_type graph(entries, row_map);
-        interp = matrix_type("interpolate", nc, values, graph);
+        interp = matrix_t("interpolate", nc, values, graph);
 
         return EXIT_SUCCESS;
     }
 
-    SGPAR_API int sgp_recoarsen_HEC(matrix_type& interp,
+    SGPAR_API int sgp_recoarsen_HEC(matrix_t& interp,
         ordinal_t* nvertices_coarse_ptr,
-        const matrix_type& g,
+        const matrix_t& g,
         const part_view_t part) {
 
         ordinal_t n = g.numRows();
@@ -1052,7 +1052,7 @@ public:
         });
 
         graph_type graph(entries, row_map);
-        interp = matrix_type("interpolate", nc, values, graph);
+        interp = matrix_t("interpolate", nc, values, graph);
 
         return EXIT_SUCCESS;
     }
@@ -1127,9 +1127,9 @@ public:
     };
 
 
-    SGPAR_API int sgp_recoarsen_match(matrix_type& interp,
+    SGPAR_API int sgp_recoarsen_match(matrix_t& interp,
         ordinal_t* nvertices_coarse_ptr,
-        const matrix_type& g,
+        const matrix_t& g,
         const part_view_t part,
         ExperimentLoggerUtil& experiment) {
 
@@ -1480,14 +1480,14 @@ public:
         });
 
         graph_type graph(entries, row_map);
-        interp = matrix_type("interpolate", nc, values, graph);
+        interp = matrix_t("interpolate", nc, values, graph);
 
         return EXIT_SUCCESS;
     }
 
-    SGPAR_API int sgp_coarsen_match(matrix_type& interp,
+    SGPAR_API int sgp_coarsen_match(matrix_t& interp,
         ordinal_t* nvertices_coarse_ptr,
-        const matrix_type& g,
+        const matrix_t& g,
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.numRows();
@@ -1827,7 +1827,7 @@ public:
         });
 
         graph_type graph(entries, row_map);
-        interp = matrix_type("interpolate", nc, values, graph);
+        interp = matrix_t("interpolate", nc, values, graph);
 
         return EXIT_SUCCESS;
     }
