@@ -43,16 +43,18 @@ public:
         int level;
     };
 
-    enum Heuristic { HEC, HECv2, HECv3, Match, MtMetis, MIS2, GOSH, GOSHv2 };
-    // default heuristic is HEC
-    Heuristic h = HEC;
-    coarsen_heuristics mapper;
+    enum Heuristic { HECv1, HECv2, HECv3, Match, MtMetis, MIS2, GOSH, GOSHv2 };
 
 private:
     using wgt_view_t = typename Kokkos::View<scalar_t>;
     using edge_view_t = typename Kokkos::View<edge_offset_t>;
     bool use_hashmap = false;
     const ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
+    using policy = Kokkos::TeamPolicy<>;
+    using member = typename policy::member_type;
+    // default heuristic is HEC
+    Heuristic h = HECv1;
+    coarsen_heuristics<ordinal_t, edge_offset_t, scalar_t, Device> mapper;
 
 //assumes that matrix has one entry-per row, not valid for general matrices
 int compute_transpose(const matrix_t& mtx,
@@ -643,12 +645,13 @@ void sgp_deduplicate_graph(const ordinal_t n, const ordinal_t nc,
             }
             //printf("remaining count: %u\n", remaining_count);
         } while (remaining_count > 0);
+        Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_eid_t & sum){
+            sum += edges_per_source(i);
+        }, gc_nedges);
     }
     else {
         Kokkos::Timer radix;
-        KokkosSparse::Experimental::SortEntriesFunctor<Kokkos::DefaultExecutionSpace, edge_offset_t, ordinal_t, edge_view_t, vtx_view_t>
-            sortEntries(source_bucket_offset, dest_by_source, wgt_by_source);
-        Kokkos::parallel_for("radix sort time", policy(nc, Kokkos::AUTO), sortEntries);
+        KokkosKernels::Impl::sort_crs_matrix<Kokkos::DefaultExecutionSpace, edge_view_t, vtx_view_t, wgt_view_t>(source_bucket_offset, dest_by_source, wgt_by_source);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixSort, radix.seconds());
         radix.reset();
 
@@ -1057,23 +1060,23 @@ coarse_level_triple sgp_coarsen_one_level(const coarse_level_triple level,
     matrix_t interpolation_graph;
 
     switch (h) {
-        case HEC:
+        case HECv1:
         case HECv2:
         case HECv3:
-            mapper.sgp_coarsen_HEC(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
+            mapper.sgp_coarsen_HEC(interpolation_graph, &nvertices_coarse, level.coarse_mtx, level.level, experiment);
             break;
         case Match:
         case MtMetis:
-            mapper.sgp_coarsen_match(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
+            mapper.sgp_coarsen_match(interpolation_graph, &nvertices_coarse, level.coarse_mtx, level.level, experiment);
             break;
         case MIS2:
-            mapper.sgp_coarsen_mis_2(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
+            mapper.sgp_coarsen_mis_2(interpolation_graph, &nvertices_coarse, level.coarse_mtx, level.level, experiment);
             break;
         case GOSHv2:
-            mapper.sgp_coarsen_GOSH_v2(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
+            mapper.sgp_coarsen_GOSH_v2(interpolation_graph, &nvertices_coarse, level.coarse_mtx, level.level, experiment);
             break;
         case GOSH:
-            mapper.sgp_coarsen_GOSH(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
+            mapper.sgp_coarsen_GOSH(interpolation_graph, &nvertices_coarse, level.coarse_mtx, level.level, experiment);
             break;
     }
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());

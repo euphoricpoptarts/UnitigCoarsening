@@ -17,6 +17,8 @@ private:
     using pool_t = Kokkos::Random_XorShift64_Pool<>;
     using gen_t = typename pool_t::generator_type;
     const ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
+    using policy = Kokkos::TeamPolicy<>;
+    using member = typename policy::member_type;
 
     template <class in, class out>
     Kokkos::View<out*> sort_order(Kokkos::View<in*> array, in max, in min) {
@@ -262,6 +264,7 @@ public:
     int sgp_coarsen_mis_2(matrix_t& interp,
         ordinal_t* nvertices_coarse_ptr,
         const matrix_t& g,
+        int coarsening_level,
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.numRows();
@@ -354,6 +357,7 @@ public:
     SGPAR_API int sgp_coarsen_GOSH(matrix_t& interp,
         ordinal_t* nvertices_coarse_ptr,
         const matrix_t& g,
+        int coarsening_level,
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.numRows();
@@ -484,6 +488,7 @@ public:
     SGPAR_API int sgp_coarsen_GOSH_v2(matrix_t& interp,
         ordinal_t* nvertices_coarse_ptr,
         const matrix_t& g,
+        int coarsening_level,
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.numRows();
@@ -836,6 +841,7 @@ public:
     SGPAR_API int sgp_coarsen_HEC(matrix_t& interp,
         ordinal_t* nvertices_coarse_ptr,
         const matrix_t& g,
+        int coarsening_level,
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.numRows();
@@ -1488,6 +1494,7 @@ public:
     SGPAR_API int sgp_coarsen_match(matrix_t& interp,
         ordinal_t* nvertices_coarse_ptr,
         const matrix_t& g,
+        int coarsening_level,
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.numRows();
