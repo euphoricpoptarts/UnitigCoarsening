@@ -21,7 +21,7 @@
 #endif
 
 #ifdef _KOKKOS
-#include "coarsen_kokkos.h"
+#include "coarsen_kokkos_template.h"
 #include "eigensolve_kokkos.h"
 #endif
 
@@ -2378,19 +2378,58 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
 #ifdef _KOKKOS
     double start_time = sgp_timer();
 
-    std::list<sgpar_kokkos::matrix_type> coarse_graphs, interp_mtxs;
-    std::list<sgpar_kokkos::vtx_view_t> vtx_weights;
-    CHECK_SGPAR(sgpar_kokkos::sgp_generate_coarse_graphs(&g, coarse_graphs, interp_mtxs, vtx_weights, rng, experiment));
+    using namespace sgpar_kokkos;
+    using coarsener_t = coarse_builder<sgp_vid_t, sgp_eid_t, sgp_wgt_t, Device>;
+    using coarse_level_triple = typename coarsener_t::coarse_level_triple;
+    using matrix_t = typename coarsener_t::matrix_t;
+    using graph_t = typename coarsener_t::graph_type;
+    coarsener_t coarsener;
+
+    std::list<coarse_level_triple> coarse_levels;
+    
+    //create matrix_t
+    sgp_vid_t fine_n = g.nvertices;
+    edge_view_t row_map("row map", fine_n + 1);
+    edge_mirror_t row_mirror = Kokkos::create_mirror(row_map);
+    vtx_view_t entries("entries", g.source_offsets[fine_n]);
+    vtx_mirror_t entries_mirror = Kokkos::create_mirror(entries);
+    wgt_view_t values("values", g.source_offsets[fine_n]);
+    wgt_mirror_t values_mirror = Kokkos::create_mirror(values);
+    vtx_view_t vtx_weights("vtx weights", fine_n);
+    Kokkos::parallel_for(host_policy(0, fine_n + 1), KOKKOS_LAMBDA(sgp_vid_t u) {
+        row_mirror(u) = g.source_offsets[u];
+    });
+    Kokkos::parallel_for(host_policy(0, g.source_offsets[fine_n]), KOKKOS_LAMBDA(sgp_vid_t i) {
+        entries_mirror(i) = g.destination_indices[i];
+        values_mirror(i) = 1.0;
+    });
+    Kokkos::deep_copy(row_map, row_mirror);
+    Kokkos::deep_copy(entries, entries_mirror);
+    Kokkos::deep_copy(values, values_mirror);
+    graph_t fine_graph(entries, row_map);
+    matrix_t fg("interpolate", fine_n, values, fine_graph);
+
+    coarse_levels = coarsener.sgp_generate_coarse_graphs(fg, experiment);
 
     double fin_coarsening_time = sgp_timer();
     sgp_real_t* eigenvec = (sgp_real_t*)malloc(g.nvertices * sizeof(sgp_real_t));
 
-    CHECK_SGPAR(sgpar_kokkos::sgp_eigensolve(eigenvec, coarse_graphs, interp_mtxs, vtx_weights, rng, config->refine_alg
+    std::list<matrix_t> coarse_graphs, interp_mtxs;
+    std::list<vtx_view_t> vtx_weight_list;
+
+    for(auto level : coarse_levels){
+        coarse_graphs.push_back(level.coarse_mtx);
+        vtx_weight_list.push_back(level.coarse_vtx_wgts);
+        if(level.level != 0){
+            interp_mtxs.push_back(level.interp_mtx);
+        }
+    }
+
+    CHECK_SGPAR(sgpar_kokkos::sgp_eigensolve(eigenvec, coarse_graphs, interp_mtxs, vtx_weight_list, rng, config->refine_alg
         , experiment
         ));
 
-    coarse_graphs.clear();
-    interp_mtxs.clear();
+    coarse_levels.clear();
     double fin_final_level_time = sgp_timer();
     //I don't feel like redoing the timing stuff rn
     double fin_refine_time = sgp_timer();

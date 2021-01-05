@@ -407,6 +407,7 @@ struct functorDedupeAfterSort
     }
 };
 
+/*
 template<typename ExecutionSpace, typename uniform_memory_pool_t>
 struct functorHashmapAccumulator
 {
@@ -548,13 +549,14 @@ struct functorHashmapAccumulator
     }   // operator()
 
 };  // functorHashmapAccumulator
+*/
 
 void sgp_deduplicate_graph(const ordinal_t n, const ordinal_t nc,
     vtx_view_t edges_per_source, vtx_view_t dest_by_source, wgt_view_t wgt_by_source,
     const edge_view_t source_bucket_offset, ExperimentLoggerUtil& experiment, edge_offset_t& gc_nedges) {
 
     if (use_hashmap) {
-
+/*
         ordinal_t remaining_count = nc;
         vtx_view_t remaining("remaining vtx", nc);
         Kokkos::parallel_for(nc, KOKKOS_LAMBDA(const ordinal_t i){
@@ -648,6 +650,7 @@ void sgp_deduplicate_graph(const ordinal_t n, const ordinal_t nc,
         Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const ordinal_t i, edge_offset_t & sum){
             sum += edges_per_source(i);
         }, gc_nedges);
+*/
     }
     else {
         Kokkos::Timer radix;
