@@ -2420,7 +2420,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     for(auto level : coarse_levels){
         coarse_graphs.push_back(level.coarse_mtx);
         vtx_weight_list.push_back(level.coarse_vtx_wgts);
-        if(level.level != 0){
+        if(level.level > 1){
             interp_mtxs.push_back(level.interp_mtx);
         }
     }

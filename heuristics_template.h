@@ -866,6 +866,8 @@ public:
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Permute, timer.seconds());
         timer.reset();
 
+
+        // TODO: should use a boolean to clearly indicated if the graph has non-uniform edge weights
         if (coarsening_level == 1) {
             //all weights equal at this level so choose heaviest edge randomly
             Kokkos::parallel_for("Random HN", n, KOKKOS_LAMBDA(ordinal_t i) {

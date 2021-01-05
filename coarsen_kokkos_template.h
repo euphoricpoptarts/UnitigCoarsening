@@ -1101,7 +1101,8 @@ std::list<coarse_level_triple> sgp_generate_coarse_graphs(const matrix_t fine_g,
     std::list<coarse_level_triple> levels;
     coarse_level_triple finest;
     finest.coarse_mtx = fine_g;
-    finest.level = 0;
+    //1-indexed, not zero indexed
+    finest.level = 1;
     vtx_view_t vtx_weights("vertex weights", fine_n);
     Kokkos::parallel_for(fine_n, KOKKOS_LAMBDA(const ordinal_t i){
         vtx_weights(i) = 1;
