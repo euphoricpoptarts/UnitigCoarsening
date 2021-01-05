@@ -25,7 +25,7 @@
 #endif
 
 #include "ExperimentLoggerUtil.cpp"
-#include "heuristics.h"
+#include "heuristics_template.h"
 
 template<typename ordinal_t, typename edge_offset_t, typename scalar_t, class Device>
 class coarse_builder {
@@ -35,13 +35,18 @@ public:
     using graph_type = typename matrix_t::staticcrsgraph_type;
 
     // contains matrix and vertex weights corresponding to current level
-    // interp matrix maps this matrix to next coarse level
+    // interp matrix maps previous level to this level
     struct coarse_level_triple {
         matrix_t coarse_mtx;
         vtx_view_t coarse_vtx_wgts;
         matrix_t interp_mtx;
         int level;
     };
+
+    enum Heuristic { HEC, HECv2, HECv3, Match, MtMetis, MIS2, GOSH, GOSHv2 };
+    // default heuristic is HEC
+    Heuristic h = HEC;
+    coarsen_heuristics mapper;
 
 private:
     using wgt_view_t = typename Kokkos::View<scalar_t>;
@@ -91,6 +96,7 @@ int compute_transpose(const matrix_t& mtx,
     return EXIT_SUCCESS;
 }
 
+/*
 int sgp_build_coarse_graph_spgemm(matrix_t& gc,
     vtx_view_t& c_vtx_w, const vtx_view_t f_vtx_w,
     const matrix_t& interp_mtx,
@@ -115,7 +121,6 @@ int sgp_build_coarse_graph_spgemm(matrix_t& gc,
     kh.set_dynamic_scheduling(true);
 
     // Select an spgemm algorithm, limited by configuration at compile-time and set via the handle
-    // Some options: {SPGEMM_KK_MEMORY, SPGEMM_KK_SPEED, SPGEMM_KK_MEMSPEED, /*SPGEMM_CUSPARSE, */ SPGEMM_MKL}
     KokkosSparse::SPGEMMAlgorithm spgemm_algorithm = KokkosSparse::SPGEMM_KK_MEMORY;
     kh.create_spgemm_handle(spgemm_algorithm);
 
@@ -330,6 +335,7 @@ int sgp_build_coarse_graph_spgemm(matrix_t& gc,
 
     return EXIT_SUCCESS;
 }
+*/
 
 template<typename ExecutionSpace>
 struct functorDedupeAfterSort
@@ -654,10 +660,9 @@ void sgp_deduplicate_graph(const ordinal_t n, const ordinal_t nc,
 
 }
 
-void sgp_build_nonskew(matrix_t& gc,
+coarse_level_triple sgp_build_nonskew(const matrix_t g,
     const matrix_t vcmap,
-    const matrix_t g,
-    const vtx_view_t mapped_edges,
+    vtx_view_t mapped_edges,
     vtx_view_t edges_per_source,
     ExperimentLoggerUtil& experiment,
     Kokkos::Timer& timer) {
@@ -755,16 +760,19 @@ void sgp_build_nonskew(matrix_t& gc,
 
     graph_type gc_graph(dest_idx, source_offsets);
     gc = matrix_type("gc", nc, wgts, gc_graph);
+
+    coarse_level_triple next_level;
+    next_level.coarse_mtx = gc;
+    return next_level;
 }
 
-coarse_level_triple sgp_build_skew(coarse_level_triple level,
+coarse_level_triple sgp_build_skew(const matrix_t g,
+    const matrix_t vcmap,
     vtx_view_t mapped_edges,
     vtx_view_t degree_initial,
     ExperimentLoggerUtil& experiment,
     Kokkos::Timer& timer) {
 
-    matrix_t g = level.coarse_mtx;
-    matrix_t vcmap = level.interp_mtx;
     ordinal_t n = g.numRows();
     ordinal_t nc = vcmap.numCols();
     edge_offset_t gc_nedges = 0;
@@ -965,13 +973,17 @@ coarse_level_triple sgp_build_skew(coarse_level_triple level,
 
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::WriteGraph, timer.seconds());
     timer.reset();
+
+    coarse_level_triple next_level;
+    next_level.coarse_mtx = gc;
+    return next_level;
 }
 
 coarse_level_triple sgp_build_coarse_graph(const coarse_level_triple level,
+    const matrix_t vcmap,
     ExperimentLoggerUtil& experiment) {
 
     matrix_t g = level.coarse_mtx;
-    matrix_t vcmap = level.interp_mtx;
     ordinal_t n = g.numRows();
     ordinal_t nc = vcmap.numCols();
 
@@ -1024,100 +1036,91 @@ coarse_level_triple sgp_build_coarse_graph(const coarse_level_triple level,
     //only do if graph is sufficiently irregular
     //don't do optimizations if running on CPU (the default host space)
     if (avg_unduped > 50 && (max_unduped / 10) > avg_unduped && typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
-        next_level = sgp_build_skew(level, mapped_edges, degree_initial, experiment, timer);
+        next_level = sgp_build_skew(g, vcmap, mapped_edges, degree_initial, experiment, timer);
     }
     else {
-        next_level = sgp_build_nonskew(level, mapped_edges, degree_initial, experiment, timer);
+        next_level = sgp_build_nonskew(g, vcmap, mapped_edges, degree_initial, experiment, timer);
     }
 
+    next_level.coarse_vtx_wgts = f_vtx_w;
+    next_level.level = level.level + 1;
+    next_level.interp_mtx = vcmap;
     return next_level;
 }
 
-int sgp_coarsen_one_level(matrix_t& gc, matrix_t& interpolation_graph, vtx_view_t& c_vtx_w,
-    const matrix_type& g,
-    const vtx_view_t& f_vtx_w,
-    const int coarsening_level,
-    sgp_pcg32_random_t* rng,
+coarse_level_triple sgp_coarsen_one_level(const coarse_level_triple level,
     ExperimentLoggerUtil& experiment) {
 
     Kokkos::Timer timer;
     ordinal_t nvertices_coarse;
-#if defined HEC || defined HEC_V2 || defined HEC_V3
-    sgp_coarsen_HEC(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
-#elif defined PUREMATCH || MTMETIS
-    sgp_coarsen_match(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
-#elif defined MIS
-    sgp_coarsen_mis_2(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
-#elif defined GOSH_V2
-    sgp_coarsen_GOSH_v2(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
-#elif defined GOSH
-    sgp_coarsen_GOSH(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
-#endif
+    matrix_t interpolation_graph;
+
+    switch (h) {
+        case HEC:
+        case HECv2:
+        case HECv3:
+            mapper.sgp_coarsen_HEC(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
+            break;
+        case Match:
+        case MtMetis:
+            mapper.sgp_coarsen_match(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
+            break;
+        case MIS2:
+            mapper.sgp_coarsen_mis_2(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
+            break;
+        case GOSHv2:
+            mapper.sgp_coarsen_GOSH_v2(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
+            break;
+        case GOSH:
+            mapper.sgp_coarsen_GOSH(interpolation_graph, &nvertices_coarse, g, coarsening_level, rng, experiment);
+            break;
+    }
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
 
     timer.reset();
-#ifdef SPGEMM
-    sgp_build_coarse_graph_spgemm(gc, c_vtx_w, f_vtx_w, interpolation_graph, g, coarsening_level);
-#else
-    sgp_build_coarse_graph(gc, c_vtx_w, interpolation_graph, g, f_vtx_w, coarsening_level, experiment);
-#endif
+    coarse_level_triple next_level = sgp_build_coarse_graph(level, interpolation_graph, experiment);
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Build, timer.seconds());
     timer.reset();
 
-    return EXIT_SUCCESS;
+    return next_level;
 }
 
-int sgp_generate_coarse_graphs(const matrix_t fine_g, std::list<matrix_t>& coarse_graphs, std::list<matrix_t>& interp_mtxs, std::list<vtx_view_t>& vtx_weights_list, ExperimentLoggerUtil& experiment) {
+public:
+std::list<coarse_level_triple> sgp_generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& experiment) {
 
     Kokkos::Timer timer;
     ordinal_t fine_n = fine_g.numRows();
-
+    std::list<coarse_level_triple> levels;
+    coarse_level_triple finest;
+    finest.coarse_mtx = fine_g;
+    finest.level = 0;
     vtw_view_t vtx_weights("vertex weights", fine_n);
-
     Kokkos::parallel_for(fine_n, KOKKOS_LAMBDA(const ordinal_t i){
         vtx_weights(i) = 1;
     });
-
-    coarse_graphs.push_back(fine_g);
-    vtx_weights_list.push_back(vtx_weights);
-
+    finest.coarse_vtx_wgts = vtx_weights;
+    levels.push_back(finest);
     printf("Fine graph copy to device time: %.8f\n", timer.seconds());
+    while (levels.rbegin()->coarse_mtx.numRows() > SGPAR_COARSENING_VTX_CUTOFF) {
+        printf("Calculating coarse graph %ld\n", levels.size());
 
-    int coarsening_level = 0;
-    while (coarse_graphs.rbegin()->numRows() > SGPAR_COARSENING_VTX_CUTOFF) {
-        printf("Calculating coarse graph %ld\n", coarse_graphs.size());
+        coarse_level_triple next_level = sgp_coarsen_one_level(*levels.rbegin(), experiment));
 
-        coarse_graphs.push_back(matrix_type());
-        vtx_view_t coarse_vtx_weights;
-        interp_mtxs.push_back(matrix_type());
-        auto end_pointer = coarse_graphs.rbegin();
+        levels.push_back(next_level);
 
-        CHECK_SGPAR(sgp_coarsen_one_level(*coarse_graphs.rbegin(),
-            *interp_mtxs.rbegin(),
-            coarse_vtx_weights,
-            *(++coarse_graphs.rbegin()),
-            *(vtx_weights_list.rbegin()),
-            ++coarsening_level,
-            rng, experiment));
-
-        vtx_weights_list.push_back(coarse_vtx_weights);
-
-        if(coarse_graphs.size() > 200) break;
+        if(levels.size() > 200) break;
 #ifdef DEBUG
-        sgp_real_t coarsen_ratio = (sgp_real_t) coarse_graphs.rbegin()->numRows() / (sgp_real_t) (++coarse_graphs.rbegin())->numRows();
+        sgp_real_t coarsen_ratio = (sgp_real_t) levels.rbegin()->coarse_mtx.numRows() / (sgp_real_t) (++levels.rbegin())->coarse_mtx.numRows();
         printf("Coarsening ratio: %.8f\n", coarsen_ratio);
 #endif
     }
 
     //don't use the coarsest level if it has too few vertices
-    if (coarse_graphs.rbegin()->numRows() < 10) {
-        coarse_graphs.pop_back();
-        interp_mtxs.pop_back();
-        vtx_weights_list.pop_back();
-        coarsening_level--;
+    if (levels.rbegin()->coarse_mtx.numRows() < 10) {
+        levels.pop_back();
     }
 
-    return EXIT_SUCCESS;
+    return levels;
 }
 
 };
