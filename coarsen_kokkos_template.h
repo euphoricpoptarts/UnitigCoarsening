@@ -49,7 +49,6 @@ private:
     using wgt_view_t = typename Kokkos::View<scalar_t*>;
     using edge_view_t = typename Kokkos::View<edge_offset_t*>;
     bool use_hashmap = false;
-    const ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
     using policy = Kokkos::TeamPolicy<>;
     using member = typename policy::member_type;
     // default heuristic is HEC
@@ -350,6 +349,7 @@ struct functorDedupeAfterSort
     wgt_view_t wgts;
     wgt_view_t wgtsOut;
     edge_view_t dedupe_edge_count;
+    const ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
 
     functorDedupeAfterSort(edge_view_t row_map,
         vtx_view_t entries,
