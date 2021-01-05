@@ -7,13 +7,13 @@ template<typename ordinal_t, typename edge_offset_t, typename scalar_t, class De
 class coarsen_heuristics {
 public:
     using matrix_t = typename KokkosSparse::CrsMatrix<scalar_t, ordinal_t, Device, void, edge_offset_t>;
-    using vtx_view_t = typename Kokkos::View<ordinal_t>;
+    using vtx_view_t = typename Kokkos::View<ordinal_t*>;
     using graph_type = typename matrix_t::staticcrsgraph_type;
 
 private:
-    using wgt_view_t = typename Kokkos::View<scalar_t>;
-    using edge_view_t = typename Kokkos::View<edge_offset_t>;
-    using part_view_t = typename Kokkos::View<int>;
+    using wgt_view_t = typename Kokkos::View<scalar_t*>;
+    using edge_view_t = typename Kokkos::View<edge_offset_t*>;
+    using part_view_t = typename Kokkos::View<int*>;
     using pool_t = Kokkos::Random_XorShift64_Pool<>;
     using gen_t = typename pool_t::generator_type;
     const ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();

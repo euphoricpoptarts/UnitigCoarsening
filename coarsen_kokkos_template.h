@@ -31,7 +31,7 @@ template<typename ordinal_t, typename edge_offset_t, typename scalar_t, class De
 class coarse_builder {
 public:
     using matrix_t = typename KokkosSparse::CrsMatrix<scalar_t, ordinal_t, Device, void, edge_offset_t>;
-    using vtx_view_t = typename Kokkos::View<ordinal_t>;
+    using vtx_view_t = typename Kokkos::View<ordinal_t*>;
     using graph_type = typename matrix_t::staticcrsgraph_type;
 
     // contains matrix and vertex weights corresponding to current level
@@ -46,8 +46,8 @@ public:
     enum Heuristic { HECv1, HECv2, HECv3, Match, MtMetis, MIS2, GOSH, GOSHv2 };
 
 private:
-    using wgt_view_t = typename Kokkos::View<scalar_t>;
-    using edge_view_t = typename Kokkos::View<edge_offset_t>;
+    using wgt_view_t = typename Kokkos::View<scalar_t*>;
+    using edge_view_t = typename Kokkos::View<edge_offset_t*>;
     bool use_hashmap = false;
     const ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
     using policy = Kokkos::TeamPolicy<>;
