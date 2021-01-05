@@ -389,7 +389,7 @@ struct functorDedupeAfterSort
         void operator()(const ordinal_t& u, edge_offset_t& thread_sum) const
     {
         ordinal_t offset = row_map(u);
-        ordinal_t last = std::numeric_limits<ordinal_t>::max();
+        ordinal_t last = sgpar::SGP_INFTY;
         for (edge_offset_t i = row_map(u); i < row_map(u + 1); i++) {
             if (last != entries(i)) {
                 entries(offset) = entries(i);
