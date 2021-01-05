@@ -467,7 +467,7 @@ struct functorHashmapAccumulator
         }
         ordinal_t* ptr_memory_pool_chunk = (ordinal_t*)(ptr_temp);
 
-        KokkosKernels::Experimental::HashmapAccumulator<hash_size_type, hash_key_type, hash_value_type> hash_map;
+        KokkosKernels::Experimental::HashmapAccumulator<hash_size_type, hash_key_type, hash_value_type, Device> hash_map;
 
         // Set pointer to hash indices
         ordinal_t* used_hash_indices = (ordinal_t*)(ptr_temp);
@@ -645,7 +645,7 @@ void sgp_deduplicate_graph(const ordinal_t n, const ordinal_t nc,
             }
             //printf("remaining count: %u\n", remaining_count);
         } while (remaining_count > 0);
-        Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const sgp_vid_t i, sgp_eid_t & sum){
+        Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const ordinal_t i, edge_offset_t & sum){
             sum += edges_per_source(i);
         }, gc_nedges);
     }
