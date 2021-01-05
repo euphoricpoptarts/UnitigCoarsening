@@ -1123,4 +1123,8 @@ std::list<coarse_level_triple> sgp_generate_coarse_graphs(const matrix_t fine_g,
     return levels;
 }
 
+void set_heuristic(Heuristic h) {
+    this->h = h;
+}
+
 };
