@@ -763,7 +763,7 @@ coarse_level_triple sgp_build_nonskew(const matrix_t g,
     });
 
     graph_type gc_graph(dest_idx, source_offsets);
-    matrix_t gc = matrix_type("gc", nc, wgts, gc_graph);
+    matrix_t gc("gc", nc, wgts, gc_graph);
 
     coarse_level_triple next_level;
     next_level.coarse_mtx = gc;
@@ -973,7 +973,7 @@ coarse_level_triple sgp_build_skew(const matrix_t g,
     });
 
     graph_type gc_graph(dest_idx, source_offsets);
-    matrix_t gc = matrix_type("gc", nc, wgts, gc_graph);
+    matrix_t gc("gc", nc, wgts, gc_graph);
 
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::WriteGraph, timer.seconds());
     timer.reset();
