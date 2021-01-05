@@ -52,6 +52,7 @@ private:
     using wgt_view_t = typename Kokkos::View<scalar_t>;
     using edge_view_t = typename Kokkos::View<edge_offset_t>;
     bool use_hashmap = false;
+    const ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
 
 //assumes that matrix has one entry-per row, not valid for general matrices
 int compute_transpose(const matrix_t& mtx,
@@ -387,7 +388,7 @@ struct functorDedupeAfterSort
         void operator()(const ordinal_t& u, edge_offset_t& thread_sum) const
     {
         ordinal_t offset = row_map(u);
-        ordinal_t last = SGP_INFTY;
+        ordinal_t last = ORD_MAX;
         for (edge_offset_t i = row_map(u); i < row_map(u + 1); i++) {
             if (last != entries(i)) {
                 entries(offset) = entries(i);
