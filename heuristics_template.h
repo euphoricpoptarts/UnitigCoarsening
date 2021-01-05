@@ -886,7 +886,7 @@ public:
                 ordinal_t adj_size = g.graph.row_map(i + 1) - g.graph.row_map(i);
                 if(adj_size > 0){
                     edge_offset_t end = g.graph.row_map(i + 1);
-                    Kokkos::MaxLoc<scalar_t,edge_offset_t,Device>::value_type argmax;
+                    typename Kokkos::MaxLoc<scalar_t,edge_offset_t,Device>::value_type argmax;
                     Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g.graph.row_map(i), end), [=](const edge_offset_t idx, Kokkos::ValLocScalar<scalar_t,edge_offset_t>& local) {
                         scalar_t wgt = g.values(idx);
                         if(wgt >= local.val){
@@ -1838,4 +1838,4 @@ public:
 
         return EXIT_SUCCESS;
     }
-}
+};
