@@ -3,8 +3,7 @@
 #include "ExperimentLoggerUtil.cpp"
 #include "definitions_kokkos.h"
 
-template<typename T>
-constexpr T ORD_MAX = sgpar::SGP_INFTY;
+static constexpr uint32_t ORD_MAX = sgpar::SGP_INFTY;
 
 template<typename ordinal_t, typename edge_offset_t, typename scalar_t, class Device>
 class coarsen_heuristics {
@@ -13,7 +12,6 @@ public:
     using vtx_view_t = typename Kokkos::View<ordinal_t*>;
     using graph_type = typename matrix_t::staticcrsgraph_type;
 
-private:
     using wgt_view_t = typename Kokkos::View<scalar_t*>;
     using edge_view_t = typename Kokkos::View<edge_offset_t*>;
     using part_view_t = typename Kokkos::View<int*>;

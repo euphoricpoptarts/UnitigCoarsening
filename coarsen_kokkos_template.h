@@ -45,7 +45,6 @@ public:
 
     enum Heuristic { HECv1, HECv2, HECv3, Match, MtMetis, MIS2, GOSH, GOSHv2 };
 
-private:
     using wgt_view_t = typename Kokkos::View<scalar_t*>;
     using edge_view_t = typename Kokkos::View<edge_offset_t*>;
     bool use_hashmap = false;
@@ -54,6 +53,7 @@ private:
     // default heuristic is HEC
     Heuristic h = HECv1;
     coarsen_heuristics<ordinal_t, edge_offset_t, scalar_t, Device> mapper;
+    std::list<coarse_level_triple> levels_return;
 
 //assumes that matrix has one entry-per row, not valid for general matrices
 int compute_transpose(const matrix_t& mtx,
@@ -1093,11 +1093,12 @@ coarse_level_triple sgp_coarsen_one_level(const coarse_level_triple level,
 }
 
 public:
-std::list<coarse_level_triple> sgp_generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& experiment) {
+void sgp_generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& experiment) {
 
     Kokkos::Timer timer;
     ordinal_t fine_n = fine_g.numRows();
-    std::list<coarse_level_triple> levels;
+    std::list<coarse_level_triple> levels = levels_return();
+    levels.clear();
     coarse_level_triple finest;
     finest.coarse_mtx = fine_g;
     //1-indexed, not zero indexed
@@ -1129,6 +1130,10 @@ std::list<coarse_level_triple> sgp_generate_coarse_graphs(const matrix_t fine_g,
     }
 
     return levels;
+}
+
+std::list<coarse_level_triple> get_levels() {
+    return levels_return();
 }
 
 void set_heuristic(Heuristic h) {

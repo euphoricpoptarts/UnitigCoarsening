@@ -2409,7 +2409,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     graph_t fine_graph(entries, row_map);
     matrix_t fg("interpolate", fine_n, values, fine_graph);
 
-    coarse_levels = coarsener.sgp_generate_coarse_graphs(fg, experiment);
+    coarsener.sgp_generate_coarse_graphs(fg, experiment);
+    coarse_levels = coarsener.get_levels();
 
     double fin_coarsening_time = sgp_timer();
     sgp_real_t* eigenvec = (sgp_real_t*)malloc(g.nvertices * sizeof(sgp_real_t));

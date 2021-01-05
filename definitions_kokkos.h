@@ -68,7 +68,7 @@ namespace sgpar {
     typedef uint64_t sgp_eid_t;
 #else
     typedef uint32_t sgp_vid_t;
-	const sgp_vid_t SGP_INFTY = std::numeric_limits<sgp_vid_t>::max();
+	static constexpr sgp_vid_t SGP_INFTY = std::numeric_limits<sgp_vid_t>::max();
     typedef uint32_t sgp_eid_t;
 #endif
     typedef double sgp_real_t;
