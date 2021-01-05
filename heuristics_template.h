@@ -16,7 +16,6 @@ private:
     using part_view_t = typename Kokkos::View<int*>;
     using pool_t = Kokkos::Random_XorShift64_Pool<>;
     using gen_t = typename pool_t::generator_type;
-    const ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
     using policy = Kokkos::TeamPolicy<>;
     using member = typename policy::member_type;
 
@@ -294,7 +293,7 @@ public:
                 vcmap(i) = Kokkos::atomic_fetch_add(&nvc(), 1);
             }
             else {
-                vcmap(i) = ORD_MAX;
+                vcmap(i) = std::numeric_limits<ordinal_t>::max();
             }
         });
 
@@ -312,11 +311,11 @@ public:
 
         //add distance-2 neighbors of color 1 to arbitrary neighboring aggregate
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(ordinal_t i){
-            if (vcmap(i) != ORD_MAX) {
+            if (vcmap(i) != std::numeric_limits<ordinal_t>::max()) {
                 //could use a thread team here
                 for (edge_offset_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
                     ordinal_t v = g.graph.entries(j);
-                    if (vcmap(v) == ORD_MAX) {
+                    if (vcmap(v) == std::numeric_limits<ordinal_t>::max()) {
                         vcmap(v) = vcmap(i);
                     }
                 }
@@ -375,7 +374,7 @@ public:
                 vcmap(i) = Kokkos::atomic_fetch_add(&nvc(), 1);
             }
             else {
-                vcmap(i) = ORD_MAX;
+                vcmap(i) = std::numeric_limits<ordinal_t>::max();
             }
         });
 
@@ -423,8 +422,8 @@ public:
 
         vtx_view_t match("match", n);
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(ordinal_t i){
-            if (vcmap(i) == ORD_MAX) {
-                match(i) = ORD_MAX;
+            if (vcmap(i) == std::numeric_limits<ordinal_t>::max()) {
+                match(i) = std::numeric_limits<ordinal_t>::max();
             }
             else {
                 match(i) = n + 1;
@@ -445,8 +444,8 @@ public:
                 int condition = u < v;
                 //need to enforce an ordering condition to allow hard-stall conditions to be broken
                 if (condition ^ swap) {
-                    if (Kokkos::atomic_compare_exchange_strong(&match(u), ORD_MAX, v)) {
-                        if (u == v || Kokkos::atomic_compare_exchange_strong(&match(v), ORD_MAX, u)) {
+                    if (Kokkos::atomic_compare_exchange_strong(&match(u), std::numeric_limits<ordinal_t>::max(), v)) {
+                        if (u == v || Kokkos::atomic_compare_exchange_strong(&match(v), std::numeric_limits<ordinal_t>::max(), u)) {
                             ordinal_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
                             vcmap(u) = cv;
                             vcmap(v) = cv;
@@ -456,7 +455,7 @@ public:
                                 vcmap(u) = vcmap(v);
                             }
                             else {
-                                match(u) = ORD_MAX;
+                                match(u) = std::numeric_limits<ordinal_t>::max();
                             }
                         }
                     }
@@ -472,7 +471,7 @@ public:
                     next_perm(add_next) = u;
                     //been noticing some memory errors on my machine, probably from memory overclock
                     //this fixes the problem, and is lightweight
-                    match(u) = ORD_MAX;
+                    match(u) = std::numeric_limits<ordinal_t>::max();
                 }
             });
             Kokkos::fence();
@@ -507,26 +506,26 @@ public:
                 vcmap(i) = cv;
             }
             else {
-                vcmap(i) = ORD_MAX;
+                vcmap(i) = std::numeric_limits<ordinal_t>::max();
             }
         });
 
         //add vertex to max wgt neighbor's aggregate
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(ordinal_t i){
-            if (vcmap(i) == ORD_MAX) {
-                ordinal_t argmax = ORD_MAX;
+            if (vcmap(i) == std::numeric_limits<ordinal_t>::max()) {
+                ordinal_t argmax = std::numeric_limits<ordinal_t>::max();
                 scalar_t max_w = 0;
                 for (edge_offset_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
                     ordinal_t v = g.graph.entries(j);
                     ordinal_t wgt = g.values(j);
-                    if (vcmap(v) != ORD_MAX) {
+                    if (vcmap(v) != std::numeric_limits<ordinal_t>::max()) {
                         if (wgt >= max_w) {
                             max_w = wgt;
                             argmax = v;
                         }
                     }
                 }
-                if (argmax != ORD_MAX) {
+                if (argmax != std::numeric_limits<ordinal_t>::max()) {
                     vcmap(i) = vcmap(argmax);
                 }
             }
@@ -534,20 +533,20 @@ public:
 
         //add vertex to max degree neighbor's aggregate
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(ordinal_t i){
-            if (vcmap(i) == ORD_MAX) {
-                ordinal_t argmax = ORD_MAX;
+            if (vcmap(i) == std::numeric_limits<ordinal_t>::max()) {
+                ordinal_t argmax = std::numeric_limits<ordinal_t>::max();
                 edge_offset_t max_d = 0;
                 for (edge_offset_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
                     ordinal_t v = g.graph.entries(j);
                     edge_offset_t degree = g.graph.row_map(v + 1) - g.graph.row_map(v);
-                    if (vcmap(v) != ORD_MAX) {
+                    if (vcmap(v) != std::numeric_limits<ordinal_t>::max()) {
                         if (degree >= max_d) {
                             max_d = degree;
                             argmax = v;
                         }
                     }
                 }
-                if (argmax != ORD_MAX) {
+                if (argmax != std::numeric_limits<ordinal_t>::max()) {
                     vcmap(i) = vcmap(argmax);
                 }
             }
@@ -555,10 +554,10 @@ public:
 
         //add neighbors of each aggregated vertex to aggregate
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(ordinal_t i){
-            if (vcmap(i) != ORD_MAX) {
+            if (vcmap(i) != std::numeric_limits<ordinal_t>::max()) {
                 for (edge_offset_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
                     ordinal_t v = g.graph.entries(j);
-                    if (vcmap(v) == ORD_MAX) {
+                    if (vcmap(v) == std::numeric_limits<ordinal_t>::max()) {
                         vcmap(v) = vcmap(i);
                     }
                 }
@@ -568,7 +567,7 @@ public:
         ordinal_t remaining_total = 0;
 
         Kokkos::parallel_reduce("count remaining", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & sum){
-            if (vcmap(i) == ORD_MAX) {
+            if (vcmap(i) == std::numeric_limits<ordinal_t>::max()) {
                 sum++;
             }
         }, remaining_total);
@@ -576,7 +575,7 @@ public:
         vtx_view_t remaining("remaining vtx", remaining_total);
 
         Kokkos::parallel_scan("count remaining", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & update, const bool final){
-            if (vcmap(i) == ORD_MAX) {
+            if (vcmap(i) == std::numeric_limits<ordinal_t>::max()) {
                 if (final) {
                     remaining(update) = i;
                 }
@@ -591,7 +590,7 @@ public:
         Kokkos::parallel_for("fill hn", remaining_total, KOKKOS_LAMBDA(ordinal_t r_idx) {
             //select heaviest neighbor with ties randomly broken
             ordinal_t i = remaining(r_idx);
-            ordinal_t hn_i = ORD_MAX;
+            ordinal_t hn_i = std::numeric_limits<ordinal_t>::max();
             uint64_t max_rand = 0;
             scalar_t max_ewt = 0;
 
@@ -647,7 +646,7 @@ public:
 
         vtx_view_t match("match", n);
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(ordinal_t i){
-            match(i) = ORD_MAX;
+            match(i) = std::numeric_limits<ordinal_t>::max();
         });
         ordinal_t perm_length = n;
         Kokkos::View<ordinal_t> nvertices_coarse("nvertices");
@@ -665,8 +664,8 @@ public:
                 int condition = ordering(u) < ordering(v);
                 //need to enforce an ordering condition to allow hard-stall conditions to be broken
                 if (condition ^ swap) {
-                    if (Kokkos::atomic_compare_exchange_strong(&match(u), ORD_MAX, v)) {
-                        if (u == v || Kokkos::atomic_compare_exchange_strong(&match(v), ORD_MAX, u)) {
+                    if (Kokkos::atomic_compare_exchange_strong(&match(u), std::numeric_limits<ordinal_t>::max(), v)) {
+                        if (u == v || Kokkos::atomic_compare_exchange_strong(&match(v), std::numeric_limits<ordinal_t>::max(), u)) {
                             ordinal_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
                             vcmap(u) = cv;
                             vcmap(v) = cv;
@@ -676,7 +675,7 @@ public:
                                 vcmap(u) = vcmap(v);
                             }
                             else {
-                                match(u) = ORD_MAX;
+                                match(u) = std::numeric_limits<ordinal_t>::max();
                             }
                         }
                     }
@@ -692,7 +691,7 @@ public:
                     next_perm(add_next) = u;
                     //been noticing some memory erros on my machine, probably from memory overclock
                     //this fixes the problem, and is lightweight
-                    match(u) = ORD_MAX;
+                    match(u) = std::numeric_limits<ordinal_t>::max();
                 }
             });
             Kokkos::fence();
@@ -715,7 +714,7 @@ public:
         while (remaining_total > 0) {
             vtx_view_t heavy_samples("heavy samples", n);
             Kokkos::parallel_for("init heavy samples", n, KOKKOS_LAMBDA(ordinal_t u){
-                heavy_samples(u) = ORD_MAX;
+                heavy_samples(u) = std::numeric_limits<ordinal_t>::max();
             });
             //for every vertex v which is the heavy neighbor for at least one other vertex u
             //we arbitrarily "match" one of the u with v
@@ -723,7 +722,7 @@ public:
             Kokkos::parallel_for("fill heavy samples", remaining_total, KOKKOS_LAMBDA(ordinal_t i){
                 ordinal_t u = remaining(i);
                 ordinal_t v = ordering(hn(u));
-                Kokkos::atomic_compare_exchange_strong(&heavy_samples(v), ORD_MAX, u);
+                Kokkos::atomic_compare_exchange_strong(&heavy_samples(v), std::numeric_limits<ordinal_t>::max(), u);
             });
             vtx_view_t psuedo_locks("psuedo locks", n);
 
@@ -734,7 +733,7 @@ public:
                     first = v;
                     second = u;
                 }
-                if (u != ORD_MAX && Kokkos::atomic_fetch_add(&psuedo_locks(first), 1) == 0 && Kokkos::atomic_fetch_add(&psuedo_locks(second), 1) == 0)
+                if (u != std::numeric_limits<ordinal_t>::max() && Kokkos::atomic_fetch_add(&psuedo_locks(first), 1) == 0 && Kokkos::atomic_fetch_add(&psuedo_locks(second), 1) == 0)
                 {
                     ordinal_t c_id = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
                     vcmap(u) = c_id;
@@ -745,9 +744,9 @@ public:
             ordinal_t total_unmapped = 0;
             Kokkos::parallel_reduce("handle unmatched", remaining_total, KOKKOS_LAMBDA(ordinal_t i, ordinal_t & sum){
                 ordinal_t u = remaining(i);
-                if (vcmap(u) == ORD_MAX) {
+                if (vcmap(u) == std::numeric_limits<ordinal_t>::max()) {
                     ordinal_t v = hn(u);
-                    if (vcmap(v) != ORD_MAX) {
+                    if (vcmap(v) != std::numeric_limits<ordinal_t>::max()) {
                         vcmap(u) = vcmap(v);
                     }
                     else {
@@ -759,7 +758,7 @@ public:
             vtx_view_t next_perm("next perm", total_unmapped);
             Kokkos::parallel_scan("set unmapped aside", remaining_total, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & update, const bool final){
                 ordinal_t u = remaining(i);
-                if (vcmap(u) == ORD_MAX) {
+                if (vcmap(u) == std::numeric_limits<ordinal_t>::max()) {
                     if (final) {
                         next_perm(update) = u;
                     }
@@ -782,7 +781,7 @@ public:
 
         vtx_view_t m("matches", n);
         Kokkos::parallel_for("init heavy samples", n, KOKKOS_LAMBDA(ordinal_t u){
-            m(u) = ORD_MAX;
+            m(u) = std::numeric_limits<ordinal_t>::max();
             if(hn(hn(u)) == u){
                 m(u) = u;
                 if(hn(u) < u){
@@ -792,12 +791,12 @@ public:
         });
         Kokkos::parallel_for("fill heavy samples", n, KOKKOS_LAMBDA(ordinal_t u){
             ordinal_t v = hn(u);
-            if (m(v) == ORD_MAX) {
-                Kokkos::atomic_compare_exchange_strong(&m(v), ORD_MAX, v);
+            if (m(v) == std::numeric_limits<ordinal_t>::max()) {
+                Kokkos::atomic_compare_exchange_strong(&m(v), std::numeric_limits<ordinal_t>::max(), v);
             }
         });
         Kokkos::parallel_for("fill heavy samples", n, KOKKOS_LAMBDA(ordinal_t u){
-            if (m(u) == ORD_MAX) {
+            if (m(u) == std::numeric_limits<ordinal_t>::max()) {
                 ordinal_t v = hn(u);
                 m(u) = m(v);
             }
@@ -851,7 +850,7 @@ public:
         vtx_view_t vcmap("vcmap", n);
 
         Kokkos::parallel_for("initialize vcmap", n, KOKKOS_LAMBDA(ordinal_t i) {
-            vcmap(i) = ORD_MAX;
+            vcmap(i) = std::numeric_limits<ordinal_t>::max();
         });
 
         pool_t rand_pool(std::time(nullptr));
@@ -865,7 +864,6 @@ public:
         });
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Permute, timer.seconds());
         timer.reset();
-
 
         // TODO: should use a boolean to clearly indicated if the graph has non-uniform edge weights
         if (coarsening_level == 1) {
@@ -954,7 +952,7 @@ public:
         vtx_view_t vcmap("vcmap", n);
 
         Kokkos::parallel_for("initialize vcmap", n, KOKKOS_LAMBDA(ordinal_t i) {
-            vcmap(i) = ORD_MAX;
+            vcmap(i) = std::numeric_limits<ordinal_t>::max();
         });
 
         pool_t rand_pool(std::time(nullptr));
@@ -970,7 +968,7 @@ public:
         timer.reset();
 
         Kokkos::parallel_for("Heaviest HN", n, KOKKOS_LAMBDA(ordinal_t i) {
-            ordinal_t hn_i = ORD_MAX;
+            ordinal_t hn_i = std::numeric_limits<ordinal_t>::max();
             ordinal_t order_max = 0;
             scalar_t max_ewt = 0;
 
@@ -1013,7 +1011,7 @@ public:
                     hn_i = v;
                 }
             }
-            if (hn_i == ORD_MAX) {
+            if (hn_i == std::numeric_limits<ordinal_t>::max()) {
                 ordinal_t rand = reverse_map(i);
                 for (ordinal_t j = rand + 1; j < n; j++) {
                     ordinal_t v = vperm(j);
@@ -1022,7 +1020,7 @@ public:
                         break;
                     }
                 }
-                if (hn_i == ORD_MAX) {
+                if (hn_i == std::numeric_limits<ordinal_t>::max()) {
                     for (ordinal_t j = 0; j < rand; j++) {
                         ordinal_t v = vperm(j);
                         if (part(i) == part(v)) {
@@ -1032,7 +1030,7 @@ public:
                     }
                 }
             }
-            if (hn_i == ORD_MAX) {
+            if (hn_i == std::numeric_limits<ordinal_t>::max()) {
                 hn_i = i;
             }
             hn(i) = hn_i;
@@ -1069,7 +1067,7 @@ public:
         ordinal_t totalInf = 0;
 
         Kokkos::parallel_reduce(target.extent(0), KOKKOS_LAMBDA(ordinal_t i, ordinal_t & thread_sum) {
-            if (target(i) == ORD_MAX) {
+            if (target(i) == std::numeric_limits<ordinal_t>::max()) {
                 thread_sum++;
             }
         }, totalInf);
@@ -1148,7 +1146,7 @@ public:
         vtx_view_t vcmap("vcmap", n);
 
         Kokkos::parallel_for("initialize vcmap", n, KOKKOS_LAMBDA(ordinal_t i) {
-            vcmap(i) = ORD_MAX;
+            vcmap(i) = std::numeric_limits<ordinal_t>::max();
         });
 
         Kokkos::View<uint64_t*> randoms("randoms", n);
@@ -1166,7 +1164,7 @@ public:
         timer.reset();
         vtx_view_t match("match", n);
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(ordinal_t i){
-            match(i) = ORD_MAX;
+            match(i) = std::numeric_limits<ordinal_t>::max();
         });
 
         ordinal_t perm_length = n;
@@ -1185,8 +1183,8 @@ public:
             //maybe count these then create next_perm to save memory?
             Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(ordinal_t i){
                 ordinal_t u = vperm(i);
-                if (vcmap(u) == ORD_MAX) {
-                    ordinal_t h = ORD_MAX;
+                if (vcmap(u) == std::numeric_limits<ordinal_t>::max()) {
+                    ordinal_t h = std::numeric_limits<ordinal_t>::max();
 
                     scalar_t max_ewt = 0;
                     uint64_t max_rand = 0;
@@ -1194,7 +1192,7 @@ public:
                     for (edge_offset_t j = g.graph.row_map(u); j < g.graph.row_map(u + 1); j++) {
                         ordinal_t v = g.graph.entries(j);
                         //v must be unmatched and in same partition to be considered
-                        if (vcmap(v) == ORD_MAX && part(v) == part(u)) {
+                        if (vcmap(v) == std::numeric_limits<ordinal_t>::max() && part(v) == part(u)) {
                             bool swap = false;
                             uint64_t rand = generator.urand64();
                             scalar_t wgt = g.values(j);
@@ -1217,11 +1215,11 @@ public:
                     }
                     rand_pool.free_state(generator);
 
-                    if (h != ORD_MAX) {
+                    if (h != std::numeric_limits<ordinal_t>::max()) {
                         ordinal_t add_next = Kokkos::atomic_fetch_add(&next_length(), 1);
                         next_perm(add_next) = u;
                         hn(u) = h;
-                        match(u) = ORD_MAX;
+                        match(u) = std::numeric_limits<ordinal_t>::max();
                     }
                 }
             });
@@ -1237,14 +1235,14 @@ public:
                     int condition = reverse_map(u) < reverse_map(v);
                     //need to enforce an ordering condition to allow hard-stall conditions to be broken
                     if (condition ^ swap) {
-                        if (Kokkos::atomic_compare_exchange_strong(&match(u), ORD_MAX, v)) {
-                            if (Kokkos::atomic_compare_exchange_strong(&match(v), ORD_MAX, u)) {
+                        if (Kokkos::atomic_compare_exchange_strong(&match(u), std::numeric_limits<ordinal_t>::max(), v)) {
+                            if (Kokkos::atomic_compare_exchange_strong(&match(v), std::numeric_limits<ordinal_t>::max(), u)) {
                                 ordinal_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
                                 vcmap(u) = cv;
                                 vcmap(v) = cv;
                             }
                             else {
-                                match(u) = ORD_MAX;
+                                match(u) = std::numeric_limits<ordinal_t>::max();
                             }
                         }
                     }
@@ -1461,7 +1459,7 @@ public:
 
         //create singleton aggregates of remaining unmatched vertices
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(ordinal_t i){
-            if (vcmap(i) == ORD_MAX) {
+            if (vcmap(i) == std::numeric_limits<ordinal_t>::max()) {
                 vcmap(i) = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
             }
         });
@@ -1506,7 +1504,7 @@ public:
         vtx_view_t vcmap("vcmap", n);
 
         Kokkos::parallel_for("initialize vcmap", n, KOKKOS_LAMBDA(ordinal_t i) {
-            vcmap(i) = ORD_MAX;
+            vcmap(i) = std::numeric_limits<ordinal_t>::max();
         });
 
         Kokkos::View<uint64_t*> randoms("randoms", n);
@@ -1553,7 +1551,7 @@ public:
         timer.reset();
         vtx_view_t match("match", n);
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(ordinal_t i){
-            match(i) = ORD_MAX;
+            match(i) = std::numeric_limits<ordinal_t>::max();
         });
 
         ordinal_t perm_length = n;
@@ -1574,14 +1572,14 @@ public:
                 int condition = reverse_map(u) < reverse_map(v);
                 //need to enforce an ordering condition to allow hard-stall conditions to be broken
                 if (condition ^ swap) {
-                    if (Kokkos::atomic_compare_exchange_strong(&match(u), ORD_MAX, v)) {
-                        if (Kokkos::atomic_compare_exchange_strong(&match(v), ORD_MAX, u)) {
+                    if (Kokkos::atomic_compare_exchange_strong(&match(u), std::numeric_limits<ordinal_t>::max(), v)) {
+                        if (Kokkos::atomic_compare_exchange_strong(&match(v), std::numeric_limits<ordinal_t>::max(), u)) {
                             ordinal_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
                             vcmap(u) = cv;
                             vcmap(v) = cv;
                         }
                         else {
-                            match(u) = ORD_MAX;
+                            match(u) = std::numeric_limits<ordinal_t>::max();
                         }
                     }
                 }
@@ -1592,8 +1590,8 @@ public:
             //maybe count these then create next_perm to save memory?
             Kokkos::parallel_for(perm_length, KOKKOS_LAMBDA(ordinal_t i){
                 ordinal_t u = vperm(i);
-                if (vcmap(u) == ORD_MAX) {
-                    ordinal_t h = ORD_MAX;
+                if (vcmap(u) == std::numeric_limits<ordinal_t>::max()) {
+                    ordinal_t h = std::numeric_limits<ordinal_t>::max();
 
                     if (coarsening_level == 1) {
                         ordinal_t max_ewt = 0;
@@ -1602,7 +1600,7 @@ public:
                         for (edge_offset_t j = g.graph.row_map(u); j < g.graph.row_map(u + 1); j++) {
                             ordinal_t v = g.graph.entries(j);
                             //v must be unmatched to be considered
-                            if (vcmap(v) == ORD_MAX) {
+                            if (vcmap(v) == std::numeric_limits<ordinal_t>::max()) {
                                 //using <= so that zero weight edges may still be chosen
                                 if (max_ewt <= reverse_map(v)) {
                                     max_ewt = reverse_map(v);
@@ -1616,7 +1614,7 @@ public:
                         for (edge_offset_t j = g.graph.row_map(u); j < g.graph.row_map(u + 1); j++) {
                             ordinal_t v = g.graph.entries(j);
                             //v must be unmatched to be considered
-                            if (vcmap(v) == ORD_MAX) {
+                            if (vcmap(v) == std::numeric_limits<ordinal_t>::max()) {
                                 //using <= so that zero weight edges may still be chosen
                                 if (max_ewt <= g.values(j)) {
                                     max_ewt = g.values(j);
@@ -1626,7 +1624,7 @@ public:
                         }
                     }
 
-                    if (h != ORD_MAX) {
+                    if (h != std::numeric_limits<ordinal_t>::max()) {
                         ordinal_t add_next = Kokkos::atomic_fetch_add(&next_length(), 1);
                         next_perm(add_next) = u;
                         hn(u) = h;
@@ -1809,7 +1807,7 @@ public:
 
         //create singleton aggregates of remaining unmatched vertices
         Kokkos::parallel_for(n, KOKKOS_LAMBDA(ordinal_t i){
-            if (vcmap(i) == ORD_MAX) {
+            if (vcmap(i) == std::numeric_limits<ordinal_t>::max()) {
                 vcmap(i) = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
             }
         });

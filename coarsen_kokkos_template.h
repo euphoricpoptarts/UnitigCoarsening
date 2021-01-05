@@ -349,7 +349,6 @@ struct functorDedupeAfterSort
     wgt_view_t wgts;
     wgt_view_t wgtsOut;
     edge_view_t dedupe_edge_count;
-    const ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
 
     functorDedupeAfterSort(edge_view_t row_map,
         vtx_view_t entries,
@@ -390,7 +389,7 @@ struct functorDedupeAfterSort
         void operator()(const ordinal_t& u, edge_offset_t& thread_sum) const
     {
         ordinal_t offset = row_map(u);
-        ordinal_t last = ORD_MAX;
+        ordinal_t last = std::numeric_limits<ordinal_t>::max();
         for (edge_offset_t i = row_map(u); i < row_map(u + 1); i++) {
             if (last != entries(i)) {
                 entries(offset) = entries(i);
