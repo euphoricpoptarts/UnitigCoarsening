@@ -246,7 +246,7 @@ void fm_create_ds_host(const eigen_mirror_t& partition, const host_matrix_t& g, 
         }
         gains(i) = gain;
         sgp_eid_t bucket = gain + maxE;
-        vtx_view_t insert_into_bucket = bucketsA;
+        vtx_mirror_t insert_into_bucket = bucketsA;
         if (partition(i) == 1.0) {
             insert_into_bucket = bucketsB;
         }
