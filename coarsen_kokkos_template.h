@@ -1097,7 +1097,7 @@ void sgp_generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& exp
 
     Kokkos::Timer timer;
     ordinal_t fine_n = fine_g.numRows();
-    std::list<coarse_level_triple> levels = levels_return();
+    std::list<coarse_level_triple>& levels = levels_return;
     levels.clear();
     coarse_level_triple finest;
     finest.coarse_mtx = fine_g;
@@ -1129,11 +1129,10 @@ void sgp_generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& exp
         levels.pop_back();
     }
 
-    return levels;
 }
 
 std::list<coarse_level_triple> get_levels() {
-    return levels_return();
+    return levels_return;
 }
 
 void set_heuristic(Heuristic h) {
