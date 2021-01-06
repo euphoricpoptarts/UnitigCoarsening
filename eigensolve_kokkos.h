@@ -205,6 +205,59 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
     return EXIT_SUCCESS;
 }
 
+void fm_create_ds_host(const eigen_mirror_t& partition_device, const host_matrix_t& g, const vtx_mirror_t& vtx_w, const sgp_eid_t maxE,
+    sgp_eid_t& cutsize, vtx_mirror_t& bucketsA, vtx_mirror_t& bucketsB, vtx_mirror_t& ll_next_out, vtx_mirror_t& ll_prev_out, vtx_mirror_t& free_vtx, Kokkos::View<int64_t*>::HostMirror& gains) {
+
+    sgp_eid_t totalBuckets = 2 * maxE + 1;
+    bucketsA = vtx_mirror_t("buckets part 1", totalBuckets);
+    bucketsB = vtx_mirror_t("buckets part 2", totalBuckets);
+    ll_next = vtx_mirror_t("linked list nexts", n);
+    ll_prev = vtx_mirror_t("linked list prevs", n);
+    gains = Kokkos::View<int64_t*>::HostMirror("gains", n);
+
+    vtx_view_t swap_order("swap order", n);
+    free_vtx = vtx_mirror_t("free vertices", n);
+
+    for (sgp_eid_t i = 0; i < 2 * maxE + 1; i++) {
+        bucketsA(i) = SGP_INFTY;
+        bucketsB(i) = SGP_INFTY;
+    }
+
+    for (sgp_vid_t i = 0; i < n; i++) {
+        ll_next(i) = SGP_INFTY;
+        ll_prev(i) = SGP_INFTY;
+        free_vtx(i) = 1;
+    }
+
+    cutsize = 0;
+    //initialize gains datastructure
+    for (sgp_vid_t i = 0; i < n; i++) {
+        sgp_real_t gain = 0;
+        for (sgp_eid_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
+            sgp_vid_t v = g.graph.entries(j);
+            if (partition(i) != partition(v)) {
+                gain += g.values(j);
+                cutsize += g.values(j);
+            }
+            else {
+                gain -= g.values(j);
+            }
+        }
+        gains(i) = gain;
+        sgp_eid_t bucket = gain + maxE;
+        vtx_view_t insert_into_bucket = bucketsA;
+        if (partition(i) == 1.0) {
+            insert_into_bucket = bucketsB;
+        }
+        sgp_vid_t bucket_first = insert_into_bucket(bucket);
+        if (bucket_first != SGP_INFTY) {
+            ll_prev(bucket_first) = i;
+        }
+        insert_into_bucket(bucket) = i;
+        ll_next(i) = bucket_first;
+    }
+}
+
 void fm_create_ds(const eigenview_t& partition_device, const matrix_type& g_device, const vtx_view_t& vtx_w_device, const sgp_eid_t maxE,
     sgp_eid_t& cutsize, vtx_mirror_t& bucketsA, vtx_mirror_t& bucketsB, vtx_mirror_t& ll_next_out, vtx_mirror_t& ll_prev_out, vtx_mirror_t& free_vtx_out, Kokkos::View<int64_t*>::HostMirror& gains_out) {
 
@@ -1016,7 +1069,7 @@ sgp_eid_t fm_refine(eigenview_t& partition_device, const matrix_type& g_device, 
     sgp_eid_t cutsize = 0;
     vtx_mirror_t bucketsA, bucketsB, ll_next, ll_prev, free_vtx;
     Kokkos::View<int64_t*>::HostMirror gains;
-    fm_create_ds(partition_device, g_device, vtx_w_device, maxE, cutsize, bucketsA, bucketsB, ll_next, ll_prev, free_vtx, gains);
+    fm_create_ds_host(partition, g, vtx_w, maxE, cutsize, bucketsA, bucketsB, ll_next, ll_prev, free_vtx, gains);
 
     int64_t balance = 0;
     for (sgp_vid_t i = 0; i < n; i++) {
