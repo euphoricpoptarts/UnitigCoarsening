@@ -205,10 +205,11 @@ SGPAR_API int sgp_power_iter(eigenview_t& u, const matrix_type& g, int normLap, 
     return EXIT_SUCCESS;
 }
 
-void fm_create_ds_host(const eigen_mirror_t& partition_device, const host_matrix_t& g, const vtx_mirror_t& vtx_w, const sgp_eid_t maxE,
-    sgp_eid_t& cutsize, vtx_mirror_t& bucketsA, vtx_mirror_t& bucketsB, vtx_mirror_t& ll_next_out, vtx_mirror_t& ll_prev_out, vtx_mirror_t& free_vtx, Kokkos::View<int64_t*>::HostMirror& gains) {
+void fm_create_ds_host(const eigen_mirror_t& partition, const host_matrix_t& g, const vtx_mirror_t& vtx_w, const sgp_eid_t maxE,
+    sgp_eid_t& cutsize, vtx_mirror_t& bucketsA, vtx_mirror_t& bucketsB, vtx_mirror_t& ll_next, vtx_mirror_t& ll_prev, vtx_mirror_t& free_vtx, Kokkos::View<int64_t*>::HostMirror& gains) {
 
     sgp_eid_t totalBuckets = 2 * maxE + 1;
+    sgp_vid_t n = g.numRows();
     bucketsA = vtx_mirror_t("buckets part 1", totalBuckets);
     bucketsB = vtx_mirror_t("buckets part 2", totalBuckets);
     ll_next = vtx_mirror_t("linked list nexts", n);
