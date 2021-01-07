@@ -550,10 +550,10 @@ coarse_level_triple sgp_build_skew(const matrix_t g,
     Kokkos::parallel_for("combine deduped fine rows", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
         ordinal_t outer_idx = thread.league_rank();
         ordinal_t u = vcmap.graph.entries(outer_idx);
-        edge_offset_t start = row_map_copy(outer_idx);
-        edge_offset_t end = start + dedupe_count(outer_idx);
+        edge_offset_t start = g.graph.row_map(outer_idx);
+        edge_offset_t end = g.graph.row_map(outer_idx + 1);
         Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t idx) {
-            ordinal_t v = dest_fine(idx);
+            ordinal_t v = mapped_edges(idx);
             bool degree_less = degree_initial(u) < degree_initial(v);
             bool degree_equal = degree_initial(u) == degree_initial(v);
             if (degree_less || (degree_equal && u < v)) {
@@ -562,7 +562,7 @@ coarse_level_triple sgp_build_skew(const matrix_t g,
                 offset += source_bucket_offset(u);
 
                 dest_by_source(offset) = v;
-                wgt_by_source(offset) = wgt_fine(idx);
+                wgt_by_source(offset) = g.values(idx);
             }
         });
     });
