@@ -262,7 +262,6 @@ public:
 
 public:
     int sgp_coarsen_mis_2(matrix_t& interp,
-        ordinal_t* nvertices_coarse_ptr,
         const matrix_t& g,
         ExperimentLoggerUtil& experiment) {
 
@@ -331,7 +330,6 @@ public:
 
         ordinal_t nc = 0;
         Kokkos::deep_copy(nc, nvc);
-        *nvertices_coarse_ptr = nc;
 
         edge_view_t row_map("interpolate row map", n + 1);
 
@@ -484,7 +482,6 @@ public:
     }
 
     int sgp_coarsen_GOSH_v2(matrix_t& interp,
-        ordinal_t* nvertices_coarse_ptr,
         const matrix_t& g,
         ExperimentLoggerUtil& experiment) {
 
@@ -618,7 +615,6 @@ public:
 
         ordinal_t nc = parallel_map_construct_prefilled(vcmap, n, remaining, hn, nvc);
         Kokkos::deep_copy(nc, nvc);
-        *nvertices_coarse_ptr = nc;
 
         edge_view_t row_map("interpolate row map", n + 1);
 
@@ -836,7 +832,6 @@ public:
     }
 
     int sgp_coarsen_HEC(matrix_t& interp,
-        ordinal_t* nvertices_coarse_ptr,
         const matrix_t& g,
         bool uniform_weights,
         ExperimentLoggerUtil& experiment,
@@ -1042,8 +1037,6 @@ public:
         ordinal_t nc = parallel_map_construct(vcmap, n, vperm, hn, reverse_map);
         //experiment.addMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct, timer.seconds());
         timer.reset();
-
-        *nvertices_coarse_ptr = nc;
 
         edge_view_t row_map("interpolate row map", n + 1);
 
@@ -1494,10 +1487,9 @@ public:
     }
 
     int sgp_coarsen_match(matrix_t& interp,
-        ordinal_t* nvertices_coarse_ptr,
         const matrix_t& g,
         bool uniform_weights,
-        ExperimentLoggerUtil& experiment
+        ExperimentLoggerUtil& experiment,
         int match_choice) {
 
         ordinal_t n = g.numRows();
@@ -1820,7 +1812,6 @@ public:
 
         ordinal_t nc = 0;
         Kokkos::deep_copy(nc, nvertices_coarse);
-        *nvertices_coarse_ptr = nc;
 
         edge_view_t row_map("interpolate row map", n + 1);
 

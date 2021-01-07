@@ -489,7 +489,7 @@ coarse_level_triple sgp_build_nonskew(const matrix_t g,
     return next_level;
 }
 
-coarse_level_triple sgp_build_very_skew(const matrix_t g,
+coarse_level_triple sgp_build_skew(const matrix_t g,
     const matrix_t vcmap,
     vtx_view_t mapped_edges,
     vtx_view_t degree_initial,
