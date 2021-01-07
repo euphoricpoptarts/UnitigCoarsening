@@ -984,8 +984,6 @@ coarse_level_triple sgp_coarsen_one_level(const coarse_level_triple level,
     return next_level;
 }
 
-matrix_t 
-
 void generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& experiment, bool uniform_weights = false) {
 
     Kokkos::Timer timer;

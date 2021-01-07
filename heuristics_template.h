@@ -323,7 +323,7 @@ public:
 
         //create singleton aggregates of remaining unaggregated vertices
         //Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
-        //    if (vcmap(i) == SGP_INFTY) {
+        //    if (vcmap(i) == ORD_MAX) {
         //        vcmap(i) = Kokkos::atomic_fetch_add(&nvc(), 1);
         //    }
         //});
@@ -1255,22 +1255,22 @@ public:
         //leaf matches
         if (unmappedRatio > 0.25) {
             Kokkos::parallel_for(n, KOKKOS_LAMBDA(ordinal_t u){
-                if (vcmap(u) != SGP_INFTY) {
+                if (vcmap(u) != ORD_MAX) {
                     for (sgp_real_t k = 0.0; k < 1.1; k++) {
-                        ordinal_t lastLeaf = SGP_INFTY;
+                        ordinal_t lastLeaf = ORD_MAX;
                         for (edge_offset_t j = g.graph.row_map(u); j < g.graph.row_map(u + 1); j++) {
                             ordinal_t v = g.graph.entries(j);
                             //v must be unmatched and in partition k to be considered
-                            if (vcmap(v) == SGP_INFTY && part(v) == k) {
+                            if (vcmap(v) == ORD_MAX && part(v) == k) {
                                 //must be degree 1 to be a leaf
                                 if (g.graph.row_map(v + 1) - g.graph.row_map(v) == 1) {
-                                    if (lastLeaf == SGP_INFTY) {
+                                    if (lastLeaf == ORD_MAX) {
                                         lastLeaf = v;
                                     }
                                     else {
                                         vcmap(lastLeaf) = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
                                         vcmap(v) = vcmap(lastLeaf);
-                                        lastLeaf = SGP_INFTY;
+                                        lastLeaf = ORD_MAX;
                                     }
                                 }
                             }
@@ -1293,7 +1293,7 @@ public:
             //compute digests of adjacency lists
             Kokkos::parallel_for("create digests", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
                 ordinal_t u = thread.league_rank();
-                if (vcmap(u) == SGP_INFTY) {
+                if (vcmap(u) == ORD_MAX) {
                     uint32_t hash = 0;
                     Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g.graph.row_map(u), g.graph.row_map(u + 1)), [=](const edge_offset_t j, uint32_t& thread_sum) {
                         thread_sum += hasher(g.graph.entries(j));
@@ -1328,7 +1328,7 @@ public:
             //get possibly mappable vertices of unmapped
             vtx_view_t mappableVtx("mappable vertices", unmapped);
             Kokkos::parallel_scan("get unmapped", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & update, const bool final){
-                if (vcmap(i) == SGP_INFTY) {
+                if (vcmap(i) == ORD_MAX) {
                     if (final) {
                         mappableVtx(update) = i;
                     }
@@ -1343,22 +1343,22 @@ public:
 
                 Kokkos::parallel_for("reset hn", mappable_count, KOKKOS_LAMBDA(ordinal_t i){
                     ordinal_t u = mappableVtx(i);
-                    hn(u) = SGP_INFTY;
+                    hn(u) = ORD_MAX;
                 });
 
                 //choose relatives for unmapped vertices
                 Kokkos::parallel_for("assign relatives", n, KOKKOS_LAMBDA(ordinal_t i){
-                    if (vcmap(i) != SGP_INFTY) {
+                    if (vcmap(i) != ORD_MAX) {
                         for (sgp_real_t k = 0.0; k < 1.1; k++) {
-                            ordinal_t last_free = SGP_INFTY;
+                            ordinal_t last_free = ORD_MAX;
                             for (edge_offset_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
                                 ordinal_t v = g.graph.entries(j);
-                                if (vcmap(v) == SGP_INFTY && part(v) == k) {
-                                    if (last_free != SGP_INFTY) {
+                                if (vcmap(v) == ORD_MAX && part(v) == k) {
+                                    if (last_free != ORD_MAX) {
                                         //there can be multiple threads updating this but it doesn't matter as long as they have some value
                                         hn(last_free) = v;
                                         hn(v) = last_free;
-                                        last_free = SGP_INFTY;
+                                        last_free = ORD_MAX;
                                     }
                                     else {
                                         last_free = v;
@@ -1374,7 +1374,7 @@ public:
                 Kokkos::parallel_reduce("count noadj", mappable_count, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & thread_sum){
                     ordinal_t u = mappableVtx(i);
                     ordinal_t adj = g.graph.row_map(u + 1) - g.graph.row_map(u);
-                    if (adj == 0 && vcmap(u) == SGP_INFTY) {
+                    if (adj == 0 && vcmap(u) == ORD_MAX) {
                         thread_sum++;
                     }
                 }, noadj);
@@ -1384,10 +1384,10 @@ public:
                 Kokkos::parallel_scan("move noadj", mappable_count, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & update, const bool final){
                     ordinal_t u = mappableVtx(i);
                     ordinal_t adj = g.graph.row_map(u + 1) - g.graph.row_map(u);
-                    if (adj == 0 && vcmap(u) == SGP_INFTY) {
+                    if (adj == 0 && vcmap(u) == ORD_MAX) {
                         if (final) {
                             noadj_v(update) = u;
-                            match(u) = SGP_INFTY;
+                            match(u) = ORD_MAX;
                         }
 
                         update++;
@@ -1405,7 +1405,7 @@ public:
                 mappable_count = 0;
                 Kokkos::parallel_reduce("count mappable", old_mappable, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & thread_sum){
                     ordinal_t u = mappableVtx(i);
-                    if (hn(u) != SGP_INFTY) {
+                    if (hn(u) != ORD_MAX) {
                         thread_sum++;
                     }
                 }, mappable_count);
@@ -1414,10 +1414,10 @@ public:
 
                 Kokkos::parallel_scan("get next mappable", old_mappable, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & update, const bool final){
                     ordinal_t u = mappableVtx(i);
-                    if (hn(u) != SGP_INFTY) {
+                    if (hn(u) != ORD_MAX) {
                         if (final) {
                             nextMappable(update) = u;
-                            match(u) = SGP_INFTY;
+                            match(u) = ORD_MAX;
                         }
 
                         update++;
@@ -1433,14 +1433,14 @@ public:
                         int condition = reverse_map(u) < reverse_map(v);
                         //need to enforce an ordering condition to allow hard-stall conditions to be broken
                         if (condition ^ swap) {
-                            if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
-                                if (u == v || Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
+                            if (Kokkos::atomic_compare_exchange_strong(&match(u), ORD_MAX, v)) {
+                                if (u == v || Kokkos::atomic_compare_exchange_strong(&match(v), ORD_MAX, u)) {
                                     ordinal_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
                                     vcmap(u) = cv;
                                     vcmap(v) = cv;
                                 }
                                 else {
-                                    match(u) = SGP_INFTY;
+                                    match(u) = ORD_MAX;
                                 }
                             }
                         }
@@ -1639,21 +1639,21 @@ public:
             //leaf matches
             if (unmappedRatio > 0.25) {
                 Kokkos::parallel_for(n, KOKKOS_LAMBDA(ordinal_t u){
-                    if (vcmap(u) != SGP_INFTY) {
-                        ordinal_t lastLeaf = SGP_INFTY;
+                    if (vcmap(u) != ORD_MAX) {
+                        ordinal_t lastLeaf = ORD_MAX;
                         for (edge_offset_t j = g.graph.row_map(u); j < g.graph.row_map(u + 1); j++) {
                             ordinal_t v = g.graph.entries(j);
                             //v must be unmatched to be considered
-                            if (vcmap(v) == SGP_INFTY) {
+                            if (vcmap(v) == ORD_MAX) {
                                 //must be degree 1 to be a leaf
                                 if (g.graph.row_map(v + 1) - g.graph.row_map(v) == 1) {
-                                    if (lastLeaf == SGP_INFTY) {
+                                    if (lastLeaf == ORD_MAX) {
                                         lastLeaf = v;
                                     }
                                     else {
                                         vcmap(lastLeaf) = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
                                         vcmap(v) = vcmap(lastLeaf);
-                                        lastLeaf = SGP_INFTY;
+                                        lastLeaf = ORD_MAX;
                                     }
                                 }
                             }
@@ -1675,7 +1675,7 @@ public:
                 //compute digests of adjacency lists
                 Kokkos::parallel_for("create digests", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
                     ordinal_t u = thread.league_rank();
-                    if (vcmap(u) == SGP_INFTY) {
+                    if (vcmap(u) == ORD_MAX) {
                         uint32_t hash = 0;
                         Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g.graph.row_map(u), g.graph.row_map(u + 1)), [=](const edge_offset_t j, uint32_t& thread_sum) {
                             thread_sum += hasher(g.graph.entries(j));
@@ -1710,7 +1710,7 @@ public:
                 //get possibly mappable vertices of unmapped
                 vtx_view_t mappableVtx("mappable vertices", unmapped);
                 Kokkos::parallel_scan("get unmapped", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & update, const bool final){
-                    if (vcmap(i) == SGP_INFTY) {
+                    if (vcmap(i) == ORD_MAX) {
                         if (final) {
                             mappableVtx(update) = i;
                         }
@@ -1725,21 +1725,21 @@ public:
 
                     Kokkos::parallel_for("reset hn", mappable_count, KOKKOS_LAMBDA(ordinal_t i){
                         ordinal_t u = mappableVtx(i);
-                        hn(u) = SGP_INFTY;
+                        hn(u) = ORD_MAX;
                     });
 
                     //choose relatives for unmapped vertices
                     Kokkos::parallel_for("assign relatives", n, KOKKOS_LAMBDA(ordinal_t i){
-                        if (vcmap(i) != SGP_INFTY) {
-                            ordinal_t last_free = SGP_INFTY;
+                        if (vcmap(i) != ORD_MAX) {
+                            ordinal_t last_free = ORD_MAX;
                             for (edge_offset_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
                                 ordinal_t v = g.graph.entries(j);
-                                if (vcmap(v) == SGP_INFTY) {
-                                    if (last_free != SGP_INFTY) {
+                                if (vcmap(v) == ORD_MAX) {
+                                    if (last_free != ORD_MAX) {
                                         //there can be multiple threads updating this but it doesn't matter as long as they have some value
                                         hn(last_free) = v;
                                         hn(v) = last_free;
-                                        last_free = SGP_INFTY;
+                                        last_free = ORD_MAX;
                                     }
                                     else {
                                         last_free = v;
@@ -1754,7 +1754,7 @@ public:
                     mappable_count = 0;
                     Kokkos::parallel_reduce("count mappable", old_mappable, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & thread_sum){
                         ordinal_t u = mappableVtx(i);
-                        if (hn(u) != SGP_INFTY) {
+                        if (hn(u) != ORD_MAX) {
                             thread_sum++;
                         }
                     }, mappable_count);
@@ -1763,7 +1763,7 @@ public:
 
                     Kokkos::parallel_scan("get next mappable", old_mappable, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & update, const bool final){
                         ordinal_t u = mappableVtx(i);
-                        if (hn(u) != SGP_INFTY) {
+                        if (hn(u) != ORD_MAX) {
                             if (final) {
                                 nextMappable(update) = u;
                             }
@@ -1781,14 +1781,14 @@ public:
                             int condition = reverse_map(u) < reverse_map(v);
                             //need to enforce an ordering condition to allow hard-stall conditions to be broken
                             if (condition ^ swap) {
-                                if (Kokkos::atomic_compare_exchange_strong(&match(u), SGP_INFTY, v)) {
-                                    if (Kokkos::atomic_compare_exchange_strong(&match(v), SGP_INFTY, u)) {
+                                if (Kokkos::atomic_compare_exchange_strong(&match(u), ORD_MAX, v)) {
+                                    if (Kokkos::atomic_compare_exchange_strong(&match(v), ORD_MAX, u)) {
                                         ordinal_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
                                         vcmap(u) = cv;
                                         vcmap(v) = cv;
                                     }
                                     else {
-                                        match(u) = SGP_INFTY;
+                                        match(u) = ORD_MAX;
                                     }
                                 }
                             }
