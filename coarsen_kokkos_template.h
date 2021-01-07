@@ -418,11 +418,11 @@ coarse_level_triple sgp_build_nonskew(const matrix_t g,
     timer.reset();
 
     Kokkos::View<edge_offset_t> sbo_subview = Kokkos::subview(source_bucket_offset, nc);
-    edge_offset_t size_sbo = 0;
-    Kokkos::deep_copy(size_sbo, sbo_subview);
+    edge_offset_t size_pre_dedupe = 0;
+    Kokkos::deep_copy(size_pre_dedupe, sbo_subview);
 
-    vtx_view_t dest_by_source("dest_by_source", size_sbo);
-    wgt_view_t wgt_by_source("wgt_by_source", size_sbo);
+    vtx_view_t dest_by_source("dest_by_source", size_pre_dedupe);
+    wgt_view_t wgt_by_source("wgt_by_source", size_pre_dedupe);
 
     Kokkos::parallel_for(policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
         ordinal_t u = vcmap.graph.entries(thread.league_rank());
@@ -538,6 +538,9 @@ coarse_level_triple sgp_build_skew(const matrix_t g,
             source_bucket_offset(i + 1) = update; // only update array on final pass
         }
     });
+    Kokkos::View<edge_offset_t> sbo_subview = Kokkos::subview(source_bucket_offset, nc);
+    edge_offset_t size_pre_dedupe = 0;
+    Kokkos::deep_copy(size_pre_dedupe, sbo_subview);
 
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Prefix, timer.seconds());
     timer.reset();
@@ -545,9 +548,9 @@ coarse_level_triple sgp_build_skew(const matrix_t g,
     Kokkos::parallel_for(nc, KOKKOS_LAMBDA(const ordinal_t i){
         edges_per_source(i) = 0;
     });
-    vtx_view_t dest_by_source("dest by source", gc_nedges);
-    wgt_view_t wgt_by_source("wgt by source", gc_nedges);
-    Kokkos::parallel_for("combine deduped fine rows", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
+    vtx_view_t dest_by_source("dest by source", size_pre_dedupe);
+    wgt_view_t wgt_by_source("wgt by source", size_pre_dedupe);
+    Kokkos::parallel_for("combine fine rows", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
         ordinal_t outer_idx = thread.league_rank();
         ordinal_t u = vcmap.graph.entries(outer_idx);
         edge_offset_t start = g.graph.row_map(outer_idx);
