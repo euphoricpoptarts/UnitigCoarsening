@@ -41,6 +41,7 @@ public:
         vtx_view_t coarse_vtx_wgts;
         matrix_t interp_mtx;
         int level;
+        bool uniform_weights;
     };
 
     enum Heuristic { HECv1, HECv2, HECv3, Match, MtMetis, MIS2, GOSH, GOSHv2 };
@@ -54,290 +55,6 @@ public:
     Heuristic h = HECv1;
     coarsen_heuristics<ordinal_t, edge_offset_t, scalar_t, Device> mapper;
     std::list<coarse_level_triple> levels_return;
-
-//assumes that matrix has one entry-per row, not valid for general matrices
-int compute_transpose(const matrix_t& mtx,
-    matrix_t& transpose) {
-    ordinal_t n = mtx.numRows();
-    ordinal_t nc = mtx.numCols();
-
-    vtx_view_t fine_per_coarse("fine_per_coarse", nc);
-    //transpose interpolation matrix
-    vtx_view_t adj_transpose("adj_transpose", n);
-    wgt_view_t wgt_transpose("weights_transpose", n);
-    edge_view_t row_map_transpose("rows_transpose", nc + 1);
-
-    Kokkos::parallel_for(n, KOKKOS_LAMBDA(ordinal_t i) {
-        ordinal_t v = mtx.graph.entries(i);
-        Kokkos::atomic_increment(&fine_per_coarse(v));
-    });
-    Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const ordinal_t i,
-        ordinal_t & update, const bool final) {
-        // Load old value in case we update it before accumulating
-        const ordinal_t val_i = fine_per_coarse(i);
-        // For inclusive scan,
-        // change the update value before updating array.
-        update += val_i;
-        if (final) {
-            row_map_transpose(i + 1) = update; // only update array on final pass
-        }
-    });
-    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(ordinal_t i) {
-        fine_per_coarse(i) = 0;
-    });
-    Kokkos::parallel_for(n, KOKKOS_LAMBDA(ordinal_t i) {
-        ordinal_t v = mtx.graph.entries(i);
-        edge_offset_t offset = row_map_transpose(v) + Kokkos::atomic_fetch_add(&fine_per_coarse(v), 1);
-        adj_transpose(offset) = i;
-        wgt_transpose(offset) = 1;
-    });
-
-    graph_type transpose_graph(adj_transpose, row_map_transpose);
-    transpose = matrix_t("transpose", n, wgt_transpose, transpose_graph);
-
-    return EXIT_SUCCESS;
-}
-
-/*
-int sgp_build_coarse_graph_spgemm(matrix_t& gc,
-    vtx_view_t& c_vtx_w, const vtx_view_t f_vtx_w,
-    const matrix_t& interp_mtx,
-    const matrix_t& g,
-    const int coarsening_level) {
-
-    ordinal_t n = g.numRows();
-    ordinal_t nc = interp_mtx.numCols();
-
-    matrix_t interp_transpose;// = KokkosKernels::Impl::transpose_matrix(interp_mtx);
-    compute_transpose(interp_mtx, interp_transpose);
-
-    //write_g(g, "dump/g_dump.mtx", true);
-    //write_g(interp_mtx, "dump/interp_dump.mtx", false);
-    //write_g(interp_transpose, "dump/interp_transpose_dump.mtx", false);
-    typedef KokkosKernels::Experimental::KokkosKernelsHandle
-        <edge_offset_t, ordinal_t, scalar_t,
-        typename Device::execution_space, typename Device::memory_space, typename Device::memory_space > KernelHandle;
-
-    KernelHandle kh;
-    kh.set_team_work_size(16);
-    kh.set_dynamic_scheduling(true);
-
-    // Select an spgemm algorithm, limited by configuration at compile-time and set via the handle
-    KokkosSparse::SPGEMMAlgorithm spgemm_algorithm = KokkosSparse::SPGEMM_KK_MEMORY;
-    kh.create_spgemm_handle(spgemm_algorithm);
-
-#ifdef TRANSPOSE_FIRST
-    edge_view_t row_map_p1("rows_partial", nc + 1);
-    KokkosSparse::Experimental::spgemm_symbolic(
-        &kh,
-        nc,
-        n,
-        n,
-        interp_transpose.graph.row_map,
-        interp_transpose.graph.entries,
-        false,
-        g.graph.row_map,
-        g.graph.entries,
-        false,
-        row_map_p1
-        );
-
-    //partial-result matrix
-    vtx_view_t entries_p1("adjacencies_partial", kh.get_spgemm_handle()->get_c_nnz());
-    wgt_view_t values_p1("weights_partial", kh.get_spgemm_handle()->get_c_nnz());
-
-    KokkosSparse::Experimental::spgemm_numeric(
-        &kh,
-        nc,
-        n,
-        n,
-        interp_transpose.graph.row_map,
-        interp_transpose.graph.entries,
-        interp_transpose.values,
-        false,
-        g.graph.row_map,
-        g.graph.entries,
-        g.values,
-        false,
-        row_map_p1,
-        entries_p1,
-        values_p1
-        );
-
-
-    edge_view_t row_map_coarse("rows_coarse", nc + 1);
-    KokkosSparse::Experimental::spgemm_symbolic(
-        &kh,
-        nc,
-        n,
-        nc,
-        row_map_p1,
-        entries_p1,
-        false,
-        interp_mtx.graph.row_map,
-        interp_mtx.graph.entries,
-        false,
-        row_map_coarse
-        );
-    //coarse-graph adjacency matrix
-    vtx_view_t adj_coarse("adjacencies_coarse", kh.get_spgemm_handle()->get_c_nnz());
-    wgt_view_t wgt_coarse("weights_coarse", kh.get_spgemm_handle()->get_c_nnz());
-
-    KokkosSparse::Experimental::spgemm_numeric(
-        &kh,
-        nc,
-        n,
-        nc,
-        row_map_p1,
-        entries_p1,
-        values_p1,
-        false,
-        interp_mtx.graph.row_map,
-        interp_mtx.graph.entries,
-        interp_mtx.values,
-        false,
-        row_map_coarse,
-        adj_coarse,
-        wgt_coarse
-        );
-#else
-    edge_view_t row_map_p1("rows_partial", n + 1);
-    KokkosSparse::Experimental::spgemm_symbolic(
-        &kh,
-        n,
-        n,
-        nc,
-        g.graph.row_map,
-        g.graph.entries,
-        false,
-        interp_mtx.graph.row_map,
-        interp_mtx.graph.entries,
-        false,
-        row_map_p1
-        );
-
-    //partial-result matrix
-    vtx_view_t entries_p1("adjacencies_partial", kh.get_spgemm_handle()->get_c_nnz());
-    wgt_view_t values_p1("weights_partial", kh.get_spgemm_handle()->get_c_nnz());
-
-    KokkosSparse::Experimental::spgemm_numeric(
-        &kh,
-        n,
-        n,
-        nc,
-        g.graph.row_map,
-        g.graph.entries,
-        g.values,
-        false,
-        interp_mtx.graph.row_map,
-        interp_mtx.graph.entries,
-        interp_mtx.values,
-        false,
-        row_map_p1,
-        entries_p1,
-        values_p1
-        );
-
-
-    edge_view_t row_map_coarse("rows_coarse", nc + 1);
-    KokkosSparse::Experimental::spgemm_symbolic(
-        &kh,
-        nc,
-        n,
-        nc,
-        interp_transpose.graph.row_map,
-        interp_transpose.graph.entries,
-        false,
-        row_map_p1,
-        entries_p1,
-        false,
-        row_map_coarse
-        );
-    //coarse-graph adjacency matrix
-    vtx_view_t adj_coarse("adjacencies_coarse", kh.get_spgemm_handle()->get_c_nnz());
-    wgt_view_t wgt_coarse("weights_coarse", kh.get_spgemm_handle()->get_c_nnz());
-
-    KokkosSparse::Experimental::spgemm_numeric(
-        &kh,
-        nc,
-        n,
-        nc,
-        interp_transpose.graph.row_map,
-        interp_transpose.graph.entries,
-        interp_transpose.values,
-        false,
-        row_map_p1,
-        entries_p1,
-        values_p1,
-        false,
-        row_map_coarse,
-        adj_coarse,
-        wgt_coarse
-        );
-#endif
-
-    edge_view_t nonLoops("nonLoop", nc);
-
-    //gonna reuse this to count non-self loop edges
-    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(ordinal_t i) {
-        nonLoops(i) = 0;
-    });
-
-    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(ordinal_t u) {
-        for (edge_offset_t j = row_map_coarse(u); j < row_map_coarse(u + 1); j++) {
-            if (adj_coarse(j) != u) {
-                nonLoops(u)++;
-            }
-        }
-    });
-
-    edge_view_t row_map_nonloop("nonloop row map", nc + 1);
-
-    Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const ordinal_t i,
-        edge_offset_t & update, const bool final) {
-        // Load old value in case we update it before accumulating
-        const edge_offset_t val_i = nonLoops(i);
-        // For inclusive scan,
-        // change the update value before updating array.
-        update += val_i;
-        if (final) {
-            row_map_nonloop(i + 1) = update; // only update array on final pass
-        }
-    });
-
-    //fix this to use a 1D view
-    Kokkos::View<edge_offset_t*> rmn_subview = Kokkos::subview(row_map_nonloop, std::make_pair(nc, nc + 1));
-    Kokkos::View<edge_offset_t*>::HostMirror rmn_subview_m = Kokkos::create_mirror(rmn_subview);
-    Kokkos::deep_copy(rmn_subview_m, rmn_subview);
-
-    vtx_view_t entries_nonloop("nonloop entries", rmn_subview_m(0));
-    wgt_view_t values_nonloop("nonloop values", rmn_subview_m(0));
-
-    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(ordinal_t i) {
-        nonLoops(i) = 0;
-    });
-
-    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(ordinal_t u) {
-        for (edge_offset_t j = row_map_coarse(u); j < row_map_coarse(u + 1); j++) {
-            if (adj_coarse(j) != u) {
-                edge_offset_t offset = row_map_nonloop(u) + nonLoops(u)++;
-                entries_nonloop(offset) = adj_coarse(j);
-                values_nonloop(offset) = wgt_coarse(j);
-            }
-        }
-    });
-
-    kh.destroy_spgemm_handle();
-
-    graph_type gc_graph(entries_nonloop, row_map_nonloop);
-    gc = matrix_t("gc", nc, values_nonloop, gc_graph);
-
-    c_vtx_w = vtx_view_t("coarse vtx weights", interp_mtx.numCols());
-    KokkosSparse::spmv("N", 1.0, interp_transpose, f_vtx_w, 0.0, c_vtx_w);
-
-    return EXIT_SUCCESS;
-}
-*/
 
 template<typename ExecutionSpace>
 struct functorDedupeAfterSort
@@ -772,7 +489,163 @@ coarse_level_triple sgp_build_nonskew(const matrix_t g,
     return next_level;
 }
 
-coarse_level_triple sgp_build_skew(const matrix_t g,
+coarse_level_triple sgp_build_very_skew(const matrix_t g,
+    const matrix_t vcmap,
+    vtx_view_t mapped_edges,
+    vtx_view_t degree_initial,
+    ExperimentLoggerUtil& experiment,
+    Kokkos::Timer& timer) {
+
+    ordinal_t n = g.numRows();
+    ordinal_t nc = vcmap.numCols();
+    edge_offset_t gc_nedges = 0;
+
+    vtx_view_t edges_per_source("edges_per_source", nc);
+
+    //recount with edges only belonging to coarse vertex of smaller degree
+    Kokkos::parallel_for("recount edges", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
+        ordinal_t outer_idx = thread.league_rank();
+        ordinal_t u = vcmap.graph.entries(outer_idx);
+        edge_offset_t start = g.graph.row_map(outer_idx);
+        edge_offset_t end = g.graph.row_map(outer_idx + 1);
+        ordinal_t nonLoopEdgesTotal = 0;
+        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t idx, ordinal_t& local_sum) {
+            ordinal_t v = mapped_edges(idx);
+            bool degree_less = degree_initial(u) < degree_initial(v);
+            bool degree_equal = degree_initial(u) == degree_initial(v);
+            if (u != v && (degree_less || (degree_equal && u < v))) {
+                local_sum++;
+            }
+        }, nonLoopEdgesTotal);
+        Kokkos::single(Kokkos::PerTeam(thread), [=]() {
+            Kokkos::atomic_add(&edges_per_source(u), nonLoopEdgesTotal);
+        });
+    });
+
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Count, timer.seconds());
+    timer.reset();
+
+    edge_view_t source_bucket_offset("source_bucket_offsets", nc + 1);
+
+    Kokkos::parallel_scan(nc, KOKKOS_LAMBDA(const ordinal_t i,
+        edge_offset_t & update, const bool final) {
+        // Load old value in case we update it before accumulating
+        const edge_offset_t val_i = edges_per_source(i);
+        // For inclusive scan,
+        // change the update value before updating array.
+        update += val_i;
+        if (final) {
+            source_bucket_offset(i + 1) = update; // only update array on final pass
+        }
+    });
+
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Prefix, timer.seconds());
+    timer.reset();
+
+    Kokkos::parallel_for(nc, KOKKOS_LAMBDA(const ordinal_t i){
+        edges_per_source(i) = 0;
+    });
+    vtx_view_t dest_by_source("dest by source", gc_nedges);
+    wgt_view_t wgt_by_source("wgt by source", gc_nedges);
+    Kokkos::parallel_for("combine deduped fine rows", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
+        ordinal_t outer_idx = thread.league_rank();
+        ordinal_t u = vcmap.graph.entries(outer_idx);
+        edge_offset_t start = row_map_copy(outer_idx);
+        edge_offset_t end = start + dedupe_count(outer_idx);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t idx) {
+            ordinal_t v = dest_fine(idx);
+            bool degree_less = degree_initial(u) < degree_initial(v);
+            bool degree_equal = degree_initial(u) == degree_initial(v);
+            if (degree_less || (degree_equal && u < v)) {
+                edge_offset_t offset = Kokkos::atomic_fetch_add(&edges_per_source(u), 1);
+
+                offset += source_bucket_offset(u);
+
+                dest_by_source(offset) = v;
+                wgt_by_source(offset) = wgt_fine(idx);
+            }
+        });
+    });
+    gc_nedges = 0;
+
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
+    timer.reset();
+
+    sgp_deduplicate_graph(n, nc,
+        edges_per_source, dest_by_source, wgt_by_source,
+        source_bucket_offset, experiment, gc_nedges);
+
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Dedupe, timer.seconds());
+    timer.reset();
+
+    //reused degree initial as degree final
+    vtx_view_t degree_final = degree_initial;
+    Kokkos::parallel_for("init space needed for each row", nc, KOKKOS_LAMBDA(const ordinal_t i){
+        degree_final(i) = edges_per_source(i);
+    });
+
+    Kokkos::parallel_for("each edge must be counted twice, once for each end", policy(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
+        ordinal_t u = thread.league_rank();
+        edge_offset_t start = source_bucket_offset(u);
+        edge_offset_t end = start + edges_per_source(u);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t idx) {
+            ordinal_t v = dest_by_source(idx);
+            //increment other vertex
+            Kokkos::atomic_fetch_add(&degree_final(v), 1);
+            });
+    });
+
+    edge_view_t source_offsets("source_offsets", nc + 1);
+
+    Kokkos::parallel_scan("allocate location for each row", nc, KOKKOS_LAMBDA(const ordinal_t i,
+        edge_offset_t & update, const bool final) {
+        // Load old value in case we update it before accumulating
+        const edge_offset_t val_i = degree_final(i);
+        // For inclusive scan,
+        // change the update value before updating array.
+        update += val_i;
+        if (final) {
+            source_offsets(i + 1) = update; // only update array on final pass
+            degree_final(i) = 0;
+        }
+    });
+
+    Kokkos::View<edge_offset_t> edge_total_subview = Kokkos::subview(source_offsets, nc);
+    Kokkos::deep_copy(gc_nedges, edge_total_subview);
+
+    vtx_view_t dest_idx("dest_idx", gc_nedges);
+    wgt_view_t wgts("wgts", gc_nedges);
+
+    Kokkos::parallel_for("move edges into correct size matrix", policy(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
+        ordinal_t u = thread.league_rank();
+        edge_offset_t u_origin = source_bucket_offset(u);
+        edge_offset_t u_dest_offset = source_offsets(u);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, edges_per_source(u)), [=](const edge_offset_t u_idx) {
+            ordinal_t v = dest_by_source(u_origin + u_idx);
+            scalar_t wgt = wgt_by_source(u_origin + u_idx);
+            edge_offset_t v_dest_offset = source_offsets(v);
+            edge_offset_t v_dest = v_dest_offset + Kokkos::atomic_fetch_add(&degree_final(v), 1);
+            edge_offset_t u_dest = u_dest_offset + Kokkos::atomic_fetch_add(&degree_final(u), 1);
+
+            dest_idx(u_dest) = v;
+            wgts(u_dest) = wgt;
+            dest_idx(v_dest) = u;
+            wgts(v_dest) = wgt;
+            });
+    });
+
+    graph_type gc_graph(dest_idx, source_offsets);
+    matrix_t gc("gc", nc, wgts, gc_graph);
+
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::WriteGraph, timer.seconds());
+    timer.reset();
+
+    coarse_level_triple next_level;
+    next_level.coarse_mtx = gc;
+    return next_level;
+}
+
+coarse_level_triple sgp_build_very_skew(const matrix_t g,
     const matrix_t vcmap,
     vtx_view_t mapped_edges,
     vtx_view_t degree_initial,
@@ -1052,6 +925,7 @@ coarse_level_triple sgp_build_coarse_graph(const coarse_level_triple level,
     next_level.coarse_vtx_wgts = c_vtx_w;
     next_level.level = level.level + 1;
     next_level.interp_mtx = vcmap;
+    next_level.uniform_weights = false;
     return next_level;
 }
 
@@ -1059,27 +933,45 @@ coarse_level_triple sgp_coarsen_one_level(const coarse_level_triple level,
     ExperimentLoggerUtil& experiment) {
 
     Kokkos::Timer timer;
-    ordinal_t nvertices_coarse;
     matrix_t interpolation_graph;
+    int choice = 0;
+
+    switch (h) {
+        case HECv1:
+            choice = 0;
+            break;
+        case HECv2:
+            choice = 1;
+            break;
+        case HECv3:
+            choice = 2;
+            break;
+        case Match:
+            choice = 0;
+            break;
+        case MtMetis:
+            choice = 1;
+            break;
+    }
 
     switch (h) {
         case HECv1:
         case HECv2:
         case HECv3:
-            mapper.sgp_coarsen_HEC(interpolation_graph, &nvertices_coarse, level.coarse_mtx, level.level, experiment);
+            mapper.sgp_coarsen_HEC(interpolation_graph, level.coarse_mtx, level.uniform_weights, experiment, choice);
             break;
         case Match:
         case MtMetis:
-            mapper.sgp_coarsen_match(interpolation_graph, &nvertices_coarse, level.coarse_mtx, level.level, experiment);
+            mapper.sgp_coarsen_match(interpolation_graph, level.coarse_mtx, level.uniform_weights, experiment, choice);
             break;
         case MIS2:
-            mapper.sgp_coarsen_mis_2(interpolation_graph, &nvertices_coarse, level.coarse_mtx, level.level, experiment);
+            mapper.sgp_coarsen_mis_2(interpolation_graph, level.coarse_mtx, experiment);
             break;
         case GOSHv2:
-            mapper.sgp_coarsen_GOSH_v2(interpolation_graph, &nvertices_coarse, level.coarse_mtx, level.level, experiment);
+            mapper.sgp_coarsen_GOSH_v2(interpolation_graph, level.coarse_mtx, experiment);
             break;
         case GOSH:
-            mapper.sgp_coarsen_GOSH(interpolation_graph, &nvertices_coarse, level.coarse_mtx, level.level, experiment);
+            mapper.sgp_coarsen_GOSH(interpolation_graph, level.coarse_mtx, experiment);
             break;
     }
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
@@ -1092,8 +984,9 @@ coarse_level_triple sgp_coarsen_one_level(const coarse_level_triple level,
     return next_level;
 }
 
-public:
-void sgp_generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& experiment) {
+matrix_t 
+
+void generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& experiment, bool uniform_weights = false) {
 
     Kokkos::Timer timer;
     ordinal_t fine_n = fine_g.numRows();
@@ -1103,6 +996,7 @@ void sgp_generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& exp
     finest.coarse_mtx = fine_g;
     //1-indexed, not zero indexed
     finest.level = 1;
+    finest.uniform_weights = uniform_weights;
     vtx_view_t vtx_weights("vertex weights", fine_n);
     Kokkos::parallel_for(fine_n, KOKKOS_LAMBDA(const ordinal_t i){
         vtx_weights(i) = 1;
@@ -1119,7 +1013,7 @@ void sgp_generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& exp
 
         if(levels.size() > 200) break;
 #ifdef DEBUG
-        sgp_real_t coarsen_ratio = (sgp_real_t) levels.rbegin()->coarse_mtx.numRows() / (sgp_real_t) (++levels.rbegin())->coarse_mtx.numRows();
+        double coarsen_ratio = (double) levels.rbegin()->coarse_mtx.numRows() / (double) (++levels.rbegin())->coarse_mtx.numRows();
         printf("Coarsening ratio: %.8f\n", coarsen_ratio);
 #endif
     }
