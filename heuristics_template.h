@@ -19,6 +19,7 @@ public:
     using gen_t = typename pool_t::generator_type;
     using policy = Kokkos::TeamPolicy<>;
     using member = typename policy::member_type;
+    using hasher_t = Kokkos::pod_hash<ordinal_t>;
 
     template <class in, class out>
     Kokkos::View<out*> sort_order(Kokkos::View<in*> array, in max, in min) {
@@ -352,7 +353,6 @@ public:
     }
 
     int sgp_coarsen_GOSH(matrix_t& interp,
-        ordinal_t* nvertices_coarse_ptr,
         const matrix_t& g,
         ExperimentLoggerUtil& experiment) {
 
@@ -393,7 +393,6 @@ public:
 
         ordinal_t nc = 0;
         Kokkos::deep_copy(nc, nvc);
-        *nvertices_coarse_ptr = nc;
 
         edge_view_t row_map("interpolate row map", n + 1);
 
@@ -915,8 +914,6 @@ public:
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct, timer.seconds());
         timer.reset();
 
-        *nvertices_coarse_ptr = nc;
-
         edge_view_t row_map("interpolate row map", n + 1);
 
         Kokkos::parallel_for(n + 1, KOKKOS_LAMBDA(ordinal_t u){
@@ -1037,6 +1034,8 @@ public:
         ordinal_t nc = parallel_map_construct(vcmap, n, vperm, hn, reverse_map);
         //experiment.addMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct, timer.seconds());
         timer.reset();
+
+        *nvertices_coarse_ptr = nc;
 
         edge_view_t row_map("interpolate row map", n + 1);
 
