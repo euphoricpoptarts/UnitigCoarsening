@@ -41,7 +41,7 @@ public:
         vtx_view_t coarse_vtx_wgts;
         matrix_t interp_mtx;
         int level;
-        bool uniform_weights;
+        bool uniform_weights, valid;
     };
 
     enum Heuristic { HECv1, HECv2, HECv3, Match, MtMetis, MIS2, GOSH, GOSHv2 };
@@ -376,7 +376,7 @@ void sgp_deduplicate_graph(const ordinal_t n, const ordinal_t nc,
 
         functorDedupeAfterSort<Kokkos::DefaultExecutionSpace>
             deduper(source_bucket_offset, dest_by_source, wgt_by_source, wgt_by_source, edges_per_source);
-        Kokkos::parallel_reduce("deduplicated sorted", nc, deduper, gc_nedges);
+        Kokkos::parallel_reduce("deduplicated sorted", n, deduper, gc_nedges);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixDedupe, radix.seconds());
         radix.reset();
     }
@@ -444,7 +444,7 @@ coarse_level_triple sgp_build_nonskew(const matrix_t g,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
     timer.reset();
 
-    sgp_deduplicate_graph(n, nc,
+    sgp_deduplicate_graph(nc, nc,
         edges_per_source, dest_by_source, wgt_by_source,
         source_bucket_offset, experiment, gc_nedges);
 
@@ -574,7 +574,7 @@ coarse_level_triple sgp_build_skew(const matrix_t g,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
     timer.reset();
 
-    sgp_deduplicate_graph(n, nc,
+    sgp_deduplicate_graph(nc, nc,
         edges_per_source, dest_by_source, wgt_by_source,
         source_bucket_offset, experiment, gc_nedges);
 
@@ -734,7 +734,7 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
     Kokkos::resize(mapped_edges, 0);
     
     //deduplicate coarse adjacencies within each fine row
-    sgp_deduplicate_graph(n, n,
+    sgp_deduplicate_graph(n, nc,
         dedupe_count, dest_fine, wgt_fine,
         row_map_copy, experiment, gc_nedges);
 
@@ -787,7 +787,7 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
     timer.reset();
 
-    sgp_deduplicate_graph(n, nc,
+    sgp_deduplicate_graph(nc, nc,
         edges_per_source, dest_by_source, wgt_by_source,
         source_bucket_offset, experiment, gc_nedges);
 
@@ -916,12 +916,13 @@ coarse_level_triple sgp_build_coarse_graph(const coarse_level_triple level,
     edge_offset_t avg_unduped = total_unduped / nc;
 
     coarse_level_triple next_level;
-    //only do if graph is sufficiently irregular
+    //optimized subroutines for sufficiently irregular graphs or high average adjacency rows
     //don't do optimizations if running on CPU (the default host space)
-    if (avg_unduped > 50 && (max_unduped / 10) > avg_unduped && typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
+    if(avg_unduped*2 > nc && typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)){
+        next_level = sgp_build_very_skew(g, vcmap, mapped_edges, degree_initial, experiment, timer);
+    } else if (avg_unduped > 50 && (max_unduped / 10) > avg_unduped && typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
         next_level = sgp_build_skew(g, vcmap, mapped_edges, degree_initial, experiment, timer);
-    }
-    else {
+    } else {
         next_level = sgp_build_nonskew(g, vcmap, mapped_edges, degree_initial, experiment, timer);
     }
 
@@ -929,6 +930,7 @@ coarse_level_triple sgp_build_coarse_graph(const coarse_level_triple level,
     next_level.level = level.level + 1;
     next_level.interp_mtx = vcmap;
     next_level.uniform_weights = false;
+    next_level.valid = true;
     return next_level;
 }
 
@@ -979,6 +981,12 @@ coarse_level_triple sgp_coarsen_one_level(const coarse_level_triple level,
     }
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
 
+    if(interpolation_graph.numCols() < 10){
+        coarse_level_triple next_level;
+        next_level.valid = false;
+        return next_level;
+    }
+
     timer.reset();
     coarse_level_triple next_level = sgp_build_coarse_graph(level, interpolation_graph, experiment);
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Build, timer.seconds());
@@ -1009,6 +1017,8 @@ void generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& experim
         printf("Calculating coarse graph %ld\n", levels.size());
 
         coarse_level_triple next_level = sgp_coarsen_one_level(*levels.rbegin(), experiment);
+
+        if(!next_level.valid) break;
 
         levels.push_back(next_level);
 
