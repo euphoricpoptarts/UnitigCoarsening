@@ -124,7 +124,6 @@ struct functorDedupeAfterSort
     }
 };
 
-/*
 template<typename ExecutionSpace, typename uniform_memory_pool_t>
 struct functorHashmapAccumulator
 {
@@ -184,32 +183,30 @@ struct functorHashmapAccumulator
             ptr_temp = (volatile ordinal_t*)(_memory_pool.allocate_chunk(tid));
         }
         ordinal_t* ptr_memory_pool_chunk = (ordinal_t*)(ptr_temp);
+        
+        // hash function is hash_size-1 (note: hash_size must be a power of 2)
+        ordinal_t hash_func_pow2 = _hash_size - 1;
 
-        KokkosKernels::Experimental::HashmapAccumulator<hash_size_type, hash_key_type, hash_value_type, Device> hash_map;
 
         // Set pointer to hash indices
         ordinal_t* used_hash_indices = (ordinal_t*)(ptr_temp);
         ptr_temp += _hash_size;
 
         // Set pointer to hash begins
-        hash_map.hash_begins = (ordinal_t*)(ptr_temp);
+        ordinal_t* hash_begins = (ordinal_t*)(ptr_temp);
         ptr_temp += _hash_size;
 
         // Set pointer to hash nexts
-        hash_map.hash_nexts = (ordinal_t*)(ptr_temp);
+        ordinal_t* hash_nexts = (ordinal_t*)(ptr_temp);
 
         // Set pointer to hash keys
-        hash_map.keys = (ordinal_t*) entries.data() + row_map(idx);
+        ordinal_t* keys = (ordinal_t*) entries.data() + row_map(idx);
 
         // Set pointer to hash values
-        hash_map.values = (scalar_t*) wgts.data() + row_map(idx);
-
-        // Set up limits in Hashmap_Accumulator
-        hash_map.hash_key_size = _max_hash_entries;
-        hash_map.max_value_size = _max_hash_entries;
-
-        // hash function is hash_size-1 (note: hash_size must be a power of 2)
-        ordinal_t hash_func_pow2 = _hash_size - 1;
+        scalar_t* values = (scalar_t*) wgts.data() + row_map(idx);
+        
+        KokkosKernels::Experimental::HashmapAccumulator<hash_size_type, hash_key_type, hash_value_type, KokkosKernels::Experimental::HashOpType::bitwiseAnd> 
+            hash_map(_hash_size, hash_func_pow2, hash_begins, hash_nexts, keys, values);
 
         // These are updated by Hashmap_Accumulator insert functions.
         ordinal_t used_hash_size = 0;
@@ -224,11 +221,10 @@ struct functorHashmapAccumulator
             // Compute the hash index using & instead of % (modulus is slower).
             ordinal_t hash = key & hash_func_pow2;
 
-            int r = hash_map.sequential_insert_into_hash_mergeAdd_TrackHashes(hash,
+            int r = hash_map.sequential_insert_into_hash_mergeAdd_TrackHashes(
                 key,
                 value,
                 &used_hash_size,
-                hash_map.max_value_size,
                 &used_hash_count,
                 used_hash_indices);
 
@@ -266,14 +262,12 @@ struct functorHashmapAccumulator
     }   // operator()
 
 };  // functorHashmapAccumulator
-*/
 
 void sgp_deduplicate_graph(const ordinal_t n, const ordinal_t nc,
     vtx_view_t edges_per_source, vtx_view_t dest_by_source, wgt_view_t wgt_by_source,
     const edge_view_t source_bucket_offset, ExperimentLoggerUtil& experiment, edge_offset_t& gc_nedges) {
 
     if (use_hashmap) {
-/*
         ordinal_t remaining_count = nc;
         vtx_view_t remaining("remaining vtx", nc);
         Kokkos::parallel_for(nc, KOKKOS_LAMBDA(const ordinal_t i){
@@ -364,12 +358,30 @@ void sgp_deduplicate_graph(const ordinal_t n, const ordinal_t nc,
             }
             //printf("remaining count: %u\n", remaining_count);
         } while (remaining_count > 0);
-        Kokkos::parallel_reduce(nc, KOKKOS_LAMBDA(const ordinal_t i, edge_offset_t & sum){
+        Kokkos::parallel_reduce(n, KOKKOS_LAMBDA(const ordinal_t i, edge_offset_t & sum){
             sum += edges_per_source(i);
         }, gc_nedges);
-*/
     }
     else {
+        /*
+        edge_offset_t total_unduped = 0;
+        ordinal_t max_unduped = 0;
+        Kokkos::parallel_reduce("find max", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& l_max){
+            ordinal_t s = source_bucket_offset(i+1) - source_bucket_offset(i);
+            if (l_max <= s) {
+                l_max = s;
+            }
+        }, Kokkos::Max<ordinal_t, Kokkos::HostSpace>(max_unduped));
+
+        Kokkos::parallel_reduce("find total", n, KOKKOS_LAMBDA(const ordinal_t i, edge_offset_t& sum){
+            ordinal_t s = source_bucket_offset(i+1) - source_bucket_offset(i);
+            sum += s;
+        }, total_unduped);
+
+        edge_offset_t avg_unduped = total_unduped / n;
+
+        printf("avg: %u, max: %u, n: %u, nc: %u\n", avg_unduped, max_unduped, n, nc);
+        */
         Kokkos::Timer radix;
         KokkosKernels::Impl::sort_crs_matrix<Kokkos::DefaultExecutionSpace, edge_view_t, vtx_view_t, wgt_view_t>(source_bucket_offset, dest_by_source, wgt_by_source);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixSort, radix.seconds());
@@ -1044,6 +1056,10 @@ std::list<coarse_level_triple> get_levels() {
 
 void set_heuristic(Heuristic h) {
     this->h = h;
+}
+
+void set_deduplication_method(bool use_hashmap) {
+    this->use_hashmap = use_hashmap;
 }
 
 };
