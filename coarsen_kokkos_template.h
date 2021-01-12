@@ -54,7 +54,8 @@ public:
     // default heuristic is HEC
     Heuristic h = HECv1;
     coarsen_heuristics<ordinal_t, edge_offset_t, scalar_t, Device> mapper;
-    std::list<coarse_level_triple> levels_return;
+    //when the results are fetched, this list is implicitly copied
+    std::list<coarse_level_triple> results;
 
 template<typename ExecutionSpace>
 struct functorDedupeAfterSort
@@ -999,7 +1000,7 @@ void generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& experim
 
     Kokkos::Timer timer;
     ordinal_t fine_n = fine_g.numRows();
-    std::list<coarse_level_triple>& levels = levels_return;
+    std::list<coarse_level_triple>& levels = results;
     levels.clear();
     coarse_level_triple finest;
     finest.coarse_mtx = fine_g;
@@ -1037,7 +1038,8 @@ void generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& experim
 }
 
 std::list<coarse_level_triple> get_levels() {
-    return levels_return;
+    //"results" is copied, therefore the list received by the caller is independent of the internal list of this class
+    return results;
 }
 
 void set_heuristic(Heuristic h) {
