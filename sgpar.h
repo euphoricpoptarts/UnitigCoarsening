@@ -2376,7 +2376,6 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                     SGPAR_POWERITER_TOL);
 
 #ifdef _KOKKOS
-    double start_time = sgp_timer();
 
     using namespace sgpar_kokkos;
     using coarsener_t = coarse_builder<sgp_vid_t, sgp_eid_t, sgp_wgt_t, Device>;
@@ -2408,7 +2407,9 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     Kokkos::deep_copy(values, values_mirror);
     graph_t fine_graph(entries, row_map);
     matrix_t fg("interpolate", fine_n, values, fine_graph);
+    double start_time = sgp_timer();
 
+    //coarsener.set_deduplication_method(true);
     coarsener.generate_coarse_graphs(fg, experiment, true);
     coarse_levels = coarsener.get_levels();
 
@@ -2425,6 +2426,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
             interp_mtxs.push_back(level.interp_mtx);
         }
     }
+
+    printf("coarse_graphs size: %lu, interp_mtxs size: %lu, vtx_weight_list size: %lu\n", coarse_graphs.size(), interp_mtxs.size(), vtx_weight_list.size());
 
     CHECK_SGPAR(sgpar_kokkos::sgp_eigensolve(eigenvec, coarse_graphs, interp_mtxs, vtx_weight_list, rng, config->refine_alg
         , experiment
@@ -2453,6 +2456,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     printf("Coarsening map total time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Map));
     printf("Coarsening heavy find total time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Heavy));
     printf("FM coarsen time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::FMRecoarsen));
+    printf("Dedupe Sort time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::RadixSort));
+    printf("Dedupe dedupe time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::RadixDedupe));
     printf("Total: %3.3lf s, coarsening %3.3lf %3.0lf%% "
         "(sort %3.3lf %3.0lf%%), "
         "refine %3.3lf s (%3.3lf s, %3.0lf%% + %3.3lf, %3.0lf%%)\n",
