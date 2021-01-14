@@ -33,6 +33,7 @@ public:
     using matrix_t = typename KokkosSparse::CrsMatrix<scalar_t, ordinal_t, Device, void, edge_offset_t>;
     using vtx_view_t = typename Kokkos::View<ordinal_t*>;
     using graph_type = typename matrix_t::staticcrsgraph_type;
+    static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
 
     // contains matrix and vertex weights corresponding to current level
     // interp matrix maps previous level to this level
@@ -80,12 +81,12 @@ struct functorDedupeAfterSort
         , dedupe_edge_count(dedupe_edge_count) {}
 
 /*    KOKKOS_INLINE_FUNCTION
-        void operator()(const member& thread, sgp_eid_t& thread_sum) const
+        void operator()(const member& thread, edge_offset_t& thread_sum) const
     {
-        sgp_vid_t u = thread.league_rank();
-        sgp_eid_t start = row_map(u);
-        sgp_eid_t end = row_map(u + 1);
-        Kokkos::parallel_scan(Kokkos::TeamThreadRange(thread, start, end), [=](const sgp_eid_t& i, sgp_eid_t& update, const bool final) {
+        ordinal_t u = thread.league_rank();
+        edge_offset_t start = row_map(u);
+        edge_offset_t end = row_map(u + 1);
+        Kokkos::parallel_scan(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t& i, edge_offset_t& update, const bool final) {
             if (i == start) {
                 update += 1;
             }
@@ -107,7 +108,7 @@ struct functorDedupeAfterSort
         void operator()(const ordinal_t& u, edge_offset_t& thread_sum) const
     {
         ordinal_t offset = row_map(u);
-        ordinal_t last = sgpar::SGP_INFTY;
+        ordinal_t last = ORD_MAX;
         for (edge_offset_t i = row_map(u); i < row_map(u + 1); i++) {
             if (last != entries(i)) {
                 entries(offset) = entries(i);
@@ -218,9 +219,6 @@ struct functorHashmapAccumulator
             ordinal_t key = entries(i);
             scalar_t value = wgts(i);
 
-            // Compute the hash index using & instead of % (modulus is slower).
-            ordinal_t hash = key & hash_func_pow2;
-
             int r = hash_map.sequential_insert_into_hash_mergeAdd_TrackHashes(
                 key,
                 value,
@@ -246,7 +244,7 @@ struct functorHashmapAccumulator
             //entries(insert_at) = hash_map.keys[i];
             //wgts(insert_at) = hash_map.values[i];
 
-            hash_map.hash_begins[dirty_hash] = -1;
+            hash_map.hash_begins[dirty_hash] = ORD_MAX;
             //insert_at++;
         }
 
@@ -333,7 +331,7 @@ void sgp_deduplicate_graph(const ordinal_t n, const ordinal_t nc,
                 }
             }
 
-            uniform_memory_pool_t memory_pool(mem_chunk_count, mem_chunk_size, -1, pool_type);
+            uniform_memory_pool_t memory_pool(mem_chunk_count, mem_chunk_size, ORD_MAX, pool_type);
 
             functorHashmapAccumulator<Kokkos::DefaultExecutionSpace, uniform_memory_pool_t>
                 hashmapAccumulator(source_bucket_offset, dest_by_source, wgt_by_source, edges_per_source, memory_pool, hash_size, max_entries, remaining);
@@ -387,9 +385,12 @@ void sgp_deduplicate_graph(const ordinal_t n, const ordinal_t nc,
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixSort, radix.seconds());
         radix.reset();
 
+        //wgt_view_t wgts_out("wgts after dedupe", wgt_by_source.extent(0));
         functorDedupeAfterSort<Kokkos::DefaultExecutionSpace>
             deduper(source_bucket_offset, dest_by_source, wgt_by_source, wgt_by_source, edges_per_source);
+        //Kokkos::parallel_reduce("deduplicated sorted", policy(n, 32, 1), deduper, gc_nedges);
         Kokkos::parallel_reduce("deduplicated sorted", n, deduper, gc_nedges);
+        //Kokkos::deep_copy(wgt_by_source, wgts_out);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixDedupe, radix.seconds());
         radix.reset();
     }

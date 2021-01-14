@@ -3,8 +3,6 @@
 #include "ExperimentLoggerUtil.cpp"
 #include "definitions_kokkos.h"
 
-static constexpr uint32_t ORD_MAX = sgpar::SGP_INFTY;
-
 template<typename ordinal_t, typename edge_offset_t, typename scalar_t, class Device>
 class coarsen_heuristics {
 public:
@@ -20,6 +18,7 @@ public:
     using policy = Kokkos::TeamPolicy<>;
     using member = typename policy::member_type;
     using hasher_t = Kokkos::pod_hash<ordinal_t>;
+    static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
 
     template <class in, class out>
     Kokkos::View<out*> sort_order(Kokkos::View<in*> array, in max, in min) {
