@@ -407,6 +407,8 @@ public:
 
         graph_type graph(entries, row_map);
         matrix_t interp("interpolate", nc, values, graph);
+
+        return interp;
     }
 
     ordinal_t parallel_map_construct_prefilled(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t vperm, const vtx_view_t hn, Kokkos::View<ordinal_t> nvertices_coarse) {
