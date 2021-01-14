@@ -261,8 +261,7 @@ public:
     }
 
 public:
-    int sgp_coarsen_mis_2(matrix_t& interp,
-        const matrix_t& g,
+    matrix_t sgp_coarsen_mis_2(const matrix_t& g,
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.numRows();
@@ -346,13 +345,12 @@ public:
         });
 
         graph_type graph(entries, row_map);
-        interp = matrix_t("interpolate", nc, values, graph);
+        matrix_t interp("interpolate", nc, values, graph);
 
-        return EXIT_SUCCESS;
+        return interp;
     }
 
-    int sgp_coarsen_GOSH(matrix_t& interp,
-        const matrix_t& g,
+    matrix_t sgp_coarsen_GOSH(const matrix_t& g,
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.numRows();
@@ -408,9 +406,7 @@ public:
         });
 
         graph_type graph(entries, row_map);
-        interp = matrix_t("interpolate", nc, values, graph);
-
-        return EXIT_SUCCESS;
+        matrix_t interp("interpolate", nc, values, graph);
     }
 
     ordinal_t parallel_map_construct_prefilled(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t vperm, const vtx_view_t hn, Kokkos::View<ordinal_t> nvertices_coarse) {
@@ -479,8 +475,7 @@ public:
         return nc;
     }
 
-    int sgp_coarsen_GOSH_v2(matrix_t& interp,
-        const matrix_t& g,
+    matrix_t sgp_coarsen_GOSH_v2(const matrix_t& g,
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.numRows();
@@ -629,9 +624,9 @@ public:
         });
 
         graph_type graph(entries, row_map);
-        interp = matrix_t("interpolate", nc, values, graph);
+        matrix_t interp("interpolate", nc, values, graph);
 
-        return EXIT_SUCCESS;
+        return interp;
     }
 
     ordinal_t parallel_map_construct(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t vperm, const vtx_view_t hn, const vtx_view_t ordering) {
@@ -829,8 +824,7 @@ public:
         return nc;
     }
 
-    int sgp_coarsen_HEC(matrix_t& interp,
-        const matrix_t& g,
+    matrix_t sgp_coarsen_HEC(const matrix_t& g,
         bool uniform_weights,
         ExperimentLoggerUtil& experiment,
         int hec_version) {
@@ -928,9 +922,9 @@ public:
         });
 
         graph_type graph(entries, row_map);
-        interp = matrix_t("interpolate", nc, values, graph);
+        matrix_t interp("interpolate", nc, values, graph);
 
-        return EXIT_SUCCESS;
+        return interp;
     }
 
     int sgp_recoarsen_HEC(matrix_t& interp,
@@ -1484,8 +1478,7 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int sgp_coarsen_match(matrix_t& interp,
-        const matrix_t& g,
+    matrix_t sgp_coarsen_match(const matrix_t& g,
         bool uniform_weights,
         ExperimentLoggerUtil& experiment,
         int match_choice) {
@@ -1826,8 +1819,8 @@ public:
         });
 
         graph_type graph(entries, row_map);
-        interp = matrix_t("interpolate", nc, values, graph);
+        matrix_t interp("interpolate", nc, values, graph);
 
-        return EXIT_SUCCESS;
+        return interp;
     }
 };

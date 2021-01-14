@@ -875,7 +875,7 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
     return next_level;
 }
 
-coarse_level_triple sgp_build_coarse_graph(const coarse_level_triple level,
+coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     const matrix_t vcmap,
     ExperimentLoggerUtil& experiment) {
 
@@ -948,7 +948,8 @@ coarse_level_triple sgp_build_coarse_graph(const coarse_level_triple level,
     return next_level;
 }
 
-coarse_level_triple sgp_coarsen_one_level(const coarse_level_triple level,
+matrix_t generate_coarse_mapping(const matrix_t g,
+    bool uniform_weights,
     ExperimentLoggerUtil& experiment) {
 
     Kokkos::Timer timer;
@@ -977,36 +978,24 @@ coarse_level_triple sgp_coarsen_one_level(const coarse_level_triple level,
         case HECv1:
         case HECv2:
         case HECv3:
-            mapper.sgp_coarsen_HEC(interpolation_graph, level.coarse_mtx, level.uniform_weights, experiment, choice);
+            interpolation_graph = mapper.sgp_coarsen_HEC(g, uniform_weights, experiment, choice);
             break;
         case Match:
         case MtMetis:
-            mapper.sgp_coarsen_match(interpolation_graph, level.coarse_mtx, level.uniform_weights, experiment, choice);
+            interpolation_graph = mapper.sgp_coarsen_match(g, uniform_weights, experiment, choice);
             break;
         case MIS2:
-            mapper.sgp_coarsen_mis_2(interpolation_graph, level.coarse_mtx, experiment);
+            interpolation_graph = mapper.sgp_coarsen_mis_2(g, experiment);
             break;
         case GOSHv2:
-            mapper.sgp_coarsen_GOSH_v2(interpolation_graph, level.coarse_mtx, experiment);
+            interpolation_graph = mapper.sgp_coarsen_GOSH_v2(g, experiment);
             break;
         case GOSH:
-            mapper.sgp_coarsen_GOSH(interpolation_graph, level.coarse_mtx, experiment);
+            interpolation_graph = mapper.sgp_coarsen_GOSH(g, experiment);
             break;
     }
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
-
-    if(interpolation_graph.numCols() < 10){
-        coarse_level_triple next_level;
-        next_level.valid = false;
-        return next_level;
-    }
-
-    timer.reset();
-    coarse_level_triple next_level = sgp_build_coarse_graph(level, interpolation_graph, experiment);
-    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Build, timer.seconds());
-    timer.reset();
-
-    return next_level;
+    return interpolation_graph;
 }
 
 void generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& experiment, bool uniform_weights = false) {
@@ -1030,9 +1019,18 @@ void generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& experim
     while (levels.rbegin()->coarse_mtx.numRows() > SGPAR_COARSENING_VTX_CUTOFF) {
         printf("Calculating coarse graph %ld\n", levels.size());
 
-        coarse_level_triple next_level = sgp_coarsen_one_level(*levels.rbegin(), experiment);
+        coarse_level_triple current_level = *levels.rbegin();
 
-        if(!next_level.valid) break;
+        matrix_t interp_graph = generate_coarse_mapping(current_level.coarse_mtx, current_level.uniform_weights, experiment);
+
+        if (interp_graph.numCols() < 10) {
+            break;
+        }
+
+        timer.reset();
+        coarse_level_triple next_level = build_coarse_graph(current_level, interp_graph, experiment);
+        experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Build, timer.seconds());
+        timer.reset();
 
         levels.push_back(next_level);
 
