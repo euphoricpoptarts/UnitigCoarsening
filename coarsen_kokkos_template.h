@@ -265,7 +265,7 @@ struct functorHashmapAccumulator
 
 };  // functorHashmapAccumulator
 
-void sgp_deduplicate_graph(const ordinal_t n,
+void deduplicate_graph(const ordinal_t n, const bool use_team,
     vtx_view_t edges_per_source, vtx_view_t dest_by_source, wgt_view_t wgt_by_source,
     const edge_view_t source_bucket_offset, ExperimentLoggerUtil& experiment, edge_offset_t& gc_nedges) {
 
@@ -393,16 +393,17 @@ void sgp_deduplicate_graph(const ordinal_t n,
         radix.reset();
 
         // combine adjacent entries having same destination
-        // thread team version
-        wgt_view_t wgts_out("wgts after dedupe", wgt_by_source.extent(0));
-        vtx_view_t dest_out("dest after dedupe", dest_by_source.extent(0));
-        functorDedupeAfterSort<Kokkos::DefaultExecutionSpace>
-            deduper(source_bucket_offset, dest_by_source, dest_out, wgt_by_source, wgts_out, edges_per_source);
-        Kokkos::parallel_reduce("deduplicated sorted", policy(n, Kokkos::AUTO), deduper, gc_nedges);
-        Kokkos::deep_copy(wgt_by_source, wgts_out);
-        Kokkos::deep_copy(dest_by_source, dest_out);
-
-        if(false){
+        if (use_team) {
+            // thread team version
+            wgt_view_t wgts_out("wgts after dedupe", wgt_by_source.extent(0));
+            vtx_view_t dest_out("dest after dedupe", dest_by_source.extent(0));
+            functorDedupeAfterSort<Kokkos::DefaultExecutionSpace>
+                deduper(source_bucket_offset, dest_by_source, dest_out, wgt_by_source, wgts_out, edges_per_source);
+            Kokkos::parallel_reduce("deduplicated sorted", policy(n, Kokkos::AUTO), deduper, gc_nedges);
+            Kokkos::deep_copy(wgt_by_source, wgts_out);
+            Kokkos::deep_copy(dest_by_source, dest_out);
+        } 
+        else {
             // no thread team version
             functorDedupeAfterSort<Kokkos::DefaultExecutionSpace>
                 deduper(source_bucket_offset, dest_by_source, dest_by_source, wgt_by_source, wgt_by_source, edges_per_source);
@@ -476,7 +477,7 @@ coarse_level_triple sgp_build_nonskew(const matrix_t g,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
     timer.reset();
 
-    sgp_deduplicate_graph(nc,
+    deduplicate_graph(nc, false,
         edges_per_source, dest_by_source, wgt_by_source,
         source_bucket_offset, experiment, gc_nedges);
 
@@ -606,7 +607,7 @@ coarse_level_triple sgp_build_skew(const matrix_t g,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
     timer.reset();
 
-    sgp_deduplicate_graph(nc,
+    deduplicate_graph(nc, true,
         edges_per_source, dest_by_source, wgt_by_source,
         source_bucket_offset, experiment, gc_nedges);
 
@@ -766,7 +767,7 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
     Kokkos::resize(mapped_edges, 0);
     
     //deduplicate coarse adjacencies within each fine row
-    sgp_deduplicate_graph(n,
+    deduplicate_graph(n, true
         dedupe_count, dest_fine, wgt_fine,
         row_map_copy, experiment, gc_nedges);
 
@@ -819,7 +820,7 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
     timer.reset();
 
-    sgp_deduplicate_graph(nc,
+    deduplicate_graph(nc, true,
         edges_per_source, dest_by_source, wgt_by_source,
         source_bucket_offset, experiment, gc_nedges);
 
