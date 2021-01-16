@@ -64,29 +64,30 @@ struct functorDedupeAfterSort
     typedef ExecutionSpace execution_space;
 
     edge_view_t row_map;
-    vtx_view_t entries;
-    wgt_view_t wgts;
-    wgt_view_t wgtsOut;
-    edge_view_t dedupe_edge_count;
+    vtx_view_t entries, entriesOut;
+    wgt_view_t wgts, wgtsOut;
+    vtx_view_t dedupe_edge_count;
 
     functorDedupeAfterSort(edge_view_t row_map,
         vtx_view_t entries,
+        vtx_view_t entriesOut,
         wgt_view_t wgts,
         wgt_view_t wgtsOut,
-        edge_view_t dedupe_edge_count)
+        vtx_view_t dedupe_edge_count)
         : row_map(row_map)
         , entries(entries)
+        , entriesOut(entriesOut)
         , wgts(wgts)
         , wgtsOut(wgtsOut)
         , dedupe_edge_count(dedupe_edge_count) {}
 
-/*    KOKKOS_INLINE_FUNCTION
+    KOKKOS_INLINE_FUNCTION
         void operator()(const member& thread, edge_offset_t& thread_sum) const
     {
         ordinal_t u = thread.league_rank();
         edge_offset_t start = row_map(u);
         edge_offset_t end = row_map(u + 1);
-        Kokkos::parallel_scan(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t& i, edge_offset_t& update, const bool final) {
+        Kokkos::parallel_scan(Kokkos::TeamThreadRange(thread, start, end), [&](const edge_offset_t& i, edge_offset_t& update, const bool final) {
             if (i == start) {
                 update += 1;
             }
@@ -94,16 +95,18 @@ struct functorDedupeAfterSort
                 update += 1;
             }
             if (final) {
-                entries(start + update - 1) = entries(i);
+                entriesOut(start + update - 1) = entries(i);
                 Kokkos::atomic_add(&wgtsOut(start + update - 1), wgts(i));
                 if (i + 1 == end) {
-                    dedupe_edge_count(u) == update;
+                    dedupe_edge_count(u) = update;
                 }
             }
-            });
-        thread_sum += dedupe_edge_count(u);
+        });
+        Kokkos::single(Kokkos::PerTeam(thread), [&]() {
+            thread_sum += dedupe_edge_count(u);
+        });
     }
-*/
+
     KOKKOS_INLINE_FUNCTION
         void operator()(const ordinal_t& u, edge_offset_t& thread_sum) const
     {
@@ -123,6 +126,7 @@ struct functorDedupeAfterSort
         dedupe_edge_count(u) = offset - row_map(u);
         thread_sum += offset - row_map(u);
     }
+
 };
 
 template<typename ExecutionSpace, typename uniform_memory_pool_t>
@@ -261,21 +265,21 @@ struct functorHashmapAccumulator
 
 };  // functorHashmapAccumulator
 
-void sgp_deduplicate_graph(const ordinal_t n, const ordinal_t nc,
+void sgp_deduplicate_graph(const ordinal_t n,
     vtx_view_t edges_per_source, vtx_view_t dest_by_source, wgt_view_t wgt_by_source,
     const edge_view_t source_bucket_offset, ExperimentLoggerUtil& experiment, edge_offset_t& gc_nedges) {
 
     if (use_hashmap) {
-        ordinal_t remaining_count = nc;
-        vtx_view_t remaining("remaining vtx", nc);
-        Kokkos::parallel_for(nc, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t remaining_count = n;
+        vtx_view_t remaining("remaining vtx", n);
+        Kokkos::parallel_for(n, KOKKOS_LAMBDA(const ordinal_t i){
             remaining(i) = i;
         });
         do {
-            //figure out max size for hashmap
+            //determine size for hashmap
             ordinal_t avg_entries = 0;
-            if (typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space) && static_cast<double>(remaining_count) / static_cast<double>(nc) > 0.01) {
-                Kokkos::parallel_reduce("calc average", remaining_count, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & thread_sum){
+            if (typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space) && static_cast<double>(remaining_count) / static_cast<double>(n) > 0.01) {
+                Kokkos::parallel_reduce("calc average among remaining", remaining_count, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & thread_sum){
                     ordinal_t u = remaining(i);
                     ordinal_t degree = edges_per_source(u);
                     thread_sum += degree;
@@ -285,13 +289,14 @@ void sgp_deduplicate_graph(const ordinal_t n, const ordinal_t nc,
                 if (avg_entries < 50) avg_entries = 50;
             }
             else {
-                Kokkos::parallel_reduce("calc average", remaining_count, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & thread_max){
+                Kokkos::parallel_reduce("calc max", remaining_count, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & thread_max){
                     ordinal_t u = remaining(i);
                     ordinal_t degree = edges_per_source(u);
                     if (degree > thread_max) {
                         thread_max = degree;
                     }
                 }, Kokkos::Max<ordinal_t, Kokkos::HostSpace>(avg_entries));
+                //need precisely one larger than max, don't remember why atm
                 avg_entries++;
             }
 
@@ -320,7 +325,7 @@ void sgp_deduplicate_graph(const ordinal_t n, const ordinal_t nc,
             ordinal_t mem_chunk_count = Kokkos::DefaultExecutionSpace::concurrency();
 
             if (typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
-                //walk back number of mem_chunks if necessary
+                //decrease number of mem_chunks to reduce memory usage if necessary
                 size_t mem_needed = static_cast<size_t>(mem_chunk_count) * static_cast<size_t>(mem_chunk_size) * sizeof(ordinal_t);
                 size_t max_mem_allowed = 536870912;//1073741824;
                 if (mem_needed > max_mem_allowed) {
@@ -380,17 +385,30 @@ void sgp_deduplicate_graph(const ordinal_t n, const ordinal_t nc,
 
         printf("avg: %u, max: %u, n: %u, nc: %u\n", avg_unduped, max_unduped, n, nc);
         */
+
+        // sort the (implicit) crs matrix
         Kokkos::Timer radix;
         KokkosKernels::Impl::sort_crs_matrix<Kokkos::DefaultExecutionSpace, edge_view_t, vtx_view_t, wgt_view_t>(source_bucket_offset, dest_by_source, wgt_by_source);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixSort, radix.seconds());
         radix.reset();
 
-        //wgt_view_t wgts_out("wgts after dedupe", wgt_by_source.extent(0));
+        // combine adjacent entries having same destination
+        // thread team version
+        wgt_view_t wgts_out("wgts after dedupe", wgt_by_source.extent(0));
+        vtx_view_t dest_out("dest after dedupe", dest_by_source.extent(0));
         functorDedupeAfterSort<Kokkos::DefaultExecutionSpace>
-            deduper(source_bucket_offset, dest_by_source, wgt_by_source, wgt_by_source, edges_per_source);
-        //Kokkos::parallel_reduce("deduplicated sorted", policy(n, 32, 1), deduper, gc_nedges);
-        Kokkos::parallel_reduce("deduplicated sorted", n, deduper, gc_nedges);
-        //Kokkos::deep_copy(wgt_by_source, wgts_out);
+            deduper(source_bucket_offset, dest_by_source, dest_out, wgt_by_source, wgts_out, edges_per_source);
+        Kokkos::parallel_reduce("deduplicated sorted", policy(n, Kokkos::AUTO), deduper, gc_nedges);
+        Kokkos::deep_copy(wgt_by_source, wgts_out);
+        Kokkos::deep_copy(dest_by_source, dest_out);
+
+        if(false){
+            // no thread team version
+            functorDedupeAfterSort<Kokkos::DefaultExecutionSpace>
+                deduper(source_bucket_offset, dest_by_source, dest_by_source, wgt_by_source, wgt_by_source, edges_per_source);
+            Kokkos::parallel_reduce("deduplicated sorted", n, deduper, gc_nedges);
+        }
+
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixDedupe, radix.seconds());
         radix.reset();
     }
@@ -458,7 +476,7 @@ coarse_level_triple sgp_build_nonskew(const matrix_t g,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
     timer.reset();
 
-    sgp_deduplicate_graph(nc, nc,
+    sgp_deduplicate_graph(nc,
         edges_per_source, dest_by_source, wgt_by_source,
         source_bucket_offset, experiment, gc_nedges);
 
@@ -588,7 +606,7 @@ coarse_level_triple sgp_build_skew(const matrix_t g,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
     timer.reset();
 
-    sgp_deduplicate_graph(nc, nc,
+    sgp_deduplicate_graph(nc,
         edges_per_source, dest_by_source, wgt_by_source,
         source_bucket_offset, experiment, gc_nedges);
 
@@ -748,7 +766,7 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
     Kokkos::resize(mapped_edges, 0);
     
     //deduplicate coarse adjacencies within each fine row
-    sgp_deduplicate_graph(n, nc,
+    sgp_deduplicate_graph(n,
         dedupe_count, dest_fine, wgt_fine,
         row_map_copy, experiment, gc_nedges);
 
@@ -801,7 +819,7 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
     timer.reset();
 
-    sgp_deduplicate_graph(nc, nc,
+    sgp_deduplicate_graph(nc,
         edges_per_source, dest_by_source, wgt_by_source,
         source_bucket_offset, experiment, gc_nedges);
 
