@@ -20,7 +20,7 @@ public:
     using part_view_t = typename Kokkos::View<int*, Device>;
     using pool_t = Kokkos::Random_XorShift64_Pool<Device>;
     using gen_t = typename pool_t::generator_type;
-    using hasher_t = Kokkos::pod_hash<ordinal_t, Device>;
+    using hasher_t = Kokkos::pod_hash<ordinal_t>;
     static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
 
     template <class in, class out>
