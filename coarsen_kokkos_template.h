@@ -279,7 +279,7 @@ void deduplicate_graph(const ordinal_t n, const bool use_team,
         do {
             //determine size for hashmap
             ordinal_t avg_entries = 0;
-            if (typeid(exec_space::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space) && static_cast<double>(remaining_count) / static_cast<double>(n) > 0.01) {
+            if (typeid(typename exec_space::memory_space) != typeid(typename Kokkos::DefaultHostExecutionSpace::memory_space) && static_cast<double>(remaining_count) / static_cast<double>(n) > 0.01) {
                 Kokkos::parallel_reduce("calc average among remaining", policy_t(0, remaining_count), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & thread_sum){
                     ordinal_t u = remaining(i);
                     ordinal_t degree = edges_per_source(u);
@@ -312,7 +312,7 @@ void deduplicate_graph(const ordinal_t n, const bool use_team,
             // Create Uniform Initialized Memory Pool
             KokkosKernels::Impl::PoolType pool_type = KokkosKernels::Impl::ManyThread2OneChunk;
 
-            if (typeid(exec_space::memory_space) == typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
+            if (typeid(typename exec_space::memory_space) == typeid(typename Kokkos::DefaultHostExecutionSpace::memory_space)) {
                 //	pool_type = KokkosKernels::Impl::OneThread2OneChunk;
             }
 
@@ -325,7 +325,7 @@ void deduplicate_graph(const ordinal_t n, const bool use_team,
             // our number of chunks at 32.
             ordinal_t mem_chunk_count = exec_space::concurrency();
 
-            if (typeid(exec_space::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
+            if (typeid(typename exec_space::memory_space) != typeid(typename Kokkos::DefaultHostExecutionSpace::memory_space)) {
                 //decrease number of mem_chunks to reduce memory usage if necessary
                 size_t mem_needed = static_cast<size_t>(mem_chunk_count) * static_cast<size_t>(mem_chunk_size) * sizeof(ordinal_t);
                 size_t max_mem_allowed = 536870912;//1073741824;
@@ -942,7 +942,7 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
         }
     }, Kokkos::Max<ordinal_t, Kokkos::HostSpace>(max_unduped));
 
-    Kokkos::parallel_reduce("find total", policy_t(-, nc), KOKKOS_LAMBDA(const ordinal_t i, edge_offset_t& sum){
+    Kokkos::parallel_reduce("find total", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i, edge_offset_t& sum){
         sum += degree_initial(i);
     }, total_unduped);
 
