@@ -30,6 +30,7 @@
 template<typename ordinal_t, typename edge_offset_t, typename scalar_t, class Device>
 class coarse_builder {
 public:
+    using exec_space = typename Device::execution_space;
     using matrix_t = typename KokkosSparse::CrsMatrix<scalar_t, ordinal_t, Device, void, edge_offset_t>;
     using vtx_view_t = typename Kokkos::View<ordinal_t*, Device>;
     using wgt_view_t = typename Kokkos::View<scalar_t*, Device>;
@@ -51,9 +52,9 @@ public:
     enum Heuristic { HECv1, HECv2, HECv3, Match, MtMetis, MIS2, GOSH, GOSHv2 };
 
     bool use_hashmap = false;
-    using policy_t = Kokkos::RangePolicy<Device::ExecutionSpace>;
-    using team_policy_t = Kokkos::TeamPolicy<Device::ExecutionSpace>;
-    using member = typename policy::member_type;
+    using policy_t = typename Kokkos::RangePolicy<exec_space>;
+    using team_policy_t = typename Kokkos::TeamPolicy<exec_space>;
+    using member = typename team_policy_t::member_type;
     // default heuristic is HEC
     Heuristic h = HECv1;
     coarsen_heuristics<ordinal_t, edge_offset_t, scalar_t, Device> mapper;
@@ -278,7 +279,7 @@ void deduplicate_graph(const ordinal_t n, const bool use_team,
         do {
             //determine size for hashmap
             ordinal_t avg_entries = 0;
-            if (typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space) && static_cast<double>(remaining_count) / static_cast<double>(n) > 0.01) {
+            if (typeid(exec_space::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space) && static_cast<double>(remaining_count) / static_cast<double>(n) > 0.01) {
                 Kokkos::parallel_reduce("calc average among remaining", policy_t(remaining_count), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & thread_sum){
                     ordinal_t u = remaining(i);
                     ordinal_t degree = edges_per_source(u);
@@ -300,7 +301,7 @@ void deduplicate_graph(const ordinal_t n, const bool use_team,
                 avg_entries++;
             }
 
-            typedef typename KokkosKernels::Impl::UniformMemoryPool<Device::ExecutionSpace, ordinal_t> uniform_memory_pool_t;
+            typedef typename KokkosKernels::Impl::UniformMemoryPool<exec_space, ordinal_t> uniform_memory_pool_t;
             // Set the hash_size as the next power of 2 bigger than hash_size_hint.
             // - hash_size must be a power of two since we use & rather than % (which is slower) for
             // computing the hash value for HashmapAccumulator.
@@ -311,7 +312,7 @@ void deduplicate_graph(const ordinal_t n, const bool use_team,
             // Create Uniform Initialized Memory Pool
             KokkosKernels::Impl::PoolType pool_type = KokkosKernels::Impl::ManyThread2OneChunk;
 
-            if (typeid(Device::ExecutionSpace::memory_space) == typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
+            if (typeid(exec_space::memory_space) == typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
                 //	pool_type = KokkosKernels::Impl::OneThread2OneChunk;
             }
 
@@ -322,9 +323,9 @@ void deduplicate_graph(const ordinal_t n, const bool use_team,
             // Set a cap on # of chunks to 32.  In application something else should be done
             // here differently if we're OpenMP vs. GPU but for this example we can just cap
             // our number of chunks at 32.
-            ordinal_t mem_chunk_count = Device::ExecutionSpace::concurrency();
+            ordinal_t mem_chunk_count = exec_space::concurrency();
 
-            if (typeid(Device::ExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
+            if (typeid(exec_space::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
                 //decrease number of mem_chunks to reduce memory usage if necessary
                 size_t mem_needed = static_cast<size_t>(mem_chunk_count) * static_cast<size_t>(mem_chunk_size) * sizeof(ordinal_t);
                 size_t max_mem_allowed = 536870912;//1073741824;
@@ -338,7 +339,7 @@ void deduplicate_graph(const ordinal_t n, const bool use_team,
 
             uniform_memory_pool_t memory_pool(mem_chunk_count, mem_chunk_size, ORD_MAX, pool_type);
 
-            functorHashmapAccumulator<Device::ExecutionSpace, uniform_memory_pool_t>
+            functorHashmapAccumulator<exec_space, uniform_memory_pool_t>
                 hashmapAccumulator(source_bucket_offset, dest_by_source, wgt_by_source, edges_per_source, memory_pool, hash_size, max_entries, remaining);
 
             ordinal_t old_remaining_count = remaining_count;
@@ -388,7 +389,7 @@ void deduplicate_graph(const ordinal_t n, const bool use_team,
 
         // sort the (implicit) crs matrix
         Kokkos::Timer radix;
-        KokkosKernels::Impl::sort_crs_matrix<Device::ExecutionSpace, edge_view_t, vtx_view_t, wgt_view_t>(source_bucket_offset, dest_by_source, wgt_by_source);
+        KokkosKernels::Impl::sort_crs_matrix<exec_space, edge_view_t, vtx_view_t, wgt_view_t>(source_bucket_offset, dest_by_source, wgt_by_source);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixSort, radix.seconds());
         radix.reset();
 
@@ -765,7 +766,7 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
     Kokkos::resize(mapped_edges, 0);
     
     //deduplicate coarse adjacencies within each fine row
-    deduplicate_graph(n, true
+    deduplicate_graph(n, true,
         dedupe_count, dest_fine, wgt_fine,
         row_map_copy, experiment, gc_nedges);
 
