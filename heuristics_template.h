@@ -1689,11 +1689,11 @@ public:
                 Kokkos::BinSort< Kokkos::View<uint32_t*, Device>, BinOp, Kokkos::DefaultExecutionSpace, ordinal_t >
                     sorter(hashes, bin_op, true);
                 sorter.create_permute_vector();
-                sorter.template sort< Kokkos::View<uint32_t*> >(hashes);
+                sorter.template sort< Kokkos::View<uint32_t*, Device> >(hashes);
                 sorter.template sort< vtx_view_t >(unmappedVtx);
 
                 MatchByHashSorted matchTwinFunctor(vcmap, unmappedVtx, hashes, unmapped, nvertices_coarse);
-                Kokkos::parallel_scan("match twins", unmapped, matchTwinFunctor);
+                Kokkos::parallel_scan("match twins", policy_t(0, unmapped), matchTwinFunctor);
             }
 
             unmapped = countInf(vcmap);
