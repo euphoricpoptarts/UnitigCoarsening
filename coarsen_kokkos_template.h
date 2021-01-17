@@ -273,14 +273,14 @@ void deduplicate_graph(const ordinal_t n, const bool use_team,
     if (use_hashmap) {
         ordinal_t remaining_count = n;
         vtx_view_t remaining("remaining vtx", n);
-        Kokkos::parallel_for(policy_t(n), KOKKOS_LAMBDA(const ordinal_t i){
+        Kokkos::parallel_for(policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i){
             remaining(i) = i;
         });
         do {
             //determine size for hashmap
             ordinal_t avg_entries = 0;
             if (typeid(exec_space::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space) && static_cast<double>(remaining_count) / static_cast<double>(n) > 0.01) {
-                Kokkos::parallel_reduce("calc average among remaining", policy_t(remaining_count), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & thread_sum){
+                Kokkos::parallel_reduce("calc average among remaining", policy_t(0, remaining_count), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & thread_sum){
                     ordinal_t u = remaining(i);
                     ordinal_t degree = edges_per_source(u);
                     thread_sum += degree;
@@ -290,7 +290,7 @@ void deduplicate_graph(const ordinal_t n, const bool use_team,
                 if (avg_entries < 50) avg_entries = 50;
             }
             else {
-                Kokkos::parallel_reduce("calc max", policy_t(remaining_count), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & thread_max){
+                Kokkos::parallel_reduce("calc max", policy_t(0, remaining_count), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & thread_max){
                     ordinal_t u = remaining(i);
                     ordinal_t degree = edges_per_source(u);
                     if (degree > thread_max) {
@@ -343,12 +343,12 @@ void deduplicate_graph(const ordinal_t n, const bool use_team,
                 hashmapAccumulator(source_bucket_offset, dest_by_source, wgt_by_source, edges_per_source, memory_pool, hash_size, max_entries, remaining);
 
             ordinal_t old_remaining_count = remaining_count;
-            Kokkos::parallel_reduce("hashmap time", policy_t(old_remaining_count), hashmapAccumulator, remaining_count);
+            Kokkos::parallel_reduce("hashmap time", policy_t(0, old_remaining_count), hashmapAccumulator, remaining_count);
 
             if (remaining_count > 0) {
                 vtx_view_t new_remaining("new remaining vtx", remaining_count);
 
-                Kokkos::parallel_scan("move remaining vertices", policy_t(old_remaining_count), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & update, const bool final){
+                Kokkos::parallel_scan("move remaining vertices", policy_t(0, old_remaining_count), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & update, const bool final){
                     ordinal_t u = remaining(i);
                     if (edges_per_source(u) >= max_entries) {
                         if (final) {
@@ -362,7 +362,7 @@ void deduplicate_graph(const ordinal_t n, const bool use_team,
             }
             //printf("remaining count: %u\n", remaining_count);
         } while (remaining_count > 0);
-        Kokkos::parallel_reduce(policy_t(n), KOKKOS_LAMBDA(const ordinal_t i, edge_offset_t & sum){
+        Kokkos::parallel_reduce(policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, edge_offset_t & sum){
             sum += edges_per_source(i);
         }, gc_nedges);
     }
@@ -406,7 +406,7 @@ void deduplicate_graph(const ordinal_t n, const bool use_team,
         else {
             // no thread team version
             functorDedupeAfterSort deduper(source_bucket_offset, dest_by_source, dest_by_source, wgt_by_source, wgt_by_source, edges_per_source);
-            Kokkos::parallel_reduce("deduplicated sorted", policy_t(n), deduper, gc_nedges);
+            Kokkos::parallel_reduce("deduplicated sorted", policy_t(0, n), deduper, gc_nedges);
         }
 
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::RadixDedupe, radix.seconds());
@@ -430,7 +430,7 @@ coarse_level_triple sgp_build_nonskew(const matrix_t g,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Count, timer.seconds());
     timer.reset();
 
-    Kokkos::parallel_scan("calc source offsets", policy_t(nc), KOKKOS_LAMBDA(const ordinal_t i,
+    Kokkos::parallel_scan("calc source offsets", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i,
         edge_offset_t & update, const bool final) {
         // Load old value in case we update it before accumulating
         const edge_offset_t val_i = edges_per_source(i);
@@ -442,7 +442,7 @@ coarse_level_triple sgp_build_nonskew(const matrix_t g,
         }
     });
 
-    Kokkos::parallel_for("reset edges per source", policy_t(nc), KOKKOS_LAMBDA(ordinal_t i) {
+    Kokkos::parallel_for("reset edges per source", policy_t(0, nc), KOKKOS_LAMBDA(ordinal_t i) {
         edges_per_source(i) = 0; // will use as counter again
     });
 
@@ -485,7 +485,7 @@ coarse_level_triple sgp_build_nonskew(const matrix_t g,
 
     edge_view_t source_offsets("source_offsets", nc + 1);
 
-    Kokkos::parallel_scan("calc source offsets again", policy_t(nc), KOKKOS_LAMBDA(const ordinal_t i,
+    Kokkos::parallel_scan("calc source offsets again", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i,
         edge_offset_t & update, const bool final) {
         // Load old value in case we update it before accumulating
         const edge_offset_t val_i = edges_per_source(i);
@@ -559,7 +559,7 @@ coarse_level_triple sgp_build_skew(const matrix_t g,
 
     edge_view_t source_bucket_offset("source_bucket_offsets", nc + 1);
 
-    Kokkos::parallel_scan("calc source offsets", policy_t(nc), KOKKOS_LAMBDA(const ordinal_t i,
+    Kokkos::parallel_scan("calc source offsets", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i,
         edge_offset_t & update, const bool final) {
         // Load old value in case we update it before accumulating
         const edge_offset_t val_i = edges_per_source(i);
@@ -577,7 +577,7 @@ coarse_level_triple sgp_build_skew(const matrix_t g,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Prefix, timer.seconds());
     timer.reset();
 
-    Kokkos::parallel_for("reset edges per source", policy_t(nc), KOKKOS_LAMBDA(const ordinal_t i){
+    Kokkos::parallel_for("reset edges per source", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i){
         edges_per_source(i) = 0;
     });
     vtx_view_t dest_by_source("dest by source", size_pre_dedupe);
@@ -615,7 +615,7 @@ coarse_level_triple sgp_build_skew(const matrix_t g,
 
     //reused degree initial as degree final
     vtx_view_t degree_final = degree_initial;
-    Kokkos::parallel_for("init space needed for each row", policy_t(nc), KOKKOS_LAMBDA(const ordinal_t i){
+    Kokkos::parallel_for("init space needed for each row", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i){
         degree_final(i) = edges_per_source(i);
     });
 
@@ -632,7 +632,7 @@ coarse_level_triple sgp_build_skew(const matrix_t g,
 
     edge_view_t source_offsets("source_offsets", nc + 1);
 
-    Kokkos::parallel_scan("allocate location for each row", policy_t(nc), KOKKOS_LAMBDA(const ordinal_t i,
+    Kokkos::parallel_scan("allocate location for each row", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i,
         edge_offset_t & update, const bool final) {
         // Load old value in case we update it before accumulating
         const edge_offset_t val_i = degree_final(i);
@@ -717,7 +717,7 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Count, timer.seconds());
     timer.reset();
 
-    Kokkos::parallel_scan("calc source offsets", policy_t(n), KOKKOS_LAMBDA(const ordinal_t i,
+    Kokkos::parallel_scan("calc source offsets", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i,
         edge_offset_t & update, const bool final) {
         // Load old value in case we update it before accumulating
         const edge_offset_t val_i = dedupe_count(i);
@@ -729,7 +729,7 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
         }
     });
 
-    Kokkos::parallel_for("reset dedupe count", policy_t(n), KOKKOS_LAMBDA(ordinal_t i) {
+    Kokkos::parallel_for("reset dedupe count", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i) {
         dedupe_count(i) = 0; // will use as counter again
     });
 
@@ -773,11 +773,11 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
     edge_view_t source_bucket_offset("source_bucket_offsets", nc + 1);
     vtx_view_t edges_per_source("edges_per_source", nc);
 
-    Kokkos::parallel_for("sum fine row sizes", policy_t(n), KOKKOS_LAMBDA(const ordinal_t i){
+    Kokkos::parallel_for("sum fine row sizes", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t u = vcmap.graph.entries(i);
         Kokkos::atomic_fetch_add(&edges_per_source(u), dedupe_count(i));
     });
-    Kokkos::parallel_scan("calc source offsets", policy_t(nc), KOKKOS_LAMBDA(const ordinal_t i,
+    Kokkos::parallel_scan("calc source offsets", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i,
         edge_offset_t & update, const bool final) {
         // Load old value in case we update it before accumulating
         const edge_offset_t val_i = edges_per_source(i);
@@ -788,7 +788,7 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
             source_bucket_offset(i + 1) = update; // only update array on final pass
         }
     });
-    Kokkos::parallel_for("reset edges per source", policy_t(nc), KOKKOS_LAMBDA(const ordinal_t i){
+    Kokkos::parallel_for("reset edges per source", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i){
         edges_per_source(i) = 0;
     });
     vtx_view_t dest_by_source("dest by source", gc_nedges);
@@ -829,7 +829,7 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
     //reused degree initial as degree final
     vtx_view_t degree_final = degree_initial;
     //use Kokkos::deep_copy here instead?
-    Kokkos::parallel_for("copy edges per source to degree final", policy_t(nc), KOKKOS_LAMBDA(const ordinal_t i){
+    Kokkos::parallel_for("copy edges per source to degree final", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i){
         degree_final(i) = edges_per_source(i);
     });
 
@@ -846,7 +846,7 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
 
     edge_view_t source_offsets("source_offsets", nc + 1);
 
-    Kokkos::parallel_scan("calc source offsets again", policy_t(nc), KOKKOS_LAMBDA(const ordinal_t i,
+    Kokkos::parallel_scan("calc source offsets again", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i,
         edge_offset_t & update, const bool final) {
         // Load old value in case we update it before accumulating
         const edge_offset_t val_i = degree_final(i);
@@ -936,13 +936,13 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     edge_offset_t total_unduped = 0;
     ordinal_t max_unduped = 0;
 
-    Kokkos::parallel_reduce("find max", policy_t(nc), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& l_max){
+    Kokkos::parallel_reduce("find max", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& l_max){
         if (l_max <= degree_initial(i)) {
             l_max = degree_initial(i);
         }
     }, Kokkos::Max<ordinal_t, Kokkos::HostSpace>(max_unduped));
 
-    Kokkos::parallel_reduce("find total", policy_t(nc), KOKKOS_LAMBDA(const ordinal_t i, edge_offset_t& sum){
+    Kokkos::parallel_reduce("find total", policy_t(-, nc), KOKKOS_LAMBDA(const ordinal_t i, edge_offset_t& sum){
         sum += degree_initial(i);
     }, total_unduped);
 
@@ -1030,7 +1030,7 @@ void generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& experim
     finest.level = 1;
     finest.uniform_weights = uniform_weights;
     vtx_view_t vtx_weights("vertex weights", fine_n);
-    Kokkos::parallel_for("generate vertex weights", policy_t(fine_n), KOKKOS_LAMBDA(const ordinal_t i){
+    Kokkos::parallel_for("generate vertex weights", policy_t(0, fine_n), KOKKOS_LAMBDA(const ordinal_t i){
         vtx_weights(i) = 1;
     });
     finest.coarse_vtx_wgts = vtx_weights;
