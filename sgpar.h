@@ -2360,6 +2360,32 @@ SGPAR_API int compute_partition_edit_distance(const sgp_vid_t* part1, const sgp_
     return EXIT_SUCCESS;
 }
 
+template <class mtx_in, class mtx_out>
+mtx_out mtx_copy(mtx_in in) {
+    using in_vtx = typename mtx_in::index_type;
+    using in_edge = typename mtx_in::row_map_type;
+    using in_val = typename mtx_in::values_type;
+    using out_vtx = typename mtx_out::index_type;
+    using out_edge = Kokkos::View<typename mtx_out::non_const_size_type*, typename mtx_out::device_type>;
+    using out_val = typename mtx_out::values_type;
+
+    out_vtx out_adj("out adj", in.nnz());
+    out_val out_wgt("out val", in.nnz());
+    out_edge out_row_map("out row map", in.numRows() + 1);
+    Kokkos::deep_copy(out_adj, in.graph.entries);
+    Kokkos::deep_copy(out_row_map, in.graph.row_map);
+    Kokkos::deep_copy(out_wgt, in.values);
+    mtx_out mtx("mtx copy", in.numRows(), in.numCols(), in.nnz(), out_wgt, out_row_map, out_adj);
+    return mtx;
+}
+
+template <class view_in, class view_out>
+view_out view_copy(view_in in) {
+    view_out out("out view", in.extent(0));
+    Kokkos::deep_copy(out, in);
+    return out;
+}
+
 SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
                                   sgp_eid_t *edge_cut,
                                   config_t * config,
@@ -2388,13 +2414,13 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     
     //create matrix_t
     sgp_vid_t fine_n = g.nvertices;
-    edge_view_t row_map("row map", fine_n + 1);
+    typename coarsener_t::edge_view_t row_map("row map", fine_n + 1);
     edge_mirror_t row_mirror = Kokkos::create_mirror(row_map);
-    vtx_view_t entries("entries", g.source_offsets[fine_n]);
+    typename coarsener_t::vtx_view_t entries("entries", g.source_offsets[fine_n]);
     vtx_mirror_t entries_mirror = Kokkos::create_mirror(entries);
-    wgt_view_t values("values", g.source_offsets[fine_n]);
+    typename coarsener_t::wgt_view_t values("values", g.source_offsets[fine_n]);
     wgt_mirror_t values_mirror = Kokkos::create_mirror(values);
-    vtx_view_t vtx_weights("vtx weights", fine_n);
+    typename coarsener_t::vtx_view_t vtx_weights("vtx weights", fine_n);
     Kokkos::parallel_for(host_policy(0, fine_n + 1), KOKKOS_LAMBDA(sgp_vid_t u) {
         row_mirror(u) = g.source_offsets[u];
     });
@@ -2409,17 +2435,41 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     matrix_t fg("interpolate", fine_n, values, fine_graph);
     double start_time = sgp_timer();
 
-    //coarsener.set_deduplication_method(true);
+#if defined HEC
+    coarsener.set_heuristic(coarsener_t::HECv1);
+#elif defined HEC_V2
+    coarsener.set_heuristic(coarsener_t::HECv2);
+#elif defined HEC_V3
+    coarsener.set_heuristic(coarsener_t::HECv3);
+#elif defined PUREMATCH
+    coarsener.set_heuristic(coarsener_t::Match);
+#elif defined MTMETIS
+    coarsener.set_heuristic(coarsener_t::MtMetis);
+#elif defined MIS
+    coarsener.set_heuristic(coarsener_t::MIS2);
+#elif defined GOSH_V2
+    coarsener.set_heuristic(coarsener_t::GOSH);
+#elif defined GOSH
+    coarsener.set_heuristic(coarsener_t::GOSHv2);
+#endif
+#ifdef HASHMAP
+    coarsener.set_deduplication_method(true);
+#endif
     coarsener.generate_coarse_graphs(fg, experiment, true);
     coarse_levels = coarsener.get_levels();
 
     double fin_coarsening_time = sgp_timer();
     sgp_real_t* eigenvec = (sgp_real_t*)malloc(g.nvertices * sizeof(sgp_real_t));
 
-    std::list<matrix_t> coarse_graphs, interp_mtxs;
+    std::list<matrix_type> coarse_graphs, interp_mtxs;
     std::list<vtx_view_t> vtx_weight_list;
 
-    for(auto level : coarse_levels){
+    for(auto level : coarse_levels){/*
+        coarse_graphs.push_back(mtx_copy<matrix_t, matrix_type>(level.coarse_mtx));
+        vtx_weight_list.push_back(view_copy<typename coarsener_t::vtx_view_t, vtx_view_t>(level.coarse_vtx_wgts));
+        if(level.level > 1){
+            interp_mtxs.push_back(mtx_copy<matrix_t, matrix_type>(level.interp_mtx));
+        }*/
         coarse_graphs.push_back(level.coarse_mtx);
         vtx_weight_list.push_back(level.coarse_vtx_wgts);
         if(level.level > 1){
