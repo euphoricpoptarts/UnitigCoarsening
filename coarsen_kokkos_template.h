@@ -953,9 +953,9 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     coarse_level_triple next_level;
     //optimized subroutines for sufficiently irregular graphs or high average adjacency rows
     //don't do optimizations if running on CPU (the default host space)
-    if(avg_unduped*2 > nc && typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)){
+    if(avg_unduped*2 > nc && typeid(typename exec_space::memory_space) != typeid(typename Kokkos::DefaultHostExecutionSpace::memory_space)){
         next_level = sgp_build_very_skew(g, vcmap, mapped_edges, degree_initial, experiment, timer);
-    } else if (avg_unduped > 50 && (max_unduped / 10) > avg_unduped && typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::DefaultHostExecutionSpace::memory_space)) {
+    } else if (avg_unduped > 50 && (max_unduped / 10) > avg_unduped && typeid(typename exec_space::memory_space) != typeid(typename Kokkos::DefaultHostExecutionSpace::memory_space)) {
         next_level = sgp_build_skew(g, vcmap, mapped_edges, degree_initial, experiment, timer);
     } else {
         next_level = sgp_build_nonskew(g, vcmap, mapped_edges, degree_initial, experiment, timer);
