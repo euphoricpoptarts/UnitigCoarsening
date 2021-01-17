@@ -63,6 +63,8 @@ public:
 
 struct functorDedupeAfterSort
 {
+    //compiler may get confused what the reduction type is without this
+    typedef edge_offset_t value_type;
 
     edge_view_t row_map;
     vtx_view_t entries, entriesOut;
