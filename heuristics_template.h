@@ -647,7 +647,7 @@ public:
         vtx_view_t curr_perm = vperm;
         while (perm_length > 0) {
             vtx_view_t next_perm("next perm", perm_length);
-            Kokkos::View<ordinal_t> next_length("next_length");
+            Kokkos::View<ordinal_t, Device> next_length("next_length");
 
             Kokkos::parallel_for(policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i){
                 ordinal_t u = curr_perm(i);
