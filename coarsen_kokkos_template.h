@@ -37,6 +37,9 @@ public:
     using edge_view_t = typename Kokkos::View<edge_offset_t*, Device>;
     using edge_subview_t = typename Kokkos::View<edge_offset_t, Device>;
     using graph_type = typename matrix_t::staticcrsgraph_type;
+    using policy_t = typename Kokkos::RangePolicy<exec_space>;
+    using team_policy_t = typename Kokkos::TeamPolicy<exec_space>;
+    using member = typename team_policy_t::member_type;
     static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
 
     // contains matrix and vertex weights corresponding to current level
@@ -52,9 +55,6 @@ public:
     enum Heuristic { HECv1, HECv2, HECv3, Match, MtMetis, MIS2, GOSH, GOSHv2 };
 
     bool use_hashmap = false;
-    using policy_t = typename Kokkos::RangePolicy<exec_space>;
-    using team_policy_t = typename Kokkos::TeamPolicy<exec_space>;
-    using member = typename team_policy_t::member_type;
     // default heuristic is HEC
     Heuristic h = HECv1;
     coarsen_heuristics<ordinal_t, edge_offset_t, scalar_t, Device> mapper;
