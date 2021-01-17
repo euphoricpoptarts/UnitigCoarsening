@@ -555,7 +555,7 @@ struct functorHashmapAccumulator
         typedef sgp_wgt_t hash_value_type;
 
         //can't do this row at current hashmap size
-        if(row_map(idx + 1) - row_map(idx) >= _max_hash_entries){
+        if (row_map(idx + 1) - row_map(idx) >= _max_hash_entries) {
             thread_sum++;
             return;
         }
@@ -570,31 +570,29 @@ struct functorHashmapAccumulator
         }
         sgp_vid_t* ptr_memory_pool_chunk = (sgp_vid_t*)(ptr_temp);
 
-        KokkosKernels::Experimental::HashmapAccumulator<hash_size_type, hash_key_type, hash_value_type> hash_map;
+        // hash function is hash_size-1 (note: hash_size must be a power of 2)
+        sgp_vid_t hash_func_pow2 = _hash_size - 1;
+
 
         // Set pointer to hash indices
         sgp_vid_t* used_hash_indices = (sgp_vid_t*)(ptr_temp);
         ptr_temp += _hash_size;
 
         // Set pointer to hash begins
-        hash_map.hash_begins = (sgp_vid_t*)(ptr_temp);
+        sgp_vid_t* hash_begins = (sgp_vid_t*)(ptr_temp);
         ptr_temp += _hash_size;
 
         // Set pointer to hash nexts
-        hash_map.hash_nexts = (sgp_vid_t*)(ptr_temp);
+        sgp_vid_t* hash_nexts = (sgp_vid_t*)(ptr_temp);
 
         // Set pointer to hash keys
-        hash_map.keys = (sgp_vid_t*) entries.data() + row_map(idx);
+        sgp_vid_t* keys = (sgp_vid_t*)entries.data() + row_map(idx);
 
         // Set pointer to hash values
-        hash_map.values = (sgp_wgt_t*) wgts.data() + row_map(idx);
+        sgp_wgt_t* values = (sgp_wgt_t*)wgts.data() + row_map(idx);
 
-        // Set up limits in Hashmap_Accumulator
-        hash_map.hash_key_size = _max_hash_entries;
-        hash_map.max_value_size = _max_hash_entries;
-
-        // hash function is hash_size-1 (note: hash_size must be a power of 2)
-        sgp_vid_t hash_func_pow2 = _hash_size - 1;
+        KokkosKernels::Experimental::HashmapAccumulator<hash_size_type, hash_key_type, hash_value_type, KokkosKernels::Experimental::HashOpType::bitwiseAnd>
+            hash_map(_hash_size, hash_func_pow2, hash_begins, hash_nexts, keys, values);
 
         // These are updated by Hashmap_Accumulator insert functions.
         sgp_vid_t used_hash_size = 0;
@@ -606,14 +604,10 @@ struct functorHashmapAccumulator
             sgp_vid_t key = entries(i);
             sgp_wgt_t value = wgts(i);
 
-            // Compute the hash index using & instead of % (modulus is slower).
-            sgp_vid_t hash = key & hash_func_pow2;
-
-            int r = hash_map.sequential_insert_into_hash_mergeAdd_TrackHashes(hash,
+            int r = hash_map.sequential_insert_into_hash_mergeAdd_TrackHashes(
                 key,
                 value,
                 &used_hash_size,
-                hash_map.max_value_size,
                 &used_hash_count,
                 used_hash_indices);
 
@@ -635,7 +629,7 @@ struct functorHashmapAccumulator
             //entries(insert_at) = hash_map.keys[i];
             //wgts(insert_at) = hash_map.values[i];
 
-            hash_map.hash_begins[dirty_hash] = -1;
+            hash_map.hash_begins[dirty_hash] = ORD_MAX;
             //insert_at++;
         }
 
@@ -647,7 +641,6 @@ struct functorHashmapAccumulator
 
         // Release the UniqueToken
         tokens.release(tid);
-
     }   // operator()
 
 };  // functorHashmapAccumulator
