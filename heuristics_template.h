@@ -413,7 +413,7 @@ public:
         return interp;
     }
 
-    ordinal_t parallel_map_construct_prefilled(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t vperm, const vtx_view_t hn, Kokkos::View<ordinal_t> nvertices_coarse) {
+    ordinal_t parallel_map_construct_prefilled(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t vperm, const vtx_view_t hn, Kokkos::View<ordinal_t, Device> nvertices_coarse) {
 
         vtx_view_t match("match", n);
         Kokkos::parallel_for(policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i){
