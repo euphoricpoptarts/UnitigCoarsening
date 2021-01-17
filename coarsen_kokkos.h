@@ -629,7 +629,7 @@ struct functorHashmapAccumulator
             //entries(insert_at) = hash_map.keys[i];
             //wgts(insert_at) = hash_map.values[i];
 
-            hash_map.hash_begins[dirty_hash] = ORD_MAX;
+            hash_map.hash_begins[dirty_hash] = SGP_INFTY;
             //insert_at++;
         }
 
