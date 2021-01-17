@@ -1073,9 +1073,9 @@ public:
         Kokkos::View<ordinal_t, Device> nvertices_coarse;
         MatchByHashSorted(vtx_view_t vcmap,
             vtx_view_t unmapped,
-            Kokkos::View<uint32_t*> hashes,
+            Kokkos::View<uint32_t*, Device> hashes,
             ordinal_t unmapped_total,
-            Kokkos::View<ordinal_t> nvertices_coarse) :
+            Kokkos::View<ordinal_t, Device> nvertices_coarse) :
             vcmap(vcmap),
             unmapped(unmapped),
             hashes(hashes),
