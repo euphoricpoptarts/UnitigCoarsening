@@ -1,5 +1,5 @@
 #IMPORTANT: Use the cmake flag -DCMAKE_CXX_COMPILER=/path/to/your/nvcc_wrapper
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.18)
 project(sgpar CXX)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
@@ -36,7 +36,7 @@ add_executable(nocoarsen sgpar.cpp)
 
 #possible flags are FM, RADIX, HASHMAP, RECOARSEN, MTMETIS, EXPERIMENT, USE_GNU_PARALLELMODE, _KOKKOS
 #add_compile_definitions(_KOKKOS EXPERIMENT USE_GNU_PARALLELMODE RADIX RECOARSEN)
-target_compile_definitions(hec_spec PUBLIC _KOKKOS EXPERIMENT USE_GNU_PARALLELMODE HEC HASHMAP)
+target_compile_definitions(hec_spec PUBLIC _KOKKOS EXPERIMENT USE_GNU_PARALLELMODE HEC RADIX)
 target_compile_definitions(hec2_spec PUBLIC _KOKKOS EXPERIMENT USE_GNU_PARALLELMODE HEC_V2 RADIX)
 target_compile_definitions(hec3_spec PUBLIC _KOKKOS EXPERIMENT USE_GNU_PARALLELMODE HEC_V3 RADIX)
 target_compile_definitions(hec_spec_spgemm PUBLIC _KOKKOS EXPERIMENT USE_GNU_PARALLELMODE HEC SPGEMM)
