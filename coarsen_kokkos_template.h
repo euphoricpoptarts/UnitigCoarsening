@@ -52,7 +52,7 @@ public:
         bool uniform_weights, valid;
     };
 
-    enum Heuristic { HECv1, HECv2, HECv3, Match, MtMetis, MIS2, GOSH, GOSHv2 };
+    enum Heuristic { HECv1, HECv2, HECv3, Match, MtMetis, MIS2, GOSHv1, GOSHv2 };
 
     bool use_hashmap = false;
     // default heuristic is HEC
@@ -953,7 +953,7 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     coarse_level_triple next_level;
     //optimized subroutines for sufficiently irregular graphs or high average adjacency rows
     //don't do optimizations if running on CPU (the default host space)
-    if(avg_unduped*2 > nc && typeid(typename exec_space::memory_space) != typeid(typename Kokkos::DefaultHostExecutionSpace::memory_space)){
+    if(avg_unduped > (nc/4) && typeid(typename exec_space::memory_space) != typeid(typename Kokkos::DefaultHostExecutionSpace::memory_space)){
         next_level = sgp_build_very_skew(g, vcmap, mapped_edges, degree_initial, experiment, timer);
     } else if (avg_unduped > 50 && (max_unduped / 10) > avg_unduped && typeid(typename exec_space::memory_space) != typeid(typename Kokkos::DefaultHostExecutionSpace::memory_space)) {
         next_level = sgp_build_skew(g, vcmap, mapped_edges, degree_initial, experiment, timer);
@@ -1011,7 +1011,7 @@ matrix_t generate_coarse_mapping(const matrix_t g,
         case GOSHv2:
             interpolation_graph = mapper.sgp_coarsen_GOSH_v2(g, experiment);
             break;
-        case GOSH:
+        case GOSHv1:
             interpolation_graph = mapper.sgp_coarsen_GOSH(g, experiment);
             break;
     }

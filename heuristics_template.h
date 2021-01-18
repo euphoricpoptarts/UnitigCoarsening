@@ -1245,6 +1245,7 @@ public:
         }
 
 #ifdef MTMETIS
+/*
         ordinal_t unmapped = countInf(vcmap);
         double unmappedRatio = static_cast<double>(unmapped) / static_cast<double>(n);
 
@@ -1446,6 +1447,7 @@ public:
                 swap = swap ^ 1;
             } while (mappable_count > 0);
         }
+*/
 #endif
 
         //create singleton aggregates of remaining unmatched vertices

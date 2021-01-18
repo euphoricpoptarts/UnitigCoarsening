@@ -2448,7 +2448,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
 #elif defined MIS
     coarsener.set_heuristic(coarsener_t::MIS2);
 #elif defined GOSH_V2
-    coarsener.set_heuristic(coarsener_t::GOSH);
+    coarsener.set_heuristic(coarsener_t::GOSHv1);
 #elif defined GOSH
     coarsener.set_heuristic(coarsener_t::GOSHv2);
 #endif
