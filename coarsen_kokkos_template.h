@@ -49,7 +49,7 @@ public:
         vtx_view_t coarse_vtx_wgts;
         matrix_t interp_mtx;
         int level;
-        bool uniform_weights, valid;
+        bool uniform_weights;
     };
 
     enum Heuristic { HECv1, HECv2, HECv3, Match, MtMetis, MIS2, GOSHv1, GOSHv2 };
@@ -965,7 +965,6 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     next_level.level = level.level + 1;
     next_level.interp_mtx = vcmap;
     next_level.uniform_weights = false;
-    next_level.valid = true;
     return next_level;
 }
 
@@ -1020,6 +1019,8 @@ matrix_t generate_coarse_mapping(const matrix_t g,
 }
 
 //we can support weighted vertices pretty easily
+//this function can't return the generated list directly because of an NVCC compiler bug
+//caller must use the get_levels() method after calling this function
 void generate_coarse_graphs(const matrix_t fine_g, ExperimentLoggerUtil& experiment, bool uniform_weights = false) {
 
     Kokkos::Timer timer;
