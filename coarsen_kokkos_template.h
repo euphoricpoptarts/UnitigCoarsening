@@ -514,6 +514,8 @@ coarse_level_triple sgp_build_nonskew(const matrix_t g,
             wgts(start_dest + idx) = wgt_by_source(start_origin + idx);
             });
     });
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::WriteGraph, timer.seconds());
+    timer.reset();
 
     graph_type gc_graph(dest_idx, source_offsets);
     matrix_t gc("gc", nc, wgts, gc_graph);
@@ -766,11 +768,16 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
     });
     //"delete" these views
     Kokkos::resize(mapped_edges, 0);
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
+    timer.reset();
     
     //deduplicate coarse adjacencies within each fine row
     deduplicate_graph(n, true,
         dedupe_count, dest_fine, wgt_fine,
         row_map_copy, experiment, gc_nedges);
+
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Dedupe, timer.seconds());
+    timer.reset();
 
     edge_view_t source_bucket_offset("source_bucket_offsets", nc + 1);
     vtx_view_t edges_per_source("edges_per_source", nc);
@@ -779,6 +786,8 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
         ordinal_t u = vcmap.graph.entries(i);
         Kokkos::atomic_fetch_add(&edges_per_source(u), dedupe_count(i));
     });
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Count, timer.seconds());
+    timer.reset();
     Kokkos::parallel_scan("calc source offsets", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i,
         edge_offset_t & update, const bool final) {
         // Load old value in case we update it before accumulating
@@ -790,6 +799,8 @@ coarse_level_triple sgp_build_very_skew(const matrix_t g,
             source_bucket_offset(i + 1) = update; // only update array on final pass
         }
     });
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Prefix, timer.seconds());
+    timer.reset();
     Kokkos::parallel_for("reset edges per source", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i){
         edges_per_source(i) = 0;
     });
