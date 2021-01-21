@@ -2453,7 +2453,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     coarsener.set_heuristic(coarsener_t::GOSHv2);
 #endif
 #ifdef HASHMAP
-    coarsener.set_deduplication_method(true);
+    coarsener.set_deduplication_method(coarsener_t::Hashmap);
 #endif
     coarsener.generate_coarse_graphs(fg, experiment, true);
     coarse_levels = coarsener.get_levels();

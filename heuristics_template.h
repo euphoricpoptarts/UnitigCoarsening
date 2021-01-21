@@ -1,7 +1,14 @@
 #pragma once
-
+#include <limits>
+#include <Kokkos_Core.hpp>
+#include <Kokkos_Atomic.hpp>
+#include <Kokkos_Random.hpp>
+#include <Kokkos_Sort.hpp>
+#include <Kokkos_Functional.hpp>
+#include "KokkosSparse_CrsMatrix.hpp"
+#include "KokkosGraph_Distance2Color.hpp"
+#include "KokkosKernels_SparseUtils.hpp"
 #include "ExperimentLoggerUtil.cpp"
-#include "definitions_kokkos.h"
 
 template<typename ordinal_t, typename edge_offset_t, typename scalar_t, class Device>
 class coarsen_heuristics {
