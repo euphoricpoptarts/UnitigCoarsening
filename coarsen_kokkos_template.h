@@ -76,6 +76,10 @@ coarse_level_triple build_coarse_graph_spgemm(const coarse_level_triple level,
     KokkosSparse::SPGEMMAlgorithm spgemm_algorithm = KokkosSparse::SPGEMM_KK_MEMORY;
     kh.create_spgemm_handle(spgemm_algorithm);
 
+    vtx_view_t adj_coarse;
+    wgt_view_t wgt_coarse;
+    edge_view_t row_map_coarse;
+
     if (b == Spgemm_transpose_first) {
         edge_view_t row_map_p1("rows_partial", nc + 1);
         KokkosSparse::Experimental::spgemm_symbolic(
@@ -115,7 +119,7 @@ coarse_level_triple build_coarse_graph_spgemm(const coarse_level_triple level,
             );
 
 
-        edge_view_t row_map_coarse("rows_coarse", nc + 1);
+        row_map_coarse = edge_view_t("rows_coarse", nc + 1);
         KokkosSparse::Experimental::spgemm_symbolic(
             &kh,
             nc,
@@ -130,8 +134,8 @@ coarse_level_triple build_coarse_graph_spgemm(const coarse_level_triple level,
             row_map_coarse
             );
         //coarse-graph adjacency matrix
-        vtx_view_t adj_coarse("adjacencies_coarse", kh.get_spgemm_handle()->get_c_nnz());
-        wgt_view_t wgt_coarse("weights_coarse", kh.get_spgemm_handle()->get_c_nnz());
+        adj_coarse = vtx_view_t("adjacencies_coarse", kh.get_spgemm_handle()->get_c_nnz());
+        wgt_coarse = wgt_view_t("weights_coarse", kh.get_spgemm_handle()->get_c_nnz());
 
         KokkosSparse::Experimental::spgemm_numeric(
             &kh,
@@ -190,7 +194,7 @@ coarse_level_triple build_coarse_graph_spgemm(const coarse_level_triple level,
             );
 
 
-        edge_view_t row_map_coarse("rows_coarse", nc + 1);
+        row_map_coarse = edge_view_t("rows_coarse", nc + 1);
         KokkosSparse::Experimental::spgemm_symbolic(
             &kh,
             nc,
@@ -205,8 +209,8 @@ coarse_level_triple build_coarse_graph_spgemm(const coarse_level_triple level,
             row_map_coarse
             );
         //coarse-graph adjacency matrix
-        vtx_view_t adj_coarse("adjacencies_coarse", kh.get_spgemm_handle()->get_c_nnz());
-        wgt_view_t wgt_coarse("weights_coarse", kh.get_spgemm_handle()->get_c_nnz());
+        adj_coarse = vtx_view_t("adjacencies_coarse", kh.get_spgemm_handle()->get_c_nnz());
+        wgt_coarse = wgt_view_t("weights_coarse", kh.get_spgemm_handle()->get_c_nnz());
 
         KokkosSparse::Experimental::spgemm_numeric(
             &kh,
