@@ -2454,6 +2454,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
 #endif
 #ifdef HASHMAP
     coarsener.set_deduplication_method(coarsener_t::Hashmap);
+#elif defined SPGEMM
+    coarsener.set_deduplication_method(coarsener_t::Spgemm);
 #endif
     coarsener.generate_coarse_graphs(fg, experiment, true);
     coarse_levels = coarsener.get_levels();
@@ -2508,6 +2510,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     printf("FM coarsen time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::FMRecoarsen));
     printf("Dedupe Sort time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::RadixSort));
     printf("Dedupe dedupe time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::RadixDedupe));
+    printf("Write Graph time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::WriteGraph));
     printf("Total: %3.3lf s, coarsening %3.3lf %3.0lf%% "
         "(sort %3.3lf %3.0lf%%), "
         "refine %3.3lf s (%3.3lf s, %3.0lf%% + %3.3lf, %3.0lf%%)\n",

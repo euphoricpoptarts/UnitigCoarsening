@@ -71,7 +71,7 @@ coarse_level_triple build_coarse_graph_spgemm(const coarse_level_triple level,
     matrix_t interp_transpose = KokkosKernels::Impl::transpose_matrix(interp_mtx);
 
     spgemm_kernel_handle kh;
-    kh.set_team_work_size(16);
+    kh.set_team_work_size(64);
     kh.set_dynamic_scheduling(true);
     KokkosSparse::SPGEMMAlgorithm spgemm_algorithm = KokkosSparse::SPGEMM_KK_MEMORY;
     kh.create_spgemm_handle(spgemm_algorithm);
@@ -635,7 +635,7 @@ void deduplicate_graph(const ordinal_t n, const bool use_team,
             wgt_view_t wgts_out("wgts after dedupe", wgt_by_source.extent(0));
             vtx_view_t dest_out("dest after dedupe", dest_by_source.extent(0));
             functorDedupeAfterSort deduper(source_bucket_offset, dest_by_source, dest_out, wgt_by_source, wgts_out, edges_per_source);
-            Kokkos::parallel_reduce("deduplicated sorted", team_policy_t(n, Kokkos::AUTO), deduper, gc_nedges);
+            Kokkos::parallel_reduce("deduplicated sorted", team_policy_t(n, 64), deduper, gc_nedges);
             Kokkos::deep_copy(wgt_by_source, wgts_out);
             Kokkos::deep_copy(dest_by_source, dest_out);
         } 

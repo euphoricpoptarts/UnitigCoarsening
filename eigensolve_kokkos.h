@@ -11,13 +11,11 @@
 namespace sgpar {
 namespace sgpar_kokkos {
 
-SGPAR_API int sgp_vec_normalize_kokkos(eigenview_t& u, sgp_vid_t n) {
-    sgp_real_t squared_sum = 0;
+SGPAR_API int sgp_vec_normalize_kokkos(eigenview_t u, sgp_vid_t n) {
+    sgp_real_t squared_sum = KokkosBlas::dot(u, u);
+    sgp_real_t sum_inv = 1.0 / sqrt(squared_sum);
 
-    squared_sum = KokkosBlas::dot(u, u);
-    sgp_real_t sum_inv = 1 / sqrt(squared_sum);
-
-    Kokkos::parallel_for(n, KOKKOS_LAMBDA(int64_t i) {
+    Kokkos::parallel_for("normalize vec", n, KOKKOS_LAMBDA(int64_t i) {
         u(i) = u(i) * sum_inv;
     });
     return EXIT_SUCCESS;
@@ -1070,6 +1068,7 @@ sgp_eid_t fm_refine(eigenview_t& partition_device, const matrix_type& g_device, 
     sgp_eid_t cutsize = 0;
     vtx_mirror_t bucketsA, bucketsB, ll_next, ll_prev, free_vtx;
     Kokkos::View<int64_t*>::HostMirror gains;
+    //fm_create_ds(partition_device, g_device, vtx_w_device, maxE, cutsize, bucketsA, bucketsB, ll_next, ll_prev, free_vtx, gains);
     fm_create_ds_host(partition, g, vtx_w, maxE, cutsize, bucketsA, bucketsB, ll_next, ll_prev, free_vtx, gains);
 
     int64_t balance = 0;
@@ -1560,7 +1559,7 @@ eigenview_t sgp_recoarsen_one_level(const matrix_type& g,
     }
 }
 
-SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type>& graphs, std::list<matrix_type>& interpolates, std::list<vtx_view_t>& vtx_weights, sgp_pcg32_random_t* rng, int refine_alg
+SGPAR_API int sgp_eigensolve(sgp_real_t* eigenvec, std::list<matrix_type> graphs, std::list<matrix_type> interpolates, std::list<vtx_view_t> vtx_weights, sgp_pcg32_random_t* rng, int refine_alg
     , ExperimentLoggerUtil& experiment) {
 
     sgp_vid_t gc_n = graphs.rbegin()->numRows();
