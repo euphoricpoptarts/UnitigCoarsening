@@ -148,6 +148,10 @@ def runExperiment(executable, filepath, metricDir, logFile, t_count):
     myenv = os.environ.copy()
     myenv['OMP_NUM_THREADS'] = str(t_count)
 
+    exe_string = parse("./{}", executable)[0]
+    if(not os.path.exists(exe_string)):
+        print("Error: Could not find executable {}".format(exe_string))
+        return
     giveup = False
     while giveup is not True:
         metricsPath = "{}/group{}.txt".format(metricDir, secrets.token_urlsafe(10))
@@ -181,6 +185,11 @@ def runExperimentSpecial(executable, filepath, metricDir, logFile, t_count):
         return
     myenv = os.environ.copy()
     myenv['OMP_NUM_THREADS'] = str(t_count)
+    
+    exe_string = parse("./{}", executable)[0]
+    if(not os.path.exists(exe_string)):
+        print("Error: Could not find executable {}".format(exe_string))
+        return
 
     metrics = []
     for x in range(10):
