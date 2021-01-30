@@ -60,6 +60,270 @@ public:
         return sorter.get_permute_vector();
     }
 
+    //create a mapping when some vertices are already mapped
+    //hn is a list of vertices such that vertex i wants to aggregate with vertex hn(i)
+    ordinal_t parallel_map_construct_prefilled(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t vperm, const vtx_view_t hn, Kokkos::View<ordinal_t, Device> nvertices_coarse) {
+
+        vtx_view_t match("match", n);
+        Kokkos::parallel_for(policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i) {
+            if (vcmap(i) == ORD_MAX) {
+                match(i) = ORD_MAX;
+            }
+            else {
+                match(i) = n + 1;
+            }
+        });
+        ordinal_t perm_length = vperm.extent(0);
+
+        //construct mapping using heaviest edges
+        int swap = 1;
+        vtx_view_t curr_perm = vperm;
+        while (perm_length > 0) {
+            vtx_view_t next_perm("next perm", perm_length);
+            Kokkos::View<ordinal_t, Device> next_length("next_length");
+
+            Kokkos::parallel_for(policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i) {
+                ordinal_t u = curr_perm(i);
+                ordinal_t v = hn(u);
+                int condition = u < v;
+                //need to enforce an ordering condition to allow hard-stall conditions to be broken
+                if (condition ^ swap) {
+                    if (Kokkos::atomic_compare_exchange_strong(&match(u), ORD_MAX, v)) {
+                        if (u == v || Kokkos::atomic_compare_exchange_strong(&match(v), ORD_MAX, u)) {
+                            ordinal_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
+                            vcmap(u) = cv;
+                            vcmap(v) = cv;
+                        }
+                        else {
+                            if (vcmap(v) < n) {
+                                vcmap(u) = vcmap(v);
+                            }
+                            else {
+                                match(u) = ORD_MAX;
+                            }
+                        }
+                    }
+                }
+            });
+            Kokkos::fence();
+            //add the ones that failed to be reprocessed next round
+            //maybe count these then create next_perm to save memory?
+            Kokkos::parallel_for(policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i) {
+                ordinal_t u = curr_perm(i);
+                if (vcmap(u) >= n) {
+                    ordinal_t add_next = Kokkos::atomic_fetch_add(&next_length(), 1);
+                    next_perm(add_next) = u;
+                    //been noticing some memory errors on my machine, probably from memory overclock
+                    //this fixes the problem, and is lightweight
+                    match(u) = ORD_MAX;
+                }
+            });
+            Kokkos::fence();
+            swap = swap ^ 1;
+            Kokkos::deep_copy(perm_length, next_length);
+            curr_perm = next_perm;
+        }
+        ordinal_t nc = 0;
+        Kokkos::deep_copy(nc, nvertices_coarse);
+        return nc;
+    }
+
+    //hn is a list of vertices such that vertex i wants to aggregate with vertex hn(i)
+    ordinal_t parallel_map_construct(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t vperm, const vtx_view_t hn, const vtx_view_t ordering) {
+
+        vtx_view_t match("match", n);
+        Kokkos::parallel_for(policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i) {
+            match(i) = ORD_MAX;
+        });
+        ordinal_t perm_length = n;
+        Kokkos::View<ordinal_t, Device> nvertices_coarse("nvertices");
+
+        //construct mapping using heaviest edges
+        int swap = 1;
+        vtx_view_t curr_perm = vperm;
+        while (perm_length > 0) {
+            vtx_view_t next_perm("next perm", perm_length);
+            Kokkos::View<ordinal_t, Device> next_length("next_length");
+
+            Kokkos::parallel_for(policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i) {
+                ordinal_t u = curr_perm(i);
+                ordinal_t v = hn(u);
+                int condition = ordering(u) < ordering(v);
+                //need to enforce an ordering condition to allow hard-stall conditions to be broken
+                if (condition ^ swap) {
+                    if (Kokkos::atomic_compare_exchange_strong(&match(u), ORD_MAX, v)) {
+                        if (u == v || Kokkos::atomic_compare_exchange_strong(&match(v), ORD_MAX, u)) {
+                            ordinal_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
+                            vcmap(u) = cv;
+                            vcmap(v) = cv;
+                        }
+                        else {
+                            if (vcmap(v) < n) {
+                                vcmap(u) = vcmap(v);
+                            }
+                            else {
+                                match(u) = ORD_MAX;
+                            }
+                        }
+                    }
+                }
+            });
+            Kokkos::fence();
+            //add the ones that failed to be reprocessed next round
+            //maybe count these then create next_perm to save memory?
+            Kokkos::parallel_for(policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i) {
+                ordinal_t u = curr_perm(i);
+                if (vcmap(u) >= n) {
+                    ordinal_t add_next = Kokkos::atomic_fetch_add(&next_length(), 1);
+                    next_perm(add_next) = u;
+                    //been noticing some memory erros on my machine, probably from memory overclock
+                    //this fixes the problem, and is lightweight
+                    match(u) = ORD_MAX;
+                }
+            });
+            Kokkos::fence();
+            swap = swap ^ 1;
+            Kokkos::deep_copy(perm_length, next_length);
+            curr_perm = next_perm;
+        }
+        ordinal_t nc = 0;
+        Kokkos::deep_copy(nc, nvertices_coarse);
+        return nc;
+    }
+
+    ordinal_t parallel_map_construct_v2(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t vperm, const vtx_view_t hn, const vtx_view_t ordering) {
+
+        ordinal_t remaining_total = n;
+        Kokkos::View<ordinal_t, Device> nvertices_coarse("nvertices");
+
+        vtx_view_t remaining = vperm;
+
+        while (remaining_total > 0) {
+            vtx_view_t heavy_samples("heavy samples", n);
+            Kokkos::parallel_for("init heavy samples", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u){
+                heavy_samples(u) = ORD_MAX;
+            });
+            //for every vertex v which is the heavy neighbor for at least one other vertex u
+            //we arbitrarily "match" one of the u with v
+            //each u can therefore appear once in heavy_samples
+            Kokkos::parallel_for("fill heavy samples", policy_t(0, remaining_total), KOKKOS_LAMBDA(ordinal_t i){
+                ordinal_t u = remaining(i);
+                ordinal_t v = ordering(hn(u));
+                Kokkos::atomic_compare_exchange_strong(&heavy_samples(v), ORD_MAX, u);
+            });
+            vtx_view_t psuedo_locks("psuedo locks", n);
+
+            Kokkos::parallel_for("do matching", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t v){
+                ordinal_t u = heavy_samples(v);
+                ordinal_t first = u, second = v;
+                if (v < u) {
+                    first = v;
+                    second = u;
+                }
+                if (u != ORD_MAX && Kokkos::atomic_fetch_add(&psuedo_locks(first), 1) == 0 && Kokkos::atomic_fetch_add(&psuedo_locks(second), 1) == 0)
+                {
+                    ordinal_t c_id = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
+                    vcmap(u) = c_id;
+                    vcmap(vperm(v)) = c_id;
+                }
+            });
+
+            ordinal_t total_unmapped = 0;
+            Kokkos::parallel_reduce("handle unmatched", policy_t(0, remaining_total), KOKKOS_LAMBDA(ordinal_t i, ordinal_t & sum){
+                ordinal_t u = remaining(i);
+                if (vcmap(u) == ORD_MAX) {
+                    ordinal_t v = hn(u);
+                    if (vcmap(v) != ORD_MAX) {
+                        vcmap(u) = vcmap(v);
+                    }
+                    else {
+                        sum++;
+                    }
+                }
+            }, total_unmapped);
+
+            vtx_view_t next_perm("next perm", total_unmapped);
+            Kokkos::parallel_scan("set unmapped aside", policy_t(0, remaining_total), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & update, const bool final){
+                ordinal_t u = remaining(i);
+                if (vcmap(u) == ORD_MAX) {
+                    if (final) {
+                        next_perm(update) = u;
+                    }
+                    update++;
+                }
+            });
+
+            remaining_total = total_unmapped;
+            remaining = next_perm;
+        }
+
+        ordinal_t nc = 0;
+        Kokkos::deep_copy(nc, nvertices_coarse);
+        return nc;
+    }
+
+    ordinal_t parallel_map_construct_v3(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t vperm, const vtx_view_t hn, const vtx_view_t ordering) {
+
+        Kokkos::View<ordinal_t, Device> nvertices_coarse("nvertices");
+
+        vtx_view_t m("matches", n);
+        Kokkos::parallel_for("init heavy samples", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u){
+            m(u) = ORD_MAX;
+            if (hn(hn(u)) == u) {
+                m(u) = u;
+                if (hn(u) < u) {
+                    m(u) = hn(u);
+                }
+            }
+        });
+        Kokkos::parallel_for("fill heavy samples", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u){
+            ordinal_t v = hn(u);
+            if (m(v) == ORD_MAX) {
+                Kokkos::atomic_compare_exchange_strong(&m(v), ORD_MAX, v);
+            }
+        });
+        Kokkos::parallel_for("fill heavy samples", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u){
+            if (m(u) == ORD_MAX) {
+                ordinal_t v = hn(u);
+                m(u) = m(v);
+            }
+        });
+
+        Kokkos::parallel_for("do matching", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u){
+            ordinal_t p = m(u);
+            while (m(p) != p) {
+                p = m(m(p));
+            }
+            m(u) = p;
+        });
+
+        vtx_view_t dense_map("dense map", n);
+        Kokkos::parallel_for("do matching", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u){
+            Kokkos::atomic_increment(&dense_map(m(u)));
+        });
+
+        Kokkos::parallel_scan("relabel", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t u, ordinal_t & update, const bool final){
+            if (dense_map(u) > 0) {
+                if (final) {
+                    dense_map(u) = update;
+                }
+                update++;
+            }
+        });
+
+        ordinal_t nc = 0;
+        Kokkos::parallel_reduce("assign coarse vertices", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u, ordinal_t & local_max){
+            vcmap(u) = dense_map(m(u));
+            if (local_max <= vcmap(u)) {
+                local_max = vcmap(u);
+            }
+        }, Kokkos::Max<ordinal_t, Kokkos::HostSpace>(nc));
+
+        //nc is the largest vertex id, it needs to be one larger
+        nc++;
+        return nc;
+    }
+
     part_view_t mis_2(const matrix_t& g) {
 
         ordinal_t n = g.numRows();
@@ -420,72 +684,6 @@ public:
         return interp;
     }
 
-    ordinal_t parallel_map_construct_prefilled(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t vperm, const vtx_view_t hn, Kokkos::View<ordinal_t, Device> nvertices_coarse) {
-
-        vtx_view_t match("match", n);
-        Kokkos::parallel_for(policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i){
-            if (vcmap(i) == ORD_MAX) {
-                match(i) = ORD_MAX;
-            }
-            else {
-                match(i) = n + 1;
-            }
-        });
-        ordinal_t perm_length = vperm.extent(0);
-
-        //construct mapping using heaviest edges
-        int swap = 1;
-        vtx_view_t curr_perm = vperm;
-        while (perm_length > 0) {
-            vtx_view_t next_perm("next perm", perm_length);
-            Kokkos::View<ordinal_t, Device> next_length("next_length");
-
-            Kokkos::parallel_for(policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i){
-                ordinal_t u = curr_perm(i);
-                ordinal_t v = hn(u);
-                int condition = u < v;
-                //need to enforce an ordering condition to allow hard-stall conditions to be broken
-                if (condition ^ swap) {
-                    if (Kokkos::atomic_compare_exchange_strong(&match(u), ORD_MAX, v)) {
-                        if (u == v || Kokkos::atomic_compare_exchange_strong(&match(v), ORD_MAX, u)) {
-                            ordinal_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
-                            vcmap(u) = cv;
-                            vcmap(v) = cv;
-                        }
-                        else {
-                            if (vcmap(v) < n) {
-                                vcmap(u) = vcmap(v);
-                            }
-                            else {
-                                match(u) = ORD_MAX;
-                            }
-                        }
-                    }
-                }
-            });
-            Kokkos::fence();
-            //add the ones that failed to be reprocessed next round
-            //maybe count these then create next_perm to save memory?
-            Kokkos::parallel_for(policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i){
-                ordinal_t u = curr_perm(i);
-                if (vcmap(u) >= n) {
-                    ordinal_t add_next = Kokkos::atomic_fetch_add(&next_length(), 1);
-                    next_perm(add_next) = u;
-                    //been noticing some memory errors on my machine, probably from memory overclock
-                    //this fixes the problem, and is lightweight
-                    match(u) = ORD_MAX;
-                }
-            });
-            Kokkos::fence();
-            swap = swap ^ 1;
-            Kokkos::deep_copy(perm_length, next_length);
-            curr_perm = next_perm;
-        }
-        ordinal_t nc = 0;
-        Kokkos::deep_copy(nc, nvertices_coarse);
-        return nc;
-    }
-
     matrix_t sgp_coarsen_GOSH_v2(const matrix_t& g,
         ExperimentLoggerUtil& experiment) {
 
@@ -638,201 +836,6 @@ public:
         matrix_t interp("interpolate", nc, values, graph);
 
         return interp;
-    }
-
-    ordinal_t parallel_map_construct(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t vperm, const vtx_view_t hn, const vtx_view_t ordering) {
-
-        vtx_view_t match("match", n);
-        Kokkos::parallel_for(policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i){
-            match(i) = ORD_MAX;
-        });
-        ordinal_t perm_length = n;
-        Kokkos::View<ordinal_t, Device> nvertices_coarse("nvertices");
-
-        //construct mapping using heaviest edges
-        int swap = 1;
-        vtx_view_t curr_perm = vperm;
-        while (perm_length > 0) {
-            vtx_view_t next_perm("next perm", perm_length);
-            Kokkos::View<ordinal_t, Device> next_length("next_length");
-
-            Kokkos::parallel_for(policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i){
-                ordinal_t u = curr_perm(i);
-                ordinal_t v = hn(u);
-                int condition = ordering(u) < ordering(v);
-                //need to enforce an ordering condition to allow hard-stall conditions to be broken
-                if (condition ^ swap) {
-                    if (Kokkos::atomic_compare_exchange_strong(&match(u), ORD_MAX, v)) {
-                        if (u == v || Kokkos::atomic_compare_exchange_strong(&match(v), ORD_MAX, u)) {
-                            ordinal_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
-                            vcmap(u) = cv;
-                            vcmap(v) = cv;
-                        }
-                        else {
-                            if (vcmap(v) < n) {
-                                vcmap(u) = vcmap(v);
-                            }
-                            else {
-                                match(u) = ORD_MAX;
-                            }
-                        }
-                    }
-                }
-            });
-            Kokkos::fence();
-            //add the ones that failed to be reprocessed next round
-            //maybe count these then create next_perm to save memory?
-            Kokkos::parallel_for(policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i){
-                ordinal_t u = curr_perm(i);
-                if (vcmap(u) >= n) {
-                    ordinal_t add_next = Kokkos::atomic_fetch_add(&next_length(), 1);
-                    next_perm(add_next) = u;
-                    //been noticing some memory erros on my machine, probably from memory overclock
-                    //this fixes the problem, and is lightweight
-                    match(u) = ORD_MAX;
-                }
-            });
-            Kokkos::fence();
-            swap = swap ^ 1;
-            Kokkos::deep_copy(perm_length, next_length);
-            curr_perm = next_perm;
-        }
-        ordinal_t nc = 0;
-        Kokkos::deep_copy(nc, nvertices_coarse);
-        return nc;
-    }
-
-    ordinal_t parallel_map_construct_v2(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t vperm, const vtx_view_t hn, const vtx_view_t ordering) {
-
-        ordinal_t remaining_total = n;
-        Kokkos::View<ordinal_t, Device> nvertices_coarse("nvertices");
-
-        vtx_view_t remaining = vperm;
-
-        while (remaining_total > 0) {
-            vtx_view_t heavy_samples("heavy samples", n);
-            Kokkos::parallel_for("init heavy samples", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u){
-                heavy_samples(u) = ORD_MAX;
-            });
-            //for every vertex v which is the heavy neighbor for at least one other vertex u
-            //we arbitrarily "match" one of the u with v
-            //each u can therefore appear once in heavy_samples
-            Kokkos::parallel_for("fill heavy samples", policy_t(0, remaining_total), KOKKOS_LAMBDA(ordinal_t i){
-                ordinal_t u = remaining(i);
-                ordinal_t v = ordering(hn(u));
-                Kokkos::atomic_compare_exchange_strong(&heavy_samples(v), ORD_MAX, u);
-            });
-            vtx_view_t psuedo_locks("psuedo locks", n);
-
-            Kokkos::parallel_for("do matching", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t v){
-                ordinal_t u = heavy_samples(v);
-                ordinal_t first = u, second = v;
-                if (v < u) {
-                    first = v;
-                    second = u;
-                }
-                if (u != ORD_MAX && Kokkos::atomic_fetch_add(&psuedo_locks(first), 1) == 0 && Kokkos::atomic_fetch_add(&psuedo_locks(second), 1) == 0)
-                {
-                    ordinal_t c_id = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
-                    vcmap(u) = c_id;
-                    vcmap(vperm(v)) = c_id;
-                }
-            });
-
-            ordinal_t total_unmapped = 0;
-            Kokkos::parallel_reduce("handle unmatched", policy_t(0, remaining_total), KOKKOS_LAMBDA(ordinal_t i, ordinal_t & sum){
-                ordinal_t u = remaining(i);
-                if (vcmap(u) == ORD_MAX) {
-                    ordinal_t v = hn(u);
-                    if (vcmap(v) != ORD_MAX) {
-                        vcmap(u) = vcmap(v);
-                    }
-                    else {
-                        sum++;
-                    }
-                }
-            }, total_unmapped);
-
-            vtx_view_t next_perm("next perm", total_unmapped);
-            Kokkos::parallel_scan("set unmapped aside", policy_t(0, remaining_total), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t & update, const bool final){
-                ordinal_t u = remaining(i);
-                if (vcmap(u) == ORD_MAX) {
-                    if (final) {
-                        next_perm(update) = u;
-                    }
-                    update++;
-                }
-            });
-
-            remaining_total = total_unmapped;
-            remaining = next_perm;
-        }
-
-        ordinal_t nc = 0;
-        Kokkos::deep_copy(nc, nvertices_coarse);
-        return nc;
-    }
-
-    ordinal_t parallel_map_construct_v3(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t vperm, const vtx_view_t hn, const vtx_view_t ordering) {
-
-        Kokkos::View<ordinal_t, Device> nvertices_coarse("nvertices");
-
-        vtx_view_t m("matches", n);
-        Kokkos::parallel_for("init heavy samples", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u){
-            m(u) = ORD_MAX;
-            if(hn(hn(u)) == u){
-                m(u) = u;
-                if(hn(u) < u){
-                    m(u) = hn(u);
-                }
-            }
-        });
-        Kokkos::parallel_for("fill heavy samples", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u){
-            ordinal_t v = hn(u);
-            if (m(v) == ORD_MAX) {
-                Kokkos::atomic_compare_exchange_strong(&m(v), ORD_MAX, v);
-            }
-        });
-        Kokkos::parallel_for("fill heavy samples", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u){
-            if (m(u) == ORD_MAX) {
-                ordinal_t v = hn(u);
-                m(u) = m(v);
-            }
-        });
-
-        Kokkos::parallel_for("do matching", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u){
-            ordinal_t p = m(u);
-            while (m(p) != p) {
-                p = m(m(p));
-            }
-            m(u) = p;
-        });
-
-        vtx_view_t dense_map("dense map", n);
-        Kokkos::parallel_for("do matching", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u){
-            Kokkos::atomic_increment(&dense_map(m(u)));
-        });
-
-        Kokkos::parallel_scan("relabel", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t u, ordinal_t & update, const bool final){
-            if (dense_map(u) > 0) {
-                if (final) {
-                    dense_map(u) = update;
-                }
-                update++;
-            }
-        });
-
-        ordinal_t nc = 0;
-        Kokkos::parallel_reduce("assign coarse vertices", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u, ordinal_t& local_max){
-            vcmap(u) = dense_map(m(u));
-            if (local_max <= vcmap(u)) {
-                local_max = vcmap(u);
-            }
-        }, Kokkos::Max<ordinal_t, Kokkos::HostSpace>(nc));
-
-        //nc is the largest vertex id, it needs to be one larger
-        nc++;
-        return nc;
     }
 
     matrix_t sgp_coarsen_HEC(const matrix_t& g,
