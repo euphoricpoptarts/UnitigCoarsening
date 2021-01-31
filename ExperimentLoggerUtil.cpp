@@ -24,6 +24,7 @@ public:
 		FMRefine,
 		FMRecoarsen,
 		Heavy,
+        InitTransfer,
 		END
 	};
 	std::vector<std::string> measurementNames{
@@ -40,7 +41,8 @@ public:
 		"coarsen-map-construct",
 		"fm-refine",
 		"fm-recoarsen",
-		"heavy"
+		"heavy",
+        "initial-transfer-to-device"
 	};
 	std::vector<double> measurements;
 

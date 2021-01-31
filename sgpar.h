@@ -2410,6 +2410,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     using graph_t = typename coarsener_t::graph_type;
     coarsener_t coarsener;
 
+    double start_time = sgp_timer();
+    Kokkos::Timer timer;
     std::list<coarse_level_triple> coarse_levels;
     
     //create matrix_t
@@ -2432,8 +2434,9 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     Kokkos::deep_copy(entries, entries_mirror);
     Kokkos::deep_copy(values, values_mirror);
     graph_t fine_graph(entries, row_map);
-    matrix_t fg("interpolate", fine_n, values, fine_graph);
-    double start_time = sgp_timer();
+    matrix_t fg("fine graph", fine_n, values, fine_graph);
+    experiment.addMeasurement(ExperimentLoggerUtil::Measurement::InitTransfer, timer.seconds());
+    timer.reset();
 
 #if defined HEC
     coarsener.set_heuristic(coarsener_t::HECv1);
