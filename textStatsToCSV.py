@@ -44,15 +44,14 @@ def getStats(filepath):
 def gpuBuildTable(graphs,data,outFile):
     with open(outFile,"w+") as f:
         print("GPU Build Comparison Table", file=f)
-        for graph in graphs:
-            graphSanitized = graph.replace("_","\\textunderscore ")
+        for graph, graphSanitized in graphOrder:
             l = [graphSanitized]
             values = data[graph]
             exp = values[("spec","hec")]
             exp_gemm = values[("spec","hec_gemm")]
             exp_map = values[("spec","hec_hashmap")]
             l.append("{:.2f}".format(exp["coarsen-duration-seconds"]["median"]))
-            l.append("{:.2f}".format(exp["coarsen-build-duration-seconds"]["median"] / exp["coarsen-duration-seconds"]["median"]))
+            l.append("{:.0f}".format(100*exp["coarsen-build-duration-seconds"]["median"] / exp["coarsen-duration-seconds"]["median"]))
             l.append("{:.2f}".format(exp_map["coarsen-build-duration-seconds"]["median"] / exp["coarsen-build-duration-seconds"]["median"]))
             l.append("{:.2f}".format(exp_gemm["coarsen-build-duration-seconds"]["median"] / exp["coarsen-build-duration-seconds"]["median"]))
             print(" & ".join(l) + " \\\\", file=f)
@@ -60,8 +59,7 @@ def gpuBuildTable(graphs,data,outFile):
 def cpuBuildTable(graphs,data,outFile):
     with open(outFile,"a+") as f:
         print("CPU Build Comparison Table", file=f)
-        for graph in graphs:
-            graphSanitized = graph.replace("_","\\textunderscore ")
+        for graph, graphSanitized in graphOrder:
             l = [graphSanitized]
             values = data[graph]
             exp = values[("spec","hecCPU")]
@@ -82,8 +80,7 @@ def cpuBuildTable(graphs,data,outFile):
 def gpuvcpuTable(graphs,data,outFile):
     with open(outFile,"a+") as f:
         print("GPU vs CPU Coarsening table", file=f)
-        for graph in graphs:
-            graphSanitized = graph.replace("_","\\textunderscore ")
+        for graph, graphSanitized in graphOrder:
             l = [graphSanitized]
             values = data[graph]
             gpu = values[("spec","hec")]
