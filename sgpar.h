@@ -1983,7 +1983,7 @@ SGPAR_API int sgp_compute_partition(sgp_vid_t *part, sgp_vid_t num_partitions,
         vu_pair[i].u  = i;
     }   
 #ifdef __cplusplus
-#if defined(USE_GNU_PARALLELMODE) && defined(_OPENMP)
+#if defined(USE_GNU_PARALLELMODE) && defined(_OPENMP) && !defined(_KOKKOS)
     __gnu_parallel::sort(((sgp_vv_pair_t *) vu_pair), 
                          ((sgp_vv_pair_t *) vu_pair)+n,
                          vu_cmpfn_inc,
@@ -2514,6 +2514,7 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     printf("Dedupe Sort time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::RadixSort));
     printf("Dedupe dedupe time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::RadixDedupe));
     printf("Write Graph time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::WriteGraph));
+    printf("Dedupe Total time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Dedupe));
     printf("Total: %3.3lf s, coarsening %3.3lf %3.0lf%% "
         "(sort %3.3lf %3.0lf%%), "
         "refine %3.3lf s (%3.3lf s, %3.0lf%% + %3.3lf, %3.0lf%%)\n",
