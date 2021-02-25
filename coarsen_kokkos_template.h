@@ -848,7 +848,7 @@ matrix_t collapse_directed_to_undirected(const ordinal_t nc,
 
     edge_offset_t coarse_edges_total = 0;
     edge_subview_t coarse_edge_total_subview = Kokkos::subview(target_row_map, nc);
-    Kokkos::deep_copy(coarse_edges_total, edge_total_subview);
+    Kokkos::deep_copy(coarse_edges_total, coarse_edge_total_subview);
 
     vtx_view_t dest_idx("dest_idx", coarse_edges_total);
     wgt_view_t wgts("wgts", coarse_edges_total);
