@@ -297,6 +297,26 @@ coarse_level_triple build_coarse_graph_spgemm(const coarse_level_triple level,
     return next_level;
 }
 
+struct prefix_sum
+{
+    vtx_view_t input;
+    edge_view_t output;
+
+    prefixSum(vtx_view_t input,
+        edge_view_t output)
+        : input(input)
+        , output(output) {}
+
+    KOKKOS_INLINE_FUNCTION
+        operator() (const ordinal_t i, edge_offset_t& update, const bool final) {
+        const edge_offset_t val_i = input(i);
+        update += val_i;
+        if (final) {
+            output(i + 1) = update;
+        }
+    }
+};
+
 struct functorDedupeAfterSort
 {
     //compiler may get confused what the reduction type is without this
@@ -715,17 +735,7 @@ coarse_level_triple build_nonskew(const matrix_t g,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Count, timer.seconds());
     timer.reset();
 
-    Kokkos::parallel_scan("calc source offsets", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i,
-        edge_offset_t & update, const bool final) {
-        // Load old value in case we update it before accumulating
-        const edge_offset_t val_i = edges_per_source(i);
-        // For inclusive scan,
-        // change the update value before updating array.
-        update += val_i;
-        if (final) {
-            source_bucket_offset(i + 1) = update; // only update array on final pass
-        }
-    });
+    Kokkos::parallel_scan("calc source offsets", policy_t(0, nc), prefix_sum(edges_per_source, source_bucket_offset));
 
     Kokkos::parallel_for("reset edges per source", policy_t(0, nc), KOKKOS_LAMBDA(ordinal_t i) {
         edges_per_source(i) = 0; // will use as counter again
@@ -770,17 +780,7 @@ coarse_level_triple build_nonskew(const matrix_t g,
 
     edge_view_t source_offsets("source_offsets", nc + 1);
 
-    Kokkos::parallel_scan("calc source offsets again", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i,
-        edge_offset_t & update, const bool final) {
-        // Load old value in case we update it before accumulating
-        const edge_offset_t val_i = edges_per_source(i);
-        // For inclusive scan,
-        // change the update value before updating array.
-        update += val_i;
-        if (final) {
-            source_offsets(i + 1) = update; // only update array on final pass
-        }
-    });
+    Kokkos::parallel_scan("calc source offsets again", policy_t(0, nc), prefix_sum(edges_per_source, source_offsets));
 
     edge_subview_t edge_total_subview = Kokkos::subview(source_offsets, nc);
     Kokkos::deep_copy(gc_nedges, edge_total_subview);
@@ -830,17 +830,7 @@ matrix_t collapse_directed_to_undirected(const ordinal_t nc,
 
     edge_view_t target_row_map("target row map", nc + 1);
 
-    Kokkos::parallel_scan("calc target row map", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i,
-        edge_offset_t & update, const bool final) {
-        // Load old value in case we update it before accumulating
-        const edge_offset_t val_i = coarse_degree(i);
-        // For inclusive scan,
-        // change the update value before updating array.
-        update += val_i;
-        if (final) {
-            target_row_map(i + 1) = update; // only update array on final pass
-        }
-    });
+    Kokkos::parallel_scan("calc target row map", policy_t(0, nc), prefix_sum(coarse_degree, target_row_map));
 
     Kokkos::parallel_for("reset coarse edges", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i){
         coarse_degree(i) = 0;
@@ -899,17 +889,7 @@ coarse_level_triple build_skew(const matrix_t g,
 
     edge_view_t source_bucket_offset("source_bucket_offsets", nc + 1);
 
-    Kokkos::parallel_scan("calc source offsets", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i,
-        edge_offset_t & update, const bool final) {
-        // Load old value in case we update it before accumulating
-        const edge_offset_t val_i = edges_per_source(i);
-        // For inclusive scan,
-        // change the update value before updating array.
-        update += val_i;
-        if (final) {
-            source_bucket_offset(i + 1) = update; // only update array on final pass
-        }
-    });
+    Kokkos::parallel_scan("calc source offsets", policy_t(0, nc), prefix_sum(edges_per_source, source_bucket_offset));
     edge_subview_t sbo_subview = Kokkos::subview(source_bucket_offset, nc);
     edge_offset_t size_pre_dedupe = 0;
     Kokkos::deep_copy(size_pre_dedupe, sbo_subview);
@@ -1000,17 +980,7 @@ coarse_level_triple build_high_duplicity(const matrix_t g,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Count, timer.seconds());
     timer.reset();
 
-    Kokkos::parallel_scan("calc source offsets", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i,
-        edge_offset_t & update, const bool final) {
-        // Load old value in case we update it before accumulating
-        const edge_offset_t val_i = dedupe_count(i);
-        // For inclusive scan,
-        // change the update value before updating array.
-        update += val_i;
-        if (final) {
-            row_map_copy(i + 1) = update; // only update array on final pass
-        }
-    });
+    Kokkos::parallel_scan("calc source offsets", policy_t(0, n), prefix_sum(dedupe_count, row_map_copy));
 
     Kokkos::parallel_for("reset dedupe count", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i) {
         dedupe_count(i) = 0; // will use as counter again
@@ -1067,17 +1037,7 @@ coarse_level_triple build_high_duplicity(const matrix_t g,
     });
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Count, timer.seconds());
     timer.reset();
-    Kokkos::parallel_scan("calc source offsets", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i,
-        edge_offset_t & update, const bool final) {
-        // Load old value in case we update it before accumulating
-        const edge_offset_t val_i = edges_per_source(i);
-        // For inclusive scan,
-        // change the update value before updating array.
-        update += val_i;
-        if (final) {
-            source_bucket_offset(i + 1) = update; // only update array on final pass
-        }
-    });
+    Kokkos::parallel_scan("calc source offsets", policy_t(0, nc), prefix_sum(edges_per_source, source_bucket_offset));
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Prefix, timer.seconds());
     timer.reset();
     Kokkos::parallel_for("reset edges per source", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i){
