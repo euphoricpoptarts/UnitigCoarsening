@@ -302,13 +302,13 @@ struct prefix_sum
     vtx_view_t input;
     edge_view_t output;
 
-    prefixSum(vtx_view_t input,
+    prefix_sum(vtx_view_t input,
         edge_view_t output)
         : input(input)
         , output(output) {}
 
     KOKKOS_INLINE_FUNCTION
-        operator() (const ordinal_t i, edge_offset_t& update, const bool final) {
+        operator() (const ordinal_t i, edge_offset_t& update, const bool final) const {
         const edge_offset_t val_i = input(i);
         update += val_i;
         if (final) {
