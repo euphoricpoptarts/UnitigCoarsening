@@ -374,8 +374,8 @@ struct functorCollapseDirectedToUndirected
     const edge_view_t target_row_map;
     const vtx_view_t source_edge_counts;
     vtx_view_t target_edge_counts;
-    const edge_view_t source_destinations;
-    edge_view_t target_destinations;
+    const vtx_view_t source_destinations;
+    vtx_view_t target_destinations;
     const wgt_view_t source_wgts;
     wgt_view_t target_wgts;
 
@@ -383,8 +383,8 @@ struct functorCollapseDirectedToUndirected
         const edge_view_t target_row_map,
         const vtx_view_t source_edge_counts,
         vtx_view_t target_edge_counts,
-        const edge_view_t source_destinations,
-        edge_view_t target_destinations,
+        const vtx_view_t source_destinations,
+        vtx_view_t target_destinations,
         const wgt_view_t source_wgts,
         wgt_view_t target_wgts)
         : source_row_map(source_row_map),
