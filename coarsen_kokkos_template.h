@@ -398,7 +398,7 @@ struct functorCollapseDirectedToUndirected
     {}
 
     KOKKOS_INLINE_FUNCTION
-    void operator(const member& thread) {
+    void operator()(const member& thread) {
         ordinal_t u = thread.league_rank();
         edge_offset_t u_origin = source_row_map(u);
         edge_offset_t u_dest_offset = target_row_map(u);
