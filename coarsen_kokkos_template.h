@@ -414,7 +414,7 @@ struct functorCollapseDirectedToUndirected
             target_destinations(v_dest) = u;
             target_wgts(v_dest) = wgt;
         });
-    };
+    }
 };
 
 template<typename ExecutionSpace, typename uniform_memory_pool_t>
@@ -811,11 +811,11 @@ coarse_level_triple build_nonskew(const matrix_t g,
 matrix_t collapse_directed_to_undirected(const ordinal_t nc,
     const vtx_view_t source_edge_counts,
     const edge_view_t source_row_map,
-    const vtx_view_t source_destinations
+    const vtx_view_t source_destinations,
     const wgt_view_t source_wgts) {
 
     vtx_view_t coarse_degree("coarse degree", nc);
-    Kokkos::deep_copy(coarse_degree, edges_per_source);
+    Kokkos::deep_copy(coarse_degree, source_edge_counts);
 
     Kokkos::parallel_for("count directed edges owned by opposite endpoint", team_policy_t(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
         ordinal_t u = thread.league_rank();
