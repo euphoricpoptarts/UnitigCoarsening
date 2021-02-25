@@ -12,7 +12,6 @@
 #include "KokkosSparse_spmv.hpp"
 #include "KokkosSparse_spgemm.hpp"
 #include "KokkosSparse_spadd.hpp"
-#include "KokkosGraph_Distance2Color.hpp"
 #include "KokkosKernels_SparseUtils.hpp"
 #include "KokkosKernels_HashmapAccumulator.hpp"
 #include "KokkosKernels_Uniform_Initialized_MemoryPool.hpp"
