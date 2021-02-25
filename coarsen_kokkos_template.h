@@ -308,7 +308,7 @@ struct prefix_sum
         , output(output) {}
 
     KOKKOS_INLINE_FUNCTION
-        operator() (const ordinal_t i, edge_offset_t& update, const bool final) const {
+        void operator() (const ordinal_t i, edge_offset_t& update, const bool final) const {
         const edge_offset_t val_i = input(i);
         update += val_i;
         if (final) {
