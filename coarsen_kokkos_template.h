@@ -368,6 +368,55 @@ struct functorDedupeAfterSort
 
 };
 
+struct functorCollapseDirectedToUndirected
+{
+    const edge_view_t source_row_map;
+    const edge_view_t target_row_map;
+    const vtx_view_t source_edge_counts;
+    vtx_view_t target_edge_counts;
+    const edge_view_t source_destinations;
+    edge_view_t target_destinations;
+    const wgt_view_t source_wgts;
+    wgt_view_t target_wgts;
+
+    functorCollapseDirectedToUndirected(const edge_view_t source_row_map,
+        const edge_view_t target_row_map,
+        const vtx_view_t source_edge_counts,
+        vtx_view_t target_edge_counts,
+        const edge_view_t source_destinations,
+        edge_view_t target_destinations,
+        const wgt_view_t source_wgts,
+        wgt_view_t target_wgts)
+        : source_row_map(source_row_map),
+        target_row_map(target_row_map),
+        source_edge_counts(source_edge_counts),
+        target_edge_counts(target_edge_counts),
+        source_destinations(source_destinations),
+        target_destinations(target_destinations),
+        source_wgts(source_wgts),
+        target_wgts(target_wgts)
+    {}
+
+    KOKKOS_INLINE_FUNCTION
+    void operator(const member& thread) {
+        ordinal_t u = thread.league_rank();
+        edge_offset_t u_origin = source_row_map(u);
+        edge_offset_t u_dest_offset = target_row_map(u);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, source_edge_counts(u)), [=](const edge_offset_t u_idx) {
+            ordinal_t v = source_destinations(u_origin + u_idx);
+            scalar_t wgt = source_wgts(u_origin + u_idx);
+            edge_offset_t v_dest_offset = target_row_map(v);
+            edge_offset_t v_dest = v_dest_offset + Kokkos::atomic_fetch_add(&target_edge_counts(v), 1);
+            edge_offset_t u_dest = u_dest_offset + Kokkos::atomic_fetch_add(&target_edge_counts(u), 1);
+
+            target_destinations(u_dest) = v;
+            target_wgts(u_dest) = wgt;
+            target_destinations(v_dest) = u;
+            target_wgts(v_dest) = wgt;
+        });
+    };
+};
+
 template<typename ExecutionSpace, typename uniform_memory_pool_t>
 struct functorHashmapAccumulator
 {
@@ -759,6 +808,59 @@ coarse_level_triple build_nonskew(const matrix_t g,
     return next_level;
 }
 
+matrix_t collapse_directed_to_undirected(const ordinal_t nc,
+    const vtx_view_t source_edge_counts,
+    const edge_view_t source_row_map,
+    const vtx_view_t source_destinations
+    const wgt_view_t source_wgts) {
+
+    vtx_view_t coarse_degree("coarse degree", nc);
+    Kokkos::deep_copy(coarse_degree, edges_per_source);
+
+    Kokkos::parallel_for("count directed edges owned by opposite endpoint", team_policy_t(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
+        ordinal_t u = thread.league_rank();
+        edge_offset_t start = source_row_map(u);
+        edge_offset_t end = start + source_edge_counts(u);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t idx) {
+            ordinal_t v = source_destinations(idx);
+            //increment other vertex
+            Kokkos::atomic_fetch_add(&coarse_degree(v), 1);
+        });
+    });
+
+    edge_view_t target_row_map("target row map", nc + 1);
+
+    Kokkos::parallel_scan("calc target row map", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i,
+        edge_offset_t & update, const bool final) {
+        // Load old value in case we update it before accumulating
+        const edge_offset_t val_i = coarse_degree(i);
+        // For inclusive scan,
+        // change the update value before updating array.
+        update += val_i;
+        if (final) {
+            target_row_map(i + 1) = update; // only update array on final pass
+        }
+    });
+
+    Kokkos::parallel_for("reset coarse edges", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i){
+        coarse_degree(i) = 0;
+    });
+
+    edge_offset_t coarse_edges_total = 0;
+    edge_subview_t coarse_edge_total_subview = Kokkos::subview(target_row_map, nc);
+    Kokkos::deep_copy(coarse_edges_total, edge_total_subview);
+
+    vtx_view_t dest_idx("dest_idx", coarse_edges_total);
+    wgt_view_t wgts("wgts", coarse_edges_total);
+
+    Kokkos::parallel_for("move edges into correct size matrix", team_policy_t(nc, Kokkos::AUTO), functorCollapseDirectedToUndirected(source_row_map,
+        target_row_map, source_edge_counts, coarse_degree, source_destinations, dest_idx, source_wgts, wgts));
+
+    graph_type gc_graph(dest_idx, target_row_map);
+    matrix_t gc("gc", nc, wgts, gc_graph);
+    return gc;
+}
+
 coarse_level_triple build_skew(const matrix_t g,
     const matrix_t vcmap,
     vtx_view_t mapped_edges,
@@ -851,64 +953,7 @@ coarse_level_triple build_skew(const matrix_t g,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Dedupe, timer.seconds());
     timer.reset();
 
-    //reused degree initial as degree final
-    vtx_view_t degree_final = degree_initial;
-    Kokkos::parallel_for("init space needed for each row", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i){
-        degree_final(i) = edges_per_source(i);
-    });
-
-    Kokkos::parallel_for("each edge must be counted twice, once for each end", team_policy_t(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
-        ordinal_t u = thread.league_rank();
-        edge_offset_t start = source_bucket_offset(u);
-        edge_offset_t end = start + edges_per_source(u);
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t idx) {
-            ordinal_t v = dest_by_source(idx);
-            //increment other vertex
-            Kokkos::atomic_fetch_add(&degree_final(v), 1);
-            });
-    });
-
-    edge_view_t source_offsets("source_offsets", nc + 1);
-
-    Kokkos::parallel_scan("allocate location for each row", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i,
-        edge_offset_t & update, const bool final) {
-        // Load old value in case we update it before accumulating
-        const edge_offset_t val_i = degree_final(i);
-        // For inclusive scan,
-        // change the update value before updating array.
-        update += val_i;
-        if (final) {
-            source_offsets(i + 1) = update; // only update array on final pass
-            degree_final(i) = 0;
-        }
-    });
-
-    edge_subview_t edge_total_subview = Kokkos::subview(source_offsets, nc);
-    Kokkos::deep_copy(gc_nedges, edge_total_subview);
-
-    vtx_view_t dest_idx("dest_idx", gc_nedges);
-    wgt_view_t wgts("wgts", gc_nedges);
-
-    Kokkos::parallel_for("move edges into correct size matrix", team_policy_t(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
-        ordinal_t u = thread.league_rank();
-        edge_offset_t u_origin = source_bucket_offset(u);
-        edge_offset_t u_dest_offset = source_offsets(u);
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, edges_per_source(u)), [=](const edge_offset_t u_idx) {
-            ordinal_t v = dest_by_source(u_origin + u_idx);
-            scalar_t wgt = wgt_by_source(u_origin + u_idx);
-            edge_offset_t v_dest_offset = source_offsets(v);
-            edge_offset_t v_dest = v_dest_offset + Kokkos::atomic_fetch_add(&degree_final(v), 1);
-            edge_offset_t u_dest = u_dest_offset + Kokkos::atomic_fetch_add(&degree_final(u), 1);
-
-            dest_idx(u_dest) = v;
-            wgts(u_dest) = wgt;
-            dest_idx(v_dest) = u;
-            wgts(v_dest) = wgt;
-            });
-    });
-
-    graph_type gc_graph(dest_idx, source_offsets);
-    matrix_t gc("gc", nc, wgts, gc_graph);
+    matrix_t gc = collapse_directed_to_undirected(nc, edges_per_source, source_bucket_offset, dest_by_source, wgt_by_source);
 
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::WriteGraph, timer.seconds());
     timer.reset();
@@ -1073,65 +1118,7 @@ coarse_level_triple build_high_duplicity(const matrix_t g,
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Dedupe, timer.seconds());
     timer.reset();
 
-    //reused degree initial as degree final
-    vtx_view_t degree_final = degree_initial;
-    //use Kokkos::deep_copy here instead?
-    Kokkos::parallel_for("copy edges per source to degree final", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i){
-        degree_final(i) = edges_per_source(i);
-    });
-
-    Kokkos::parallel_for("count space needed for deduped matrix", team_policy_t(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
-        ordinal_t u = thread.league_rank();
-        edge_offset_t start = source_bucket_offset(u);
-        edge_offset_t end = start + edges_per_source(u);
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t idx) {
-            ordinal_t v = dest_by_source(idx);
-            //increment other vertex
-            Kokkos::atomic_fetch_add(&degree_final(v), 1);
-            });
-    });
-
-    edge_view_t source_offsets("source_offsets", nc + 1);
-
-    Kokkos::parallel_scan("calc source offsets again", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i,
-        edge_offset_t & update, const bool final) {
-        // Load old value in case we update it before accumulating
-        const edge_offset_t val_i = degree_final(i);
-        // For inclusive scan,
-        // change the update value before updating array.
-        update += val_i;
-        if (final) {
-            source_offsets(i + 1) = update; // only update array on final pass
-            degree_final(i) = 0;
-        }
-    });
-
-    edge_subview_t edge_total_subview = Kokkos::subview(source_offsets, nc);
-    Kokkos::deep_copy(gc_nedges, edge_total_subview);
-
-    vtx_view_t dest_idx("dest_idx", gc_nedges);
-    wgt_view_t wgts("wgts", gc_nedges);
-
-    Kokkos::parallel_for("move deduped edges into correct size matrix", team_policy_t(nc, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
-        ordinal_t u = thread.league_rank();
-        edge_offset_t u_origin = source_bucket_offset(u);
-        edge_offset_t u_dest_offset = source_offsets(u);
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, edges_per_source(u)), [=](const edge_offset_t u_idx) {
-            ordinal_t v = dest_by_source(u_origin + u_idx);
-            scalar_t wgt = wgt_by_source(u_origin + u_idx);
-            edge_offset_t v_dest_offset = source_offsets(v);
-            edge_offset_t v_dest = v_dest_offset + Kokkos::atomic_fetch_add(&degree_final(v), 1);
-            edge_offset_t u_dest = u_dest_offset + Kokkos::atomic_fetch_add(&degree_final(u), 1);
-
-            dest_idx(u_dest) = v;
-            wgts(u_dest) = wgt;
-            dest_idx(v_dest) = u;
-            wgts(v_dest) = wgt;
-            });
-    });
-
-    graph_type gc_graph(dest_idx, source_offsets);
-    matrix_t gc("gc", nc, wgts, gc_graph);
+    matrix_t gc = collapse_directed_to_undirected(nc, edges_per_source, source_bucket_offset, dest_by_source, wgt_by_source);
 
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::WriteGraph, timer.seconds());
     timer.reset();
