@@ -2515,6 +2515,8 @@ SGPAR_API int sgp_partition_graph(sgp_vid_t *part,
     printf("Dedupe dedupe time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::RadixDedupe));
     printf("Write Graph time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::WriteGraph));
     printf("Dedupe Total time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Dedupe));
+    printf("Count Total time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Count));
+    printf("Bucket Total time: %.8f\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Bucket));
     printf("Total: %3.3lf s, coarsening %3.3lf %3.0lf%% "
         "(sort %3.3lf %3.0lf%%), "
         "refine %3.3lf s (%3.3lf s, %3.0lf%% + %3.3lf, %3.0lf%%)\n",
