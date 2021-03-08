@@ -6,7 +6,7 @@
 #include <Kokkos_Sort.hpp>
 #include <Kokkos_Functional.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
-#include "KokkosGraph_Distance2Color.hpp"
+#include "KokkosGraph_MIS2.hpp"
 #include "KokkosKernels_SparseUtils.hpp"
 #include "ExperimentLoggerUtil.cpp"
 
@@ -540,7 +540,7 @@ public:
         ordinal_t n = g.numRows();
 
         typename matrix_t::staticcrsgraph_type::entries_type::non_const_value_type nc = 0;
-        vtx_view_t vcmap = graph_mis2_coarsen<Device, typename matrix_t::staticcrsgraph_type::row_map_type, typename matrix_t::staticcrsgraph_type::entries_type, vtx_view_t>(g.graph.row_map, g.graph.entries, nc);
+        vtx_view_t vcmap = KokkosGraph::Experimental::graph_mis2_coarsen<Device, typename matrix_t::staticcrsgraph_type::row_map_type, typename matrix_t::staticcrsgraph_type::entries_type, vtx_view_t>(g.graph.row_map, g.graph.entries, nc);
 
         edge_view_t row_map("interpolate row map", n + 1);
 
