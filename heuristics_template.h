@@ -538,70 +538,9 @@ public:
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.numRows();
-        /*typedef KokkosKernels::Experimental::KokkosKernelsHandle
-            <sgp_eid_t, sgp_vid_t, sgp_wgt_t,
-            typename Device::execution_space, typename Device::memory_space, typename Device::memory_space > KernelHandle;
 
-        KernelHandle kh;
-        kh.set_team_work_size(16);
-        kh.set_dynamic_scheduling(true);
-
-        kh.create_distance2_graph_coloring_handle();
-        KokkosGraph::Experimental::graph_color_distance2(&kh, n, g.graph.row_map, g.graph.entries);
-        Kokkos::View<sgp_vid_t*> colors = kh.get_distance2_graph_coloring_handle()->get_vertex_colors();
-        kh.destroy_distance2_graph_coloring_handle();*/
-
-        part_view_t colors = mis_2(g);
-
-        Kokkos::View<ordinal_t, Device> nvc("nvertices_coarse");
-        vtx_view_t vcmap("vcmap", n);
-
-        int first_color = 1;
-
-        //create aggregates for color 1
-        Kokkos::parallel_for(policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i){
-            if (colors(i) == first_color) {
-                vcmap(i) = Kokkos::atomic_fetch_add(&nvc(), 1);
-            }
-            else {
-                vcmap(i) = ORD_MAX;
-            }
-        });
-
-        //add direct neighbors of color 1 to aggregates
-        //could also do this by checking neighbors of each un-aggregated vertex
-        Kokkos::parallel_for(policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i){
-            if (colors(i) == first_color) {
-                //could use a thread team here
-                for (edge_offset_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
-                    ordinal_t v = g.graph.entries(j);
-                    vcmap(v) = vcmap(i);
-                }
-            }
-        });
-
-        //add distance-2 neighbors of color 1 to arbitrary neighboring aggregate
-        Kokkos::parallel_for(policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i){
-            if (vcmap(i) != ORD_MAX) {
-                //could use a thread team here
-                for (edge_offset_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++) {
-                    ordinal_t v = g.graph.entries(j);
-                    if (vcmap(v) == ORD_MAX) {
-                        vcmap(v) = vcmap(i);
-                    }
-                }
-            }
-        });
-
-        //create singleton aggregates of remaining unaggregated vertices
-        //Kokkos::parallel_for(n, KOKKOS_LAMBDA(sgp_vid_t i){
-        //    if (vcmap(i) == ORD_MAX) {
-        //        vcmap(i) = Kokkos::atomic_fetch_add(&nvc(), 1);
-        //    }
-        //});
-
-        ordinal_t nc = 0;
-        Kokkos::deep_copy(nc, nvc);
+        typename matrix_t::staticcrsgraph_type::entries_type::non_const_value_type nc = 0;
+        vtx_view_t vcmap = graph_mis2_coarsen<Device, typename matrix_t::staticcrsgraph_type::row_map_type, typename matrix_t::staticcrsgraph_type::entries_type, vtx_view_t>(g.graph.row_map, g.graph.entries, nc);
 
         edge_view_t row_map("interpolate row map", n + 1);
 
