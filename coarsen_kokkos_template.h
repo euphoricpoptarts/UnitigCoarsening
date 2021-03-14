@@ -720,6 +720,54 @@ void deduplicate_graph(const ordinal_t n, const bool use_team,
 
 }
 
+struct translationFunctor {
+
+    matrix_t vcmap, g;
+    vtx_view_t mapped_edges, edges_per_source;
+    edge_view_t source_bucket_offset;
+    vtx_view_t edges_out;
+    wgt_view_t wgts_out;
+    ordinal_t workLength;
+
+    translationFunctor(matrix_t vcmap,
+            matrix_t g,
+            vtx_view_t mapped_edges,
+            vtx_view_t edges_per_source,
+            edge_view_t source_bucket_offset,
+            vtx_view_t edges_out,
+            wgt_view_t wgts_out) :
+        vcmap(vcmap),
+        g(g),
+        mapped_edges(mapped_edges),
+        edges_per_source(edges_per_source),
+        source_bucket_offset(source_bucket_offset),
+        workLength(g.numRows()),
+        edges_out(edges_out),
+        wgts_out(wgts_out) {}
+
+    KOKKOS_INLINE_FUNCTION
+        void operator()(const member& t) const 
+    {
+        ordinal_t i = t.league_rank() * t.team_size() + t.team_rank();
+        if(i >= workLength) return;
+        ordinal_t u = vcmap.graph.entries(i);
+        edge_offset_t start = g.graph.row_map(i);
+        edge_offset_t end = g.graph.row_map(i + 1);
+        ordinal_t nonLoopEdgesTotal = 0;
+        Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(t, start, end), [=] (const edge_offset_t idx, ordinal_t& local_sum) {
+            ordinal_t v = mapped_edges(idx);
+            if (u != v) {
+                edge_offset_t offset = Kokkos::atomic_fetch_add(&edges_per_source(u), 1);
+
+                offset += source_bucket_offset(u);
+
+                edges_out(offset) = v;
+                wgts_out(offset) = g.values(idx);
+            }
+        }, nonLoopEdgesTotal);
+    }
+};
+
 coarse_level_triple build_nonskew(const matrix_t g,
     const matrix_t vcmap,
     vtx_view_t mapped_edges,
@@ -751,22 +799,12 @@ coarse_level_triple build_nonskew(const matrix_t g,
     vtx_view_t dest_by_source("dest_by_source", size_pre_dedupe);
     wgt_view_t wgt_by_source("wgt_by_source", size_pre_dedupe);
 
-    Kokkos::parallel_for("move edges to coarse matrix", team_policy_t(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
-        ordinal_t u = vcmap.graph.entries(thread.league_rank());
-        edge_offset_t start = g.graph.row_map(thread.league_rank());
-        edge_offset_t end = g.graph.row_map(thread.league_rank() + 1);
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t idx) {
-            ordinal_t v = mapped_edges(idx);
-            if (u != v) {
-                edge_offset_t offset = Kokkos::atomic_fetch_add(&edges_per_source(u), 1);
-
-                offset += source_bucket_offset(u);
-
-                dest_by_source(offset) = v;
-                wgt_by_source(offset) = g.values(idx);
-            }
-            });
-    });
+    auto execSpaceEnum = KokkosKernels::Impl::kk_get_exec_space_type<exec_space>();
+    int vectorLength = KokkosKernels::Impl::kk_get_suggested_vector_size(n, g.nnz(), execSpaceEnum);
+    translationFunctor translateF(vcmap, g, mapped_edges, edges_per_source, source_bucket_offset, dest_by_source, wgt_by_source);
+    team_policy_t dummy(1, 1, vectorLength);
+    int teamSize = dummy.team_size_max(translateF, Kokkos::ParallelForTag());
+    Kokkos::parallel_for("move edges to coarse matrix", team_policy_t((n + teamSize - 1) / teamSize, teamSize, vectorLength), translateF);
 
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Bucket, timer.seconds());
     timer.reset();
@@ -1088,6 +1126,51 @@ coarse_level_triple build_high_duplicity(const matrix_t g,
     return next_level;
 }
 
+struct countingFunctor {
+
+    matrix_t vcmap, g;
+    vtx_view_t mapped_edges, degree_initial;
+    vtx_view_t c_vtx_w, f_vtx_w;
+    ordinal_t workLength;
+
+    countingFunctor(matrix_t vcmap,
+            matrix_t g,
+            vtx_view_t mapped_edges,
+            vtx_view_t degree_initial,
+            vtx_view_t c_vtx_w,
+            vtx_view_t f_vtx_w) :
+        vcmap(vcmap),
+        g(g),
+        mapped_edges(mapped_edges),
+        degree_initial(degree_initial),
+        c_vtx_w(c_vtx_w),
+        f_vtx_w(f_vtx_w),
+        workLength(g.numRows()) {}
+
+    KOKKOS_INLINE_FUNCTION
+        void operator()(const member& t) const 
+    {
+        ordinal_t i = t.league_rank() * t.team_size() + t.team_rank();
+        if(i >= workLength) return;
+        ordinal_t u = vcmap.graph.entries(i);
+        edge_offset_t start = g.graph.row_map(i);
+        edge_offset_t end = g.graph.row_map(i + 1);
+        ordinal_t nonLoopEdgesTotal = 0;
+        Kokkos::parallel_reduce(Kokkos::ThreadVectorRange(t, start, end), [=] (const edge_offset_t idx, ordinal_t& local_sum) {
+            ordinal_t v = vcmap.graph.entries(g.graph.entries(idx));
+            mapped_edges(idx) = v;
+            if (u != v) {
+                local_sum++;
+            }
+        }, nonLoopEdgesTotal);
+        Kokkos::single(Kokkos::PerThread(t), [=]() {
+            Kokkos::atomic_add(&degree_initial(u), nonLoopEdgesTotal);
+            Kokkos::atomic_add(&c_vtx_w(u), f_vtx_w(i));
+        });
+    
+    }
+};
+
 coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     const matrix_t vcmap,
     ExperimentLoggerUtil& experiment) {
@@ -1112,24 +1195,13 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     vtx_view_t f_vtx_w = level.coarse_vtx_wgts;
     vtx_view_t c_vtx_w = vtx_view_t("coarse vertex weights", nc);
 
+    auto execSpaceEnum = KokkosKernels::Impl::kk_get_exec_space_type<exec_space>();
+    int vectorLength = KokkosKernels::Impl::kk_get_suggested_vector_size(n, g.nnz(), execSpaceEnum);
+    countingFunctor countF(vcmap, g, mapped_edges, degree_initial, c_vtx_w, f_vtx_w);
+    team_policy_t dummy(1, 1, vectorLength);
+    int teamSize = dummy.team_size_max(countF, Kokkos::ParallelForTag());
     //count edges per vertex
-    Kokkos::parallel_for("count edges per coarse vertex (also compute coarse vertex weights)", team_policy_t(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread) {
-        ordinal_t u = vcmap.graph.entries(thread.league_rank());
-        edge_offset_t start = g.graph.row_map(thread.league_rank());
-        edge_offset_t end = g.graph.row_map(thread.league_rank() + 1);
-        ordinal_t nonLoopEdgesTotal = 0;
-        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [=] (const edge_offset_t idx, ordinal_t& local_sum) {
-            ordinal_t v = vcmap.graph.entries(g.graph.entries(idx));
-            mapped_edges(idx) = v;
-            if (u != v) {
-                local_sum++;
-            }
-        }, nonLoopEdgesTotal);
-        Kokkos::single(Kokkos::PerTeam(thread), [=]() {
-            Kokkos::atomic_add(&degree_initial(u), nonLoopEdgesTotal);
-            Kokkos::atomic_add(&c_vtx_w(u), f_vtx_w(thread.league_rank()));
-        });
-    });
+    Kokkos::parallel_for("count edges per coarse vertex (also compute coarse vertex weights)", team_policy_t((n + teamSize - 1) / teamSize, teamSize, vectorLength), countF);
 
     edge_offset_t total_unduped = 0;
     ordinal_t max_unduped = 0;
