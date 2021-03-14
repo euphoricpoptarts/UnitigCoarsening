@@ -50,7 +50,7 @@ public:
             randoms(i) = generator.urand64();
             rand_pool.free_state(generator);
         });
-        printf("random time: %.4f\n", t.seconds());
+        //printf("random time: %.4f\n", t.seconds());
         t.reset();
 
         int t_buckets = 2*n;
@@ -94,7 +94,7 @@ public:
             sorter(randoms, bin_op, true);
         sorter.create_permute_vector();
         */
-        printf("sort time: %.4f\n", t.seconds());
+        //printf("sort time: %.4f\n", t.seconds());
         t.reset();
         return permute;//sorter.get_permute_vector();
     }
