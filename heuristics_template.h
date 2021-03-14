@@ -44,12 +44,48 @@ public:
     vtx_view_t generate_permutation(ordinal_t n, pool_t rand_pool) {
         rand_view_t randoms("randoms", n);
 
+        Kokkos::Timer t;
         Kokkos::parallel_for("create random entries", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i){
             gen_t generator = rand_pool.get_state();
             randoms(i) = generator.urand64();
             rand_pool.free_state(generator);
         });
+        printf("random time: %.4f\n", t.seconds());
+        t.reset();
 
+        int t_buckets = 2*n;
+        vtx_view_t buckets("buckets", t_buckets);
+        Kokkos::parallel_for("init buckets", policy_t(0, t_buckets), KOKKOS_LAMBDA(ordinal_t i){
+            buckets(i) = ORD_MAX;
+        });
+
+        uint64_t max = std::numeric_limits<uint64_t>::max();
+        uint64_t bucket_size = max / t_buckets;
+        Kokkos::parallel_for("insert buckets", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i){
+            ordinal_t bucket = randoms(i) / bucket_size;
+            //jesus take the wheel
+            for(;; bucket++){
+                if(bucket >= t_buckets) bucket -= t_buckets;
+                if(buckets(bucket) == ORD_MAX){
+                    //attempt to insert into bucket
+                    if(Kokkos::atomic_compare_exchange_strong(&buckets(bucket), ORD_MAX, i)){
+                        break;
+                    }
+                }
+            }
+        });
+        
+        vtx_view_t permute("permutation", n);
+        Kokkos::parallel_scan("extract permutation", policy_t(0, t_buckets), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
+            if(buckets(i) != ORD_MAX){
+                if(final){
+                    permute(update) = buckets(i);
+                }
+                update++;
+            }
+        });
+
+        /*
         uint64_t max = std::numeric_limits<uint64_t>::max();
         typedef Kokkos::BinOp1D< rand_view_t > BinOp;
         BinOp bin_op(n, 0, max);
@@ -57,7 +93,10 @@ public:
         Kokkos::BinSort< rand_view_t, BinOp, exec_space, ordinal_t >
             sorter(randoms, bin_op, true);
         sorter.create_permute_vector();
-        return sorter.get_permute_vector();
+        */
+        printf("sort time: %.4f\n", t.seconds());
+        t.reset();
+        return permute;//sorter.get_permute_vector();
     }
 
     //create a mapping when some vertices are already mapped
