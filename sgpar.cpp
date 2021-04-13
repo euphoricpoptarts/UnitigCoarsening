@@ -23,7 +23,7 @@ int main(int argc, char **argv) {
 
     sgp_graph_t g;
     CHECK_SGPAR( sgp_load_graph(&g, filename) );
-    printf("n: %u, m: %u\n", g.nvertices, g.nedges);
+    printf("n: %ld, m: %ld\n", ((long) g.nvertices), ((long) g.nedges));
     printf("coarsening_alg: %d, refine_alg: %d, local_alg %d, num_iter %d\n", 
                     config.coarsening_alg, config.refine_alg, config.local_search_alg, config.num_iter);
 

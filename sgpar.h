@@ -708,8 +708,9 @@ typedef struct {
     sgp_vid_t v;
     sgp_vid_t w;
 } edge_triple_t;
-#ifdef __cplusplus
 
+#if 0
+#ifdef __cplusplus
 inline static bool uvw_cmpfn_inc(const edge_triple_t& a, 
                                  const edge_triple_t& b) {
     if (a.u != b.u) {
@@ -746,6 +747,7 @@ static int uvw_cmpfn_inc(const void *a, const void *b) {
     }
     return 0;
 }
+#endif
 #endif
 
 typedef struct {
@@ -784,6 +786,7 @@ static int vu_cmpfn_inc(const void *a, const void *b) {
 
 //assumption: source_offsets[rangeBegin] <= target < source_offsets[rangeEnd] 
 //
+#if 0
 static sgp_vid_t binary_search_find_source_index(sgp_eid_t *source_offsets, sgp_vid_t rangeBegin, sgp_vid_t rangeEnd, sgp_eid_t target){
     if(rangeBegin + 1 == rangeEnd){
         return rangeBegin;
@@ -795,7 +798,9 @@ static sgp_vid_t binary_search_find_source_index(sgp_eid_t *source_offsets, sgp_
         return binary_search_find_source_index(source_offsets, rangeBegin, rangeMiddle, target);
     }
 }
+#endif
 
+#if 0
 static sgp_eid_t binary_search_find_first_self_loop(edge_triple_t *edges, sgp_eid_t rangeBegin, sgp_eid_t rangeEnd){
     if(rangeBegin + 1 == rangeEnd){
         return rangeEnd;
@@ -807,6 +812,7 @@ static sgp_eid_t binary_search_find_first_self_loop(edge_triple_t *edges, sgp_ei
         return binary_search_find_first_self_loop(edges, rangeBegin, rangeMiddle);
     }
 }
+#endif
 
 void heap_deduplicate(sgp_eid_t* offset_bottom, sgp_vid_t* dest_by_source, sgp_wgt_t* wgt_by_source, sgp_vid_t* edges_per_source, sgp_eid_t* gc_nedges) {
 
@@ -1168,9 +1174,9 @@ SGPAR_API int sgp_build_coarse_graph_msd(sgp_graph_t* gc,
 #pragma omp for schedule(dynamic, 16)
     for (sgp_vid_t u = 0; u < nc; u++) {
 
-        sgp_vid_t size = source_bucket_offset[u + 1] - source_bucket_offset[u];
 
 #ifdef __cplusplus
+        sgp_vid_t size = source_bucket_offset[u + 1] - source_bucket_offset[u];
         //heapsort
         if ((coarsening_alg & 6) == 2 && size < 10) {
             heap_deduplicate(source_bucket_offset + u, dest_by_source, wgt_by_source, edges_per_source + u, gc_count + t_id);
@@ -1664,10 +1670,14 @@ SGPAR_API int sgp_power_iter(sgp_real_t *u, sgp_graph_t g, const int normLap, co
 }
     free(v);
 
+#ifdef EXPERIMENT
     int max_iter_reached = 0;
+#endif
     if (g_niter >= iter_max) {
         printf("exceeded max iter count, ");
+#ifdef EXPERIMENT
         max_iter_reached = 1;
+#endif
     }
     printf("number of iterations: %lu\n", g_niter);
 #ifdef EXPERIMENT
@@ -1924,7 +1934,7 @@ SGPAR_API int sgp_power_iter(sgp_real_t* u, sgp_graph_t g, int normLap, int fina
         if (niter == iter_max) {
             printf("exceeded max iter count, ");
         }
-        printf("number of iterations: %d\n", niter);
+        printf("number of iterations: %ld\n", ((long) niter));
         free(v);
 
     int max_iter_reached = 0;
@@ -1956,7 +1966,7 @@ SGPAR_API int write_sorted_eigenvec(sgp_vv_pair_t* vu_pair, sgp_vid_t n) {
     }
     for (sgp_vid_t i = 0; i < n; i++) {
 #ifdef SGPAR_HUGEGRAPHS
-        fprintf(infp, "%llu %.20f\n", vu_pair[i].u, vu_pair[i].ev);
+        fprintf(infp, "%lu %.20f\n", ((unsigned long) vu_pair[i].u), vu_pair[i].ev);
 #else
         fprintf(infp, "%u %.20f\n", vu_pair[i].u, vu_pair[i].ev);
 #endif
