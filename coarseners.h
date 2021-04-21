@@ -1236,7 +1236,7 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     return next_level;
 }
 
-graph_type coarsen_graph(graph_type g, matrix_t interp){
+graph_type coarsen_de_bruijn_graph(graph_type g, matrix_t interp){
     ordinal_t n = g.numRows();
     ordinal_t nc = interp.numCols();
     //vtx 0 maps vertices with no edges, which we don't care about
@@ -1248,9 +1248,11 @@ graph_type coarsen_graph(graph_type g, matrix_t interp){
             ordinal_t f = g.entries(g.row_map(i));
             ordinal_t v = interp.graph.entries(f);
             if(u != v){
-                //only one possible edge for each u
+                //only two possible edges for each u
+                //one in and one out
+                //don't care which is which
                 //shift vtx id down by 1
-                edge_count(u - 1) = 1;
+                Kokkos::atomic_increment(&edge_count(u - 1));
             }
         }
     });
@@ -1260,14 +1262,17 @@ graph_type coarsen_graph(graph_type g, matrix_t interp){
     edge_offset_t total_edges = 0;
     Kokkos::deep_copy(total_edges, rm_subview);
     vtx_view_t entries("entries", total_edges);
+    Kokkos::parallel_for("reset edge count", nc - 1, KOKKOS_LAMBDA(const ordinal_t i){
+        edge_count(i) = 0;
+    });
     Kokkos::parallel_for("write edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t u = interp.graph.entries(i);
         if(u > 0 && (g.row_map(i + 1) - g.row_map(i) > 0)){
             ordinal_t f = g.entries(g.row_map(i));
             ordinal_t v = interp.graph.entries(f);
             if(u != v){
-                //only one possible edge for each u
                 //shift vtx ids down by 1
+                edge_offset_t insert = row_map(u - 1) + Kokkos::atomic_fetch_add(&edge_count(u - 1), 1);
                 entries(row_map(u - 1)) = v - 1;
             }
         }
@@ -1276,28 +1281,28 @@ graph_type coarsen_graph(graph_type g, matrix_t interp){
     return gc;
 }
 
+//remove all out-edges for any vertex with more than 1 out-edge
+//remove all in-edges for any vertex with more than 1 in-edge
+//combine remaining in and out edges into one graph
 graph_type prune_edges(graph_type g1, graph_type g2){
     //g1 contains in edges, g2 contains out edges
     ordinal_t n = g1.numRows();
     ordinal_t total_paths = 0;
     edge_view_t row_map("pruned row map", n+1);
-    Kokkos::parallel_scan("count path edges", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
+    edge_view_t edge_count("edge count", n);
+    Kokkos::parallel_scan("count path edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         //vertex i has exactly 1 out edge
         if(g2.row_map(i + 1) - g2.row_map(i) == 1){
             //id of the "in" vertex of the edge
             ordinal_t v = g2.entries(g2.row_map(i));
             //vertex v has exactly 1 in edge
             if(g1.row_map(v + 1) - g1.row_map(v) == 1){
-                if(final){
-                    row_map(i) = update;
-                }
-                update++;
-                if(final && (i+1 == n)){
-                    row_map(n) = update;
-                }
+                Kokkos::atomic_increment(&edge_count(i));
+                Kokkos::atomic_increment(&edge_count(v));
             }
         }
     });
+    Kokkos::parallel_scan("calc source offsets", policy_t(0, n), prefix_sum(edge_count, row_map));
     edge_subview_t rm_subview = Kokkos::subview(row_map, n);
     edge_offset_t total_paths = 0;
     Kokkos::deep_copy(total_paths, rm_subview);
@@ -1309,7 +1314,10 @@ graph_type prune_edges(graph_type g1, graph_type g2){
             ordinal_t v = g2.entries(g2.row_map(i));
             //vertex v has exactly 1 in edge
             if(g1.row_map(v + 1) - g1.row_map(v) == 1){
+                //out edge
                 entries(row_map(i)) = v;
+                //in edge
+                entries(row_map(v + 1) - 1) = i;
             }
         }
     });
@@ -1365,6 +1373,27 @@ matrix_t generate_coarse_mapping(const matrix_t g,
     }
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
     return interpolation_graph;
+}
+
+void coarsen_de_bruijn_full_cycle(const graph_type g, ExperimentLoggerUtil& experiment){
+    {
+        edge_view_t row_map;
+        vtx_view_t entries;
+        KokkosKernels::Impl::transpose_graph
+        <typename graph_type::row_map_type, vtx_view_t, edge_view_t, vtx_view_t, edge_view_t, exec_space>
+        (g.numRows(), g.numCols(), g.row_map, g.entries, row_map, entries);
+        graph_type transposed(entries, row_map);
+        g = prune_edges(g, transposed);
+    }
+    std::list<graph_type> levels;
+    std::list<matrix_t> level_interp;
+    levels.push_back(g);
+    while(levels.rbegin()->numRows() > 1){
+        matrix_t interp = mapper.sgp_coarsen_HEC(g, experiment);
+        graph_type next = coarsen_de_bruijn_graph(*levels.rbegin(), interp);
+        levels.push_back(next);
+        level_interp.push_back(interp);
+    }
 }
 
 //we can support weighted vertices pretty easily

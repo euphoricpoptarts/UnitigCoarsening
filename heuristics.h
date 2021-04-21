@@ -292,8 +292,10 @@ public:
             ordinal_t i = thread.league_rank();
             ordinal_t adj_size = g.row_map(i + 1) - g.row_map(i);
             if(adj_size > 0){
+                //up to two possible edges, just choose the first one
                 hn(i) = g.entries(g.row_map(i));
             } else {
+                //no edges, assign to output vertex
                 vcmap(i) = 0;
             }
         });
