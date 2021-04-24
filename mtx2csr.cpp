@@ -118,7 +118,7 @@ int main(int argc, char *argv[]) {
                 if (u != v)  {
                     // store 0-indexed vertex ids
                     AdjVector[u-1].push_back(v-1);
-                    AdjVector[v-1].push_back(u-1);
+                    //AdjVector[v-1].push_back(u-1);
                 }
             } else {
                 u += N2;
@@ -171,96 +171,28 @@ int main(int argc, char *argv[]) {
     // compSizes[0] = 0;
     unsigned int largestCompSize = 0;
     unsigned int largestCompID   = 0;
- 
-    for (long i=0; i<N; i++) {
-        if (CompID[i] != 0) {
-            continue;
-        }
 
-        // Do a BFS from vertex i
-        numComps++;       
-        S[0] = i;
-        CompID[i] = numComps;
-        unsigned int currentPosS = 0;
-        unsigned int visitedCount = 1;
 
-        while (currentPosS != visitedCount) {
-            unsigned int currentVert = S[currentPosS];
-            for (unsigned int j=0; j<AdjVector[currentVert].size(); j++) {
-                unsigned int v = AdjVector[currentVert][j];
-                if (CompID[v] == 0) {
-                    S[visitedCount++] = v;
-                    CompID[v] = numComps;
-                }
-            }
-            currentPosS++;
-        }
-        // compSizes[numComps] = visitedCount;
-        if (visitedCount > largestCompSize) {
-            largestCompSize = visitedCount;
-            largestCompID = numComps;
-        }
-    }
-
-    if (numComps == 1) {
-        cout << "There is just one connected component." << endl;
-    } else {
-        cout << "There are " << numComps << " components and the largest component size is " 
-             << largestCompSize << endl;
-    }
-
-    unsigned newID = 1;
-    unsigned newM = 0;
-    for (long i=0; i<N; i++) {
-        if (CompID[i] == largestCompID) {
-            CompID[i] = newID++;
-            newM += AdjVector[i].size();
-        } else {
-            CompID[i] = 0;
-        }
-    }
-    assert((newID-1) == largestCompSize);
-    
-    // Store old-to-new vertex mapping to disk
-    /*
-    if (numComps > 1) {
-        ofstream ofs((string(argv[1])+".vmapping").c_str(), std::ofstream::out);
-        for (long i=0; i<N; i++) {
-            ofs << CompID[i] << endl;
-        }
-        ofs.close();
-    }
-    */
-
-    // Get final Adj vectors and offsets
-    long Nold = N;
-    N = largestCompSize;
-    cout << "Old edge count: " << M/2 << ", new edge count: " << newM/2 << endl; 
-    M = newM;
     unsigned int* num_edges = new unsigned int[N+1];
     unsigned int* adj = new unsigned int[M];
 
     // Update num_edges array
     num_edges[0] = 0;
-    for (long i=0; i<Nold; i++) {
-        if (CompID[i] != 0) {
-            unsigned int u = CompID[i]-1;
+    for (long i=0; i < N; i++) {
+            unsigned int u = i;
             num_edges[u+1] = num_edges[u] + AdjVector[i].size();
-        }
     }
-    assert(num_edges[N] == newM);
+    assert(num_edges[N] == M);
 
     // Update adj array 
-    for (long i=0; i<Nold; i++) {
-        if (CompID[i] != 0) {
-            unsigned int u = CompID[i]-1;
+    for (long i=0; i < N; i++) {
+            unsigned int u = i;
             for (size_t j=0; j<AdjVector[i].size(); j++) {
-                unsigned int v = CompID[AdjVector[i][j]]-1;
+                unsigned int v = AdjVector[i][j];
                 unsigned int adjPos = num_edges[u] + j;
                 assert(((long) adjPos) < M);
                 adj[adjPos] = v;
             }
-        }
     }
 
     // Write to CSR file

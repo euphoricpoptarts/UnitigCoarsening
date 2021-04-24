@@ -12,7 +12,7 @@
 #include "KokkosKernels_HashmapAccumulator.hpp"
 #include "KokkosKernels_Uniform_Initialized_MemoryPool.hpp"
 #include "ExperimentLoggerUtil.cpp"
-#include "heuristics_template.h"
+#include "heuristics.h"
 
 template<typename ordinal_t, typename edge_offset_t, typename scalar_t, class Device>
 class coarse_builder {
@@ -1244,15 +1244,18 @@ graph_type coarsen_de_bruijn_graph(graph_type g, matrix_t interp){
     edge_view_t edge_count("edge count", nc - 1);
     Kokkos::parallel_for("count edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t u = interp.graph.entries(i);
-        if(u > 0 && (g.row_map(i + 1) - g.row_map(i) > 0)){
-            ordinal_t f = g.entries(g.row_map(i));
-            ordinal_t v = interp.graph.entries(f);
-            if(u != v){
-                //only two possible edges for each u
-                //one in and one out
-                //don't care which is which
-                //shift vtx id down by 1
-                Kokkos::atomic_increment(&edge_count(u - 1));
+        if(u > 0){
+            printf("%u -> %u\n", i + 1, u);
+            for(ordinal_t j = g.row_map(i); j < g.row_map(i + 1); j++){
+                ordinal_t f = g.entries(j);
+                ordinal_t v = interp.graph.entries(f);
+                if(u != v){
+                    //only two possible edges for each u
+                    //one in and one out
+                    //don't care which is which
+                    //shift vtx id down by 1
+                    Kokkos::atomic_increment(&edge_count(u - 1));
+                }
             }
         }
     });
@@ -1267,16 +1270,19 @@ graph_type coarsen_de_bruijn_graph(graph_type g, matrix_t interp){
     });
     Kokkos::parallel_for("write edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t u = interp.graph.entries(i);
-        if(u > 0 && (g.row_map(i + 1) - g.row_map(i) > 0)){
-            ordinal_t f = g.entries(g.row_map(i));
-            ordinal_t v = interp.graph.entries(f);
-            if(u != v){
-                //shift vtx ids down by 1
-                edge_offset_t insert = row_map(u - 1) + Kokkos::atomic_fetch_add(&edge_count(u - 1), 1);
-                entries(row_map(u - 1)) = v - 1;
+        if(u > 0){
+            for(ordinal_t j = g.row_map(i); j < g.row_map(i + 1); j++){
+                ordinal_t f = g.entries(j);
+                ordinal_t v = interp.graph.entries(f);
+                if(u != v){
+                    //shift vtx ids down by 1
+                    edge_offset_t insert = row_map(u - 1) + Kokkos::atomic_fetch_add(&edge_count(u - 1), 1);
+                    entries(insert) = v - 1;
+                }
             }
         }
     });
+    printf("nc: %u; edges: %u\n", nc - 1, total_edges);
     graph_type gc(entries, row_map);
     return gc;
 }
@@ -1287,10 +1293,9 @@ graph_type coarsen_de_bruijn_graph(graph_type g, matrix_t interp){
 graph_type prune_edges(graph_type g1, graph_type g2){
     //g1 contains in edges, g2 contains out edges
     ordinal_t n = g1.numRows();
-    ordinal_t total_paths = 0;
     edge_view_t row_map("pruned row map", n+1);
     edge_view_t edge_count("edge count", n);
-    Kokkos::parallel_scan("count path edges", n, KOKKOS_LAMBDA(const ordinal_t i){
+    Kokkos::parallel_for("count path edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         //vertex i has exactly 1 out edge
         if(g2.row_map(i + 1) - g2.row_map(i) == 1){
             //id of the "in" vertex of the edge
@@ -1355,7 +1360,7 @@ matrix_t generate_coarse_mapping(const matrix_t g,
         case HECv1:
         case HECv2:
         case HECv3:
-            interpolation_graph = mapper.sgp_coarsen_HEC(g, uniform_weights, experiment, choice);
+            interpolation_graph = mapper.sgp_coarsen_HEC(g, experiment);
             break;
         case Match:
         case MtMetis:
@@ -1365,32 +1370,58 @@ matrix_t generate_coarse_mapping(const matrix_t g,
             interpolation_graph = mapper.sgp_coarsen_mis_2(g, experiment);
             break;
         case GOSHv2:
-            interpolation_graph = mapper.sgp_coarsen_GOSH_v2(g, experiment);
             break;
         case GOSHv1:
-            interpolation_graph = mapper.sgp_coarsen_GOSH(g, experiment);
             break;
     }
     experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
     return interpolation_graph;
 }
 
-void coarsen_de_bruijn_full_cycle(const graph_type g, ExperimentLoggerUtil& experiment){
+graph_type transpose(graph_type g){
+    ordinal_t n = g.numRows();
+    edge_view_t row_map("pruned row map", n+1);
+    edge_view_t edge_count("edge count", n);
+    Kokkos::parallel_for("count transpose edges", n, KOKKOS_LAMBDA(const ordinal_t i){
+        for(edge_offset_t j = g.row_map(i); j < g.row_map(i + 1); j++){
+            ordinal_t v = g.entries(j);
+            Kokkos::atomic_increment(&edge_count(v));
+        }
+    });
+    Kokkos::parallel_scan("calc source offsets", policy_t(0, n), prefix_sum(edge_count, row_map));
+    edge_subview_t rm_subview = Kokkos::subview(row_map, n);
+    edge_offset_t total_e = 0;
+    Kokkos::deep_copy(total_e, rm_subview);
+    Kokkos::parallel_for("reset edge count", n, KOKKOS_LAMBDA(const ordinal_t i){
+        edge_count(i) = 0;
+    });
+    vtx_view_t entries("pruned out entries", total_e);
+    assert(total_e == g.entries.extent(0));
+    Kokkos::parallel_for("write transpose edges", n, KOKKOS_LAMBDA(const ordinal_t i){
+        for(edge_offset_t j = g.row_map(i); j < g.row_map(i + 1); j++){
+            ordinal_t v = g.entries(j);
+            edge_offset_t insert = row_map(v) + Kokkos::atomic_fetch_add(&edge_count(v), 1);
+            entries(insert) = i;
+        }
+    });
+    graph_type pruned(entries, row_map);
+    return pruned;
+}
+
+void coarsen_de_bruijn_full_cycle(graph_type g, ExperimentLoggerUtil& experiment){
     {
-        edge_view_t row_map;
-        vtx_view_t entries;
-        KokkosKernels::Impl::transpose_graph
-        <typename graph_type::row_map_type, vtx_view_t, edge_view_t, vtx_view_t, edge_view_t, exec_space>
-        (g.numRows(), g.numCols(), g.row_map, g.entries, row_map, entries);
-        graph_type transposed(entries, row_map);
+        graph_type transposed = transpose(g);
         g = prune_edges(g, transposed);
     }
     std::list<graph_type> levels;
     std::list<matrix_t> level_interp;
     levels.push_back(g);
     while(levels.rbegin()->numRows() > 1){
-        matrix_t interp = mapper.sgp_coarsen_HEC(g, experiment);
-        graph_type next = coarsen_de_bruijn_graph(*levels.rbegin(), interp);
+        graph_type cur = *levels.rbegin();
+        printf("Calculating coarse graph %ld\n", levels.size());
+        printf("input vertices: %u; nnz: %lu\n", cur.numRows(), cur.entries.extent(0));
+        matrix_t interp = mapper.sgp_coarsen_HEC(cur, experiment);
+        graph_type next = coarsen_de_bruijn_graph(cur, interp);
         levels.push_back(next);
         level_interp.push_back(interp);
     }

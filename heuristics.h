@@ -168,29 +168,31 @@ public:
     }
 
     //hn is a list of vertices such that vertex i wants to aggregate with vertex hn(i)
-    ordinal_t parallel_map_construct(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t hn, const vtx_view_t ordering) {
+    ordinal_t parallel_map_construct(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t hn) {
 
         vtx_view_t match("match", n);
         Kokkos::parallel_for(policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i) {
             match(i) = ORD_MAX;
         });
-        ordinal_t perm_length = n;
+        ordinal_t perm_length = 0;
         Kokkos::View<ordinal_t, Device> nvertices_coarse("nvertices");
         Kokkos::View<ordinal_t, Device> perm_length_dev("perm length");
         //coarse vertex 0 is used to map vertices with no edges
         ordinal_t nvc = 1;
         Kokkos::deep_copy(nvertices_coarse, nvc);
+        Kokkos::deep_copy(perm_length_dev, perm_length);
 
         int swap = 1;
         //find vertices that must be aggregated
-        vtx_view_t curr_perm("rem vtx", perm_length);
-        Kokkos::parallel_for(policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i) {
-            if(vcmap(i) == ORD_MAX){
-                ordinal_t insert = Kokkos::atomic_fetch_add(perm_length_dev(), 1);
+        vtx_view_t curr_perm("rem vtx", n);
+        Kokkos::parallel_for(policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i) {
+            if(vcmap(i) != 0){
+                ordinal_t insert = Kokkos::atomic_fetch_add(&perm_length_dev(), (ordinal_t)1);
                 curr_perm(insert) = i;
             }
         });
         Kokkos::deep_copy(perm_length, perm_length_dev);
+        printf("edgeful vertices: %u\n", perm_length);
         //construct mapping using heaviest edges
         while (perm_length > 0) {
             vtx_view_t next_perm("next perm", perm_length);
@@ -199,7 +201,7 @@ public:
             Kokkos::parallel_for(policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i) {
                 ordinal_t u = curr_perm(i);
                 ordinal_t v = hn(u);
-                int condition = ordering(u) < ordering(v);
+                int condition = u < v;
                 //need to enforce an ordering condition to allow hard-stall conditions to be broken
                 if (condition ^ swap) {
                     if (Kokkos::atomic_compare_exchange_strong(&match(u), ORD_MAX, v)) {
@@ -288,8 +290,7 @@ public:
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Permute, timer.seconds());
         timer.reset();
 
-        Kokkos::parallel_for("edge choose", policy_t(0, n), KOKKOS_LAMBDA(const member & thread) {
-            ordinal_t i = thread.league_rank();
+        Kokkos::parallel_for("edge choose", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i) {
             ordinal_t adj_size = g.row_map(i + 1) - g.row_map(i);
             if(adj_size > 0){
                 //up to two possible edges, just choose the first one
@@ -302,7 +303,7 @@ public:
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Heavy, timer.seconds());
         timer.reset();
         ordinal_t nc = 0;
-        nc = parallel_map_construct(vcmap, n, vperm, hn, reverse_map);
+        nc = parallel_map_construct(vcmap, n, hn);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct, timer.seconds());
         timer.reset();
 
