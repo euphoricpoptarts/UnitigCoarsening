@@ -39,15 +39,15 @@ namespace sgpar {
      */
 #if defined(SGPAR_HUGEGRAPHS)
     typedef uint64_t ordinal_t;
-#define SGP_INFTY UINT64_MAX
+	static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
     typedef uint64_t edge_offset_t;
 #elif defined(SGPAR_LARGEGRAPHS)
     typedef uint32_t ordinal_t;
-#define SGP_INFTY UINT32_MAX
+	static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
     typedef uint64_t edge_offset_t;
 #else
     typedef uint32_t ordinal_t;
-	static constexpr ordinal_t SGP_INFTY = std::numeric_limits<ordinal_t>::max();
+	static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
     typedef uint32_t edge_offset_t;
 #endif
     typedef double sgp_real_t;
@@ -70,7 +70,10 @@ namespace sgpar {
 
         using host_policy = Kokkos::RangePolicy<Kokkos::OpenMP>;
 
+        using char_view_t = Kokkos::View<char*>;
+        using char_mirror_t = typename char_view_t::HostMirror;
         using edge_view_t = Kokkos::View<edge_offset_t*>;
+        using edge_subview_t = Kokkos::View<edge_offset_t, Device>;
         using edge_mirror_t = typename edge_view_t::HostMirror;
         using vtx_view_t = Kokkos::View<ordinal_t*>;
         using vtx_mirror_t = typename vtx_view_t::HostMirror;

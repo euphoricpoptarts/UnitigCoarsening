@@ -1404,8 +1404,8 @@ graph_type transpose(graph_type g){
             entries(insert) = i;
         }
     });
-    graph_type pruned(entries, row_map);
-    return pruned;
+    graph_type transposed(entries, row_map);
+    return transposed;
 }
 
 void coarsen_de_bruijn_full_cycle(graph_type g, ExperimentLoggerUtil& experiment){
