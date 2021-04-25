@@ -1,5 +1,6 @@
 #include "coarseners.h"
 #include "heuristics.h"
+#include "assembler.h"
 #include "ExperimentLoggerUtil.cpp"
 #include "definitions_kokkos.h"
 #include <assert.h>
@@ -68,141 +69,110 @@ int load_kmers(char_view_t& out, char *fname, int k) {
     Kokkos::deep_copy(out, char_mirror);
     return 0;
 }
-  
-//fnv hash algorithm
-//we going deep
-KOKKOS_INLINE_FUNCTION
-uint32_t fnv(const char_view_t chars, size_t offset, size_t k){
-    uint32_t hash = 2166136261U;
-    for(uint32_t i = offset; i < offset + k; i++)
-    {
-        hash = hash ^ (chars(i)); // xor next byte into the bottom of the hash
-        hash = hash * 16777619; // Multiply by prime number found to work well
-    }
-    return hash;
-}
 
-//gotta do everything myself
-KOKKOS_INLINE_FUNCTION
-bool cmp(const char_view_t s1_chars, const char_view_t s2_chars, const size_t s1_offset, const size_t s2_offset, const size_t k){
-    for(size_t i = 0; i < k; i++){
-        if(s1_chars(s1_offset + i) != s2_chars(s2_offset + i)){
-            return false;
+void write_unitigs(char_view_t kmers, edge_view_t kmer_offsets, graph_type glue_action){
+    edge_offset_t write_size = 0;
+    c_edge_subview_t start_writes_sub = Kokkos::subview(glue_action.row_map, 0);
+    c_edge_subview_t end_writes_sub = Kokkos::subview(glue_action.row_map, 1);
+    edge_offset_t start_writes = 0, end_writes = 0;
+    Kokkos::deep_copy(start_writes, start_writes_sub);
+    Kokkos::deep_copy(end_writes, end_writes_sub);
+    vtx_view_t write_sizes("write sizes", end_writes - start_writes + 1);
+    Kokkos::parallel_scan("count writes", r_policy(start_writes, end_writes), KOKKOS_LAMBDA(const edge_offset_t i, edge_offset_t& update, const bool final){
+        ordinal_t u = glue_action.entries(i);
+        edge_offset_t size = kmer_offsets(u + 1) - kmer_offsets(u);
+        if(final){
+            write_sizes(i - start_writes) = update;
+            if(i + 1 == end_writes){
+                write_sizes(end_writes - start_writes) = update + size;
+            }
         }
-    }
-    return true;
-}
-
-//check if edge formed by appending extension to kmer at offset exists in edges using a hashmap
-KOKKOS_INLINE_FUNCTION
-bool find_edge(const char_view_t chars, const char_view_t edges, const vtx_view_t edge_map, size_t offset, size_t k, char extension){
-    uint32_t hash = fnv(chars, offset, k);
-    hash = hash ^ (extension); // xor next byte into the bottom of the hash
-    hash = hash * 16777619; // Multiply by prime number found to work well
-    uint32_t hash_cast = edge_map.extent(0) - 1;
-    hash = hash & hash_cast;
-    while(edge_map(hash) != ORD_MAX){
-        size_t edge_offset = edge_map(hash)*(k + 1);
-        if(cmp(chars, edges, offset, edge_offset, k) && extension == edges(edge_offset + k)){
-            return true;
-        }
-        hash = (hash + 1) & hash_cast;
-    }
-    return false;
-}
-
-//check if vtx formed by appending extension to (k-1)mer at offset exists in vtxs using a hashmap
-KOKKOS_INLINE_FUNCTION
-ordinal_t find_vtx(const char_view_t chars, const vtx_view_t vtx_map, size_t offset, size_t k, char extension){
-    uint32_t hash = fnv(chars, offset, k - 1);
-    hash = hash ^ (extension); // xor next byte into the bottom of the hash
-    hash = hash * 16777619; // Multiply by prime number found to work well
-    uint32_t hash_cast = vtx_map.extent(0) - 1;
-    hash = hash & hash_cast;
-    while(vtx_map(hash) != ORD_MAX){
-        size_t opposite_offset = vtx_map(hash)*k;
-        if(cmp(chars, chars, offset, opposite_offset, k - 1) && (extension == chars(opposite_offset + (k - 1))) ){
-            return vtx_map(hash);
-        }
-        hash = (hash + 1) & hash_cast;
-    }
-    return ORD_MAX;
-}
-
-vtx_view_t generate_hashmap(char_view_t kmers, int k, int size){
-    size_t hashmap_size = 1;
-    while(hashmap_size < 2*size) hashmap_size <<= 1;
-    vtx_view_t out("hashmap", hashmap_size);
-    Kokkos::parallel_for("init hashmap", hashmap_size, KOKKOS_LAMBDA(const ordinal_t i){
-        out(i) = ORD_MAX;
+        update += size;
     });
-    size_t hash_cast = hashmap_size - 1;
-    Kokkos::parallel_for("fill hashmap", size, KOKKOS_LAMBDA(const ordinal_t i){
-        uint32_t hash = fnv(kmers, k*i, k) & hash_cast;
-        bool success = Kokkos::atomic_compare_exchange_strong(&out(hash), ORD_MAX, i);
-        //linear probing
-        //all values are unique so no need to check
-        while(!success){
-            hash = (hash + 1) & hash_cast;
-            success = Kokkos::atomic_compare_exchange_strong(&out(hash), ORD_MAX, i);
+    edge_subview_t write_size_sub = Kokkos::subview(write_sizes, end_writes - start_writes);
+    Kokkos::deep_copy(write_size, write_size_sub);
+    char_view_t writes("writes", write_size);
+    printf("write out unitigs size: %u\n", write_size);
+    printf("write out unitigs count: %u\n", end_writes - start_writes);
+    Kokkos::parallel_for("move writes", r_policy(start_writes, end_writes), KOKKOS_LAMBDA(const edge_offset_t i){
+        ordinal_t u = glue_action.entries(i);
+        edge_offset_t write_offset = write_sizes(i - start_writes);
+        for(edge_offset_t j = kmer_offsets(u); j < kmer_offsets(u + 1); j++){
+            writes(write_offset) = kmers(j);
+            write_offset++;
         }
     });
-    return out; 
 }
 
-struct prefix_sum1
-{
-    vtx_view_t input;
-    edge_view_t output;
-
-    prefix_sum1(vtx_view_t input,
-        edge_view_t output)
-        : input(input)
-        , output(output) {}
-
-    KOKKOS_INLINE_FUNCTION
-        void operator() (const ordinal_t i, edge_offset_t& update, const bool final) const {
-        const edge_offset_t val_i = input(i);
-        update += val_i;
-        if (final) {
-            output(i + 1) = update;
+void compress_unitigs(char_view_t& kmers, edge_view_t& kmer_offsets, graph_type glue_action, int k){
+    edge_offset_t write_size = 0;
+    //minus 2 because 0 is not processed, and row_map is one bigger than number of rows
+    ordinal_t n = glue_action.row_map.extent(0) - 2;
+    vtx_view_t next_offsets("next offsets", n + 1);
+    Kokkos::parallel_scan("compute offsets", r_policy(1, n+1), KOKKOS_LAMBDA(const ordinal_t u, edge_offset_t& update, const bool final){
+        edge_offset_t size = 0;
+        bool first = true;
+        for(edge_offset_t i = glue_action.row_map(u); i < glue_action.row_map(u + 1); i++){
+            ordinal_t f = glue_action.entries(i);
+            size += kmer_offsets(f + 1) - kmer_offsets(f);
+            if(!first){
+                //subtract for overlap of k-mers/unitigs
+                size -= (k - 1);
+            }
+            first = false;
         }
-    }
-};
+        if(final){
+            next_offsets(u - 1) = update;
+            if(u == n){
+                next_offsets(n) = update + size;
+            }
+        }
+        update += size;
+    });
+    edge_subview_t write_size_sub = Kokkos::subview(next_offsets, n);
+    Kokkos::deep_copy(write_size, write_size_sub);
+    char_view_t writes("writes", write_size);
+    printf("compressed unitigs size: %u\n", write_size);
+    Kokkos::parallel_for("move writes", r_policy(1, n+1), KOKKOS_LAMBDA(const edge_offset_t u){
+        bool first = true;
+        edge_offset_t write_offset = next_offsets(u - 1);
+        for(edge_offset_t i = glue_action.row_map(u); i < glue_action.row_map(u + 1); i++){
+            ordinal_t f = glue_action.entries(i);
+            edge_offset_t start = kmer_offsets(f);
+            edge_offset_t end = kmer_offsets(f + 1);
+            if(!first){
+                //subtract for overlap of k-mers/unitigs
+                start += (k - 1);
+            }
+            first = false;
+            for(edge_offset_t j = start; j < end; j++){
+                writes(write_offset) = kmers(j);
+                write_offset++;
+            }
+        }
+    });
+    kmers = writes;
+    kmer_offsets = next_offsets;
+}
 
-graph_type assemble_graph(char_view_t kmers, char_view_t kpmers, vtx_view_t edge_map, vtx_view_t vtx_map, int k){
+edge_view_t sizes_init(ordinal_t n, int k){
+    edge_view_t sizes("unitig sizes", n + 1);
+    Kokkos::parallel_for("init sizes", n + 1, KOKKOS_LAMBDA(const ordinal_t i){
+        sizes(i) = k*i;
+    });
+    return sizes;
+}
+
+void compress_unitigs_maximally(char_view_t kmers, std::list<graph_type> glue_actions, int k){
     ordinal_t n = kmers.extent(0) / k;
-    edge_view_t row_map("row map", n+1);
-    edge_view_t edge_count("edge count", n);
-    char edges[4] = {'A', 'T', 'G', 'C'};
-    Kokkos::parallel_for("count edges", n, KOKKOS_LAMBDA(const ordinal_t i){
-        for(int j = 0; j < 4; j++){
-            //check if edge exists
-            if(find_edge(kmers, kpmers, edge_map, i*k, k, edges[j])){
-                edge_count(i)++;
-            }
-        }
-    });
-    Kokkos::parallel_scan("calc source offsets", n, prefix_sum1(edge_count, row_map));
-    edge_subview_t rm_subview = Kokkos::subview(row_map, n);
-    edge_offset_t total_e = 0;
-    Kokkos::deep_copy(total_e, rm_subview);
-    Kokkos::parallel_for("reset edge count", n, KOKKOS_LAMBDA(const ordinal_t i){
-        edge_count(i) = 0;
-    });
-    vtx_view_t entries("pruned out entries", total_e);
-    Kokkos::parallel_for("write edges", n, KOKKOS_LAMBDA(const ordinal_t i){
-        for(int j = 0; j < 4; j++){
-            //check if edge exists
-            if(find_edge(kmers, kpmers, edge_map, i*k, k, edges[j])){
-                edge_offset_t insert = row_map(i) + edge_count(i)++;
-                ordinal_t v = find_vtx(kmers, vtx_map, i*k + 1, k, edges[j]);
-                entries(insert) = v;
-            }
-        }
-    });
-    graph_type g(entries, row_map);
-    return g;
+    //there are issues compiling kernels if there is a std object in the function header
+    edge_view_t sizes = sizes_init(n, k);
+    auto glue_iter = glue_actions.begin();
+    while(glue_iter != glue_actions.end()){
+        write_unitigs(kmers, sizes, *glue_iter);
+        compress_unitigs(kmers, sizes, *glue_iter, k);
+        glue_iter++;
+    }
 }
 
 int main(int argc, char **argv) {
@@ -236,6 +206,7 @@ int main(int argc, char **argv) {
         ExperimentLoggerUtil experiment;
         std::list<graph_type> glue_list = coarsener.coarsen_de_bruijn_full_cycle(g, experiment);
         printf("glue list length: %lu\n", glue_list.size());
+        compress_unitigs_maximally(kmers, glue_list, k);
     }
     Kokkos::finalize();
     return 0;
