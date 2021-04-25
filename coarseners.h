@@ -1455,7 +1455,6 @@ graph_type transpose_and_sort(matrix_t interp, graph_type g){
             end--;
         }
     });
-    dont = true;
     return interp_transpose.graph;
 }
 
