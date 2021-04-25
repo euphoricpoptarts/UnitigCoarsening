@@ -1245,7 +1245,7 @@ graph_type coarsen_de_bruijn_graph(graph_type g, matrix_t interp){
     Kokkos::parallel_for("count edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t u = interp.graph.entries(i);
         if(u > 0){
-            printf("%u -> %u\n", i + 1, u);
+            //printf("%u -> %u\n", i + 1, u);
             for(ordinal_t j = g.row_map(i); j < g.row_map(i + 1); j++){
                 ordinal_t f = g.entries(j);
                 ordinal_t v = interp.graph.entries(f);
@@ -1289,7 +1289,7 @@ graph_type coarsen_de_bruijn_graph(graph_type g, matrix_t interp){
 
 //remove all out-edges for any vertex with more than 1 out-edge
 //remove all in-edges for any vertex with more than 1 in-edge
-//combine remaining in and out edges into one graph
+//output graph contains only out-edges
 graph_type prune_edges(graph_type g1, graph_type g2){
     //g1 contains in edges, g2 contains out edges
     ordinal_t n = g1.numRows();
@@ -1302,8 +1302,9 @@ graph_type prune_edges(graph_type g1, graph_type g2){
             ordinal_t v = g2.entries(g2.row_map(i));
             //vertex v has exactly 1 in edge
             if(g1.row_map(v + 1) - g1.row_map(v) == 1){
-                Kokkos::atomic_increment(&edge_count(i));
-                Kokkos::atomic_increment(&edge_count(v));
+                edge_count(i) = 1;
+                //Kokkos::atomic_increment(&edge_count(i));
+                //Kokkos::atomic_increment(&edge_count(v));
             }
         }
     });
@@ -1322,7 +1323,7 @@ graph_type prune_edges(graph_type g1, graph_type g2){
                 //out edge
                 entries(row_map(i)) = v;
                 //in edge
-                entries(row_map(v + 1) - 1) = i;
+                //entries(row_map(v + 1) - 1) = i;
             }
         }
     });
@@ -1395,7 +1396,7 @@ graph_type transpose(graph_type g){
     Kokkos::parallel_for("reset edge count", n, KOKKOS_LAMBDA(const ordinal_t i){
         edge_count(i) = 0;
     });
-    vtx_view_t entries("pruned out entries", total_e);
+    vtx_view_t entries("out entries", total_e);
     assert(total_e == g.entries.extent(0));
     Kokkos::parallel_for("write transpose edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         for(edge_offset_t j = g.row_map(i); j < g.row_map(i + 1); j++){
@@ -1408,7 +1409,29 @@ graph_type transpose(graph_type g){
     return transposed;
 }
 
-void coarsen_de_bruijn_full_cycle(graph_type g, ExperimentLoggerUtil& experiment){
+graph_type transpose_and_sort(matrix_t interp, graph_type g){
+    matrix_t interp_transpose = KokkosKernels::Impl::transpose_matrix(interp);
+    ordinal_t nc = interp_transpose.numRows();
+    Kokkos::parallel_for("sort tranpose entries", policy_t(1, nc), KOKKOS_LAMBDA(const ordinal_t i){
+        //bubble-sort entries where g is a directed acyclic graph
+        edge_offset_t start = interp_transpose.graph.row_map(i);
+        edge_offset_t end = interp_transpose.graph.row_map(i + 1);
+        for(edge_offset_t x = end; x > start; x--){
+            for(edge_offset_t y = start + 1; y < x; y++){
+                ordinal_t u = interp_transpose.graph.entries(y - 1);
+                ordinal_t v = interp_transpose.graph.entries(y);
+                //if there is an edge from v -> u, swap v and u
+                if(g.entries(g.row_map(v)) == u){
+                    interp_transpose.graph.entries(y - 1) = v;
+                    interp_transpose.graph.entries(y) = u;
+                }
+            }
+        }
+    });
+    return interp_transpose.graph;
+}
+
+std::list<graph_type> coarsen_de_bruijn_full_cycle(graph_type g, ExperimentLoggerUtil& experiment){
     {
         graph_type transposed = transpose(g);
         g = prune_edges(g, transposed);
@@ -1416,7 +1439,7 @@ void coarsen_de_bruijn_full_cycle(graph_type g, ExperimentLoggerUtil& experiment
     std::list<graph_type> levels;
     std::list<matrix_t> level_interp;
     levels.push_back(g);
-    while(levels.rbegin()->numRows() > 1){
+    while(levels.rbegin()->numRows() > 0){
         graph_type cur = *levels.rbegin();
         printf("Calculating coarse graph %ld\n", levels.size());
         printf("input vertices: %u; nnz: %lu\n", cur.numRows(), cur.entries.extent(0));
@@ -1425,6 +1448,16 @@ void coarsen_de_bruijn_full_cycle(graph_type g, ExperimentLoggerUtil& experiment
         levels.push_back(next);
         level_interp.push_back(interp);
     }
+    auto g_iter = levels.begin();
+    auto interp_iter = level_interp.begin();
+    std::list<graph_type> glue_list;
+    while(interp_iter != level_interp.end()){
+        graph_type cur = transpose_and_sort(*interp_iter, *g_iter);
+        glue_list.push_back(cur);
+        interp_iter++;
+        g_iter++;
+    }
+    return glue_list;
 }
 
 //we can support weighted vertices pretty easily

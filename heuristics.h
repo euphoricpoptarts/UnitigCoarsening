@@ -283,6 +283,7 @@ public:
 
         Kokkos::parallel_for("initialize vcmap", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i) {
             vcmap(i) = ORD_MAX;
+            hn(i) = ORD_MAX;
         });
 
         Kokkos::Timer timer;
@@ -292,12 +293,26 @@ public:
 
         Kokkos::parallel_for("edge choose", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i) {
             ordinal_t adj_size = g.row_map(i + 1) - g.row_map(i);
+            //i has an out edge
             if(adj_size > 0){
-                //up to two possible edges, just choose the first one
-                hn(i) = g.entries(g.row_map(i));
-            } else {
-                //no edges, assign to output vertex
-                vcmap(i) = 0;
+                //only one edge is possible
+                //write its heaviest neighbor as me
+                ordinal_t v = g.entries(g.row_map(i));
+                hn(v) = i;
+            }
+        });
+        Kokkos::parallel_for("edge choose", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i) {
+            //i has no in edge
+            if(hn(i) == ORD_MAX){
+                ordinal_t adj_size = g.row_map(i + 1) - g.row_map(i);
+                //i has an out edge
+                if(adj_size > 0){
+                    ordinal_t v = g.entries(g.row_map(i));
+                    hn(i) = v;
+                } else {
+                    //no edges, assign to output vertex
+                    vcmap(i) = 0;
+                }
             }
         });
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Heavy, timer.seconds());

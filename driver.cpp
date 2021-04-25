@@ -121,7 +121,7 @@ ordinal_t find_vtx(const char_view_t chars, const vtx_view_t vtx_map, size_t off
     hash = hash & hash_cast;
     while(vtx_map(hash) != ORD_MAX){
         size_t opposite_offset = vtx_map(hash)*k;
-        if(cmp(chars, chars, offset, opposite_offset, k - 1) && extension == char(opposite_offset + (k - 1))){
+        if(cmp(chars, chars, offset, opposite_offset, k - 1) && (extension == chars(opposite_offset + (k - 1))) ){
             return vtx_map(hash);
         }
         hash = (hash + 1) & hash_cast;
@@ -138,7 +138,7 @@ vtx_view_t generate_hashmap(char_view_t kmers, int k, int size){
     });
     size_t hash_cast = hashmap_size - 1;
     Kokkos::parallel_for("fill hashmap", size, KOKKOS_LAMBDA(const ordinal_t i){
-        size_t hash = fnv(kmers, k*i, k) & hash_cast;
+        uint32_t hash = fnv(kmers, k*i, k) & hash_cast;
         bool success = Kokkos::atomic_compare_exchange_strong(&out(hash), ORD_MAX, i);
         //linear probing
         //all values are unique so no need to check
@@ -147,7 +147,7 @@ vtx_view_t generate_hashmap(char_view_t kmers, int k, int size){
             success = Kokkos::atomic_compare_exchange_strong(&out(hash), ORD_MAX, i);
         }
     });
-   return out; 
+    return out; 
 }
 
 struct prefix_sum1
@@ -191,7 +191,7 @@ graph_type assemble_graph(char_view_t kmers, char_view_t kpmers, vtx_view_t edge
         edge_count(i) = 0;
     });
     vtx_view_t entries("pruned out entries", total_e);
-    Kokkos::parallel_for("write transpose edges", n, KOKKOS_LAMBDA(const ordinal_t i){
+    Kokkos::parallel_for("write edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         for(int j = 0; j < 4; j++){
             //check if edge exists
             if(find_edge(kmers, kpmers, edge_map, i*k, k, edges[j])){
@@ -220,8 +220,8 @@ int main(int argc, char **argv) {
         char_view_t kmers, kpmers;
         load_kmers(kmers, kmer_fname, k);
         load_kmers(kpmers, kpmer_fname, k+1);
-        printf("kmer size: %lu\n", kmers.extent(0));
-        printf("(k+1)-mer size: %lu\n", kpmers.extent(0));
+        printf("kmer size: %lu, kmers: %lu\n", kmers.extent(0), kmers.extent(0)/k);
+        printf("(k+1)-mer size: %lu, (k+1)mers: %lu\n", kpmers.extent(0), kpmers.extent(0)/(k+1));
         vtx_view_t vtx_map = generate_hashmap(kmers, k, kmers.extent(0)/k);
         vtx_view_t edge_map = generate_hashmap(kpmers, k + 1, kpmers.extent(0)/(k + 1));
         printf("kmer hashmap size: %lu\n", vtx_map.extent(0));
@@ -231,10 +231,11 @@ int main(int argc, char **argv) {
         //graph_type g;
         //load_graph(g, filename);
         //printf("vertices: %u; nnz: %lu\n", g.numRows(), g.entries.extent(0));
-        //using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
-        //coarsener_t coarsener;
-        //ExperimentLoggerUtil experiment;
-        //coarsener.coarsen_de_bruijn_full_cycle(g, experiment);
+        using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
+        coarsener_t coarsener;
+        ExperimentLoggerUtil experiment;
+        std::list<graph_type> glue_list = coarsener.coarsen_de_bruijn_full_cycle(g, experiment);
+        printf("glue list length: %lu\n", glue_list.size());
     }
     Kokkos::finalize();
     return 0;
