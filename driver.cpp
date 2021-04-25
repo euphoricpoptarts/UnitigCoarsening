@@ -70,6 +70,22 @@ int load_kmers(char_view_t& out, char *fname, int k) {
     return 0;
 }
 
+void write_to_f(char_view_t unitigs, edge_view_t unitig_offsets){
+    char_mirror_t chars("chars", unitigs.extent(0));
+    Kokkos::deep_copy(chars, unitigs);
+    edge_mirror_t offsets("offsets", unitig_offsets.extent(0));
+    Kokkos::deep_copy(offsets, unitig_offsets);
+    std::ofstream of("dump/unitigs.txt", std::ofstream::out | std::ofstream::app);
+    ordinal_t n = offsets.extent(0) - 1;
+    for(ordinal_t i = 0; i < n; i++){
+        edge_offset_t string_size = offsets(i + 1) - offsets(i);
+        char* buf_start = chars.data() + offsets(i);
+        std::string s(buf_start, string_size);
+        of << s << std::endl;
+    }
+    of.close();
+}
+
 void write_unitigs(char_view_t kmers, edge_view_t kmer_offsets, graph_type glue_action){
     edge_offset_t write_size = 0;
     c_edge_subview_t start_writes_sub = Kokkos::subview(glue_action.row_map, 0);
@@ -102,6 +118,7 @@ void write_unitigs(char_view_t kmers, edge_view_t kmer_offsets, graph_type glue_
             write_offset++;
         }
     });
+    write_to_f(writes, write_sizes);
 }
 
 void compress_unitigs(char_view_t& kmers, edge_view_t& kmer_offsets, graph_type glue_action, int k){
@@ -190,6 +207,7 @@ int main(int argc, char **argv) {
         char_view_t kmers, kpmers;
         load_kmers(kmers, kmer_fname, k);
         load_kmers(kpmers, kpmer_fname, k+1);
+        Kokkos::Timer t;
         printf("kmer size: %lu, kmers: %lu\n", kmers.extent(0), kmers.extent(0)/k);
         printf("(k+1)-mer size: %lu, (k+1)mers: %lu\n", kpmers.extent(0), kpmers.extent(0)/(k+1));
         vtx_view_t vtx_map = generate_hashmap(kmers, k, kmers.extent(0)/k);
@@ -207,6 +225,8 @@ int main(int argc, char **argv) {
         std::list<graph_type> glue_list = coarsener.coarsen_de_bruijn_full_cycle(g, experiment);
         printf("glue list length: %lu\n", glue_list.size());
         compress_unitigs_maximally(kmers, glue_list, k);
+        printf("Total time: %.3fs\n", t.seconds());
+        t.reset();
     }
     Kokkos::finalize();
     return 0;

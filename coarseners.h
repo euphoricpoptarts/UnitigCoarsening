@@ -1416,25 +1416,55 @@ graph_type transpose_and_sort(matrix_t interp, graph_type g){
         //bubble-sort entries where g is a directed acyclic graph
         edge_offset_t start = interp_transpose.graph.row_map(i);
         edge_offset_t end = interp_transpose.graph.row_map(i + 1);
-        for(edge_offset_t x = end; x > start; x--){
-            for(edge_offset_t y = start + 1; y < x; y++){
-                ordinal_t u = interp_transpose.graph.entries(y - 1);
-                ordinal_t v = interp_transpose.graph.entries(y);
-                //if there is an edge from v -> u, swap v and u
-                if(g.entries(g.row_map(v)) == u){
-                    interp_transpose.graph.entries(y - 1) = v;
-                    interp_transpose.graph.entries(y) = u;
+        ordinal_t end_vertex = ORD_MAX;
+        for(edge_offset_t x = start; x < end; x++){
+            ordinal_t u = interp_transpose.graph.entries(x);
+            edge_offset_t ec = g.row_map(u + 1) - g.row_map(u);
+            if(ec == 0){
+                //last vertex in path
+                //only one fine vertex in a coarse vertex can satisfy this condition
+                interp_transpose.graph.entries(x) = interp_transpose.graph.entries(end - 1);
+                interp_transpose.graph.entries(end - 1) = u;
+                end_vertex = u;
+                break;
+            } else {
+                ordinal_t v = g.entries(g.row_map(u));
+                if(interp.graph.entries(v) != i){
+                    //last vertex in path contained in this coarse vertex
+                    //only one fine vertex in a coarse vertex can satisfy either this or the previous condition
+                    interp_transpose.graph.entries(x) = interp_transpose.graph.entries(end - 1);
+                    interp_transpose.graph.entries(end - 1) = u;
+                    end_vertex = u;
+                    break;
                 }
             }
         }
+        end--;
+        while(end > start){
+            for(edge_offset_t x = start; x < end; x++){
+                ordinal_t u = interp_transpose.graph.entries(x);
+                //u MUST have an edge
+                ordinal_t v = g.entries(g.row_map(u));
+                if(v == end_vertex){
+                    interp_transpose.graph.entries(x) = interp_transpose.graph.entries(end - 1);
+                    interp_transpose.graph.entries(end - 1) = u;
+                    end_vertex = u;
+                    break;
+                }
+            }
+            end--;
+        }
     });
+    dont = true;
     return interp_transpose.graph;
 }
 
 std::list<graph_type> coarsen_de_bruijn_full_cycle(graph_type g, ExperimentLoggerUtil& experiment){
+    //g contains out edges only
     {
         graph_type transposed = transpose(g);
-        g = prune_edges(g, transposed);
+        //first parameter is 'in' edges, second parameter is 'out' edges
+        g = prune_edges(transposed, g);
     }
     std::list<graph_type> levels;
     std::list<matrix_t> level_interp;
