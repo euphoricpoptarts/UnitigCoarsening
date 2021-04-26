@@ -1236,99 +1236,60 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     return next_level;
 }
 
-graph_type coarsen_de_bruijn_graph(graph_type g, matrix_t interp){
-    ordinal_t n = g.numRows();
+vtx_view_t coarsen_de_bruijn_graph(vtx_view_t g, matrix_t interp){
+    ordinal_t n = g.extent(0);
     ordinal_t nc = interp.numCols();
-    //vtx 0 maps vertices with no edges, which we don't care about
-    //we remove vtx 0 from the graph
-    edge_view_t edge_count("edge count", nc - 1);
-    Kokkos::parallel_for("count edges", n, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = interp.graph.entries(i);
-        if(u > 0){
-            //printf("%u -> %u\n", i + 1, u);
-            for(ordinal_t j = g.row_map(i); j < g.row_map(i + 1); j++){
-                ordinal_t f = g.entries(j);
-                ordinal_t v = interp.graph.entries(f);
-                if(u != v){
-                    //only two possible edges for each u
-                    //one in and one out
-                    //don't care which is which
-                    //shift vtx id down by 1
-                    Kokkos::atomic_increment(&edge_count(u - 1));
-                }
-            }
-        }
-    });
-    edge_view_t row_map("row map", nc);
-    Kokkos::parallel_scan("calc source offsets", policy_t(0, nc - 1), prefix_sum(edge_count, row_map));
-    edge_subview_t rm_subview = Kokkos::subview(row_map, nc - 1);
-    edge_offset_t total_edges = 0;
-    Kokkos::deep_copy(total_edges, rm_subview);
-    vtx_view_t entries("entries", total_edges);
-    Kokkos::parallel_for("reset edge count", nc - 1, KOKKOS_LAMBDA(const ordinal_t i){
-        edge_count(i) = 0;
+    vtx_view_t entries("entries", nc - 1);
+    Kokkos::parallel_for("init entries", nc, KOKKOS_LAMBDA(const ordinal_t i){
+        entries(i) = ORD_MAX;
     });
     Kokkos::parallel_for("write edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t u = interp.graph.entries(i);
         if(u > 0){
-            for(ordinal_t j = g.row_map(i); j < g.row_map(i + 1); j++){
-                ordinal_t f = g.entries(j);
+            //u is not the null aggregate
+            ordinal_t f = g(i);
+            if(f != ORD_MAX){
+                //f is a real edge
+                //v can't be the null aggregate if an edge points to it
                 ordinal_t v = interp.graph.entries(f);
                 if(u != v){
-                    //shift vtx ids down by 1
-                    edge_offset_t insert = row_map(u - 1) + Kokkos::atomic_fetch_add(&edge_count(u - 1), 1);
-                    entries(insert) = v - 1;
+                    entries(u - 1) = v - 1;
                 }
             }
         }
     });
-    printf("nc: %u; edges: %u\n", nc - 1, total_edges);
-    graph_type gc(entries, row_map);
-    return gc;
+    return entries;
 }
 
 //remove all out-edges for any vertex with more than 1 out-edge
 //remove all in-edges for any vertex with more than 1 in-edge
 //output graph contains only out-edges
-graph_type prune_edges(graph_type g1, graph_type g2){
-    //g1 contains in edges, g2 contains out edges
-    ordinal_t n = g1.numRows();
-    edge_view_t row_map("pruned row map", n+1);
-    edge_view_t edge_count("edge count", n);
+//index is out vertex, value is in vertex
+vtx_view_t prune_edges(graph_type g){
+    ordinal_t n = g.numRows();
+    vtx_view_t edge_count("in edge count", n);
     Kokkos::parallel_for("count path edges", n, KOKKOS_LAMBDA(const ordinal_t i){
-        //vertex i has exactly 1 out edge
-        if(g2.row_map(i + 1) - g2.row_map(i) == 1){
-            //id of the "in" vertex of the edge
-            ordinal_t v = g2.entries(g2.row_map(i));
-            //vertex v has exactly 1 in edge
-            if(g1.row_map(v + 1) - g1.row_map(v) == 1){
-                edge_count(i) = 1;
-                //Kokkos::atomic_increment(&edge_count(i));
-                //Kokkos::atomic_increment(&edge_count(v));
-            }
+        for(edge_offset_t j = g.row_map(i); j < g.row_map(i + 1); j++){
+            ordinal_t v = g.entries(j);
+            //count in edge for v
+            Kokkos::atomic_increment(&edge_count(v));
         }
     });
-    Kokkos::parallel_scan("calc source offsets", policy_t(0, n), prefix_sum(edge_count, row_map));
-    edge_subview_t rm_subview = Kokkos::subview(row_map, n);
-    edge_offset_t total_paths = 0;
-    Kokkos::deep_copy(total_paths, rm_subview);
-    vtx_view_t entries("pruned out entries", total_paths);
+    vtx_view_t entries("pruned out entries", n);
+    Kokkos::parallel_for("init entries", n, KOKKOS_LAMBDA(const ordinal_t i){
+        entries(i) = ORD_MAX;
+    });
     Kokkos::parallel_for("write path edges", n, KOKKOS_LAMBDA(const ordinal_t i){
-        //vertex i has exactly 1 out edge
-        if(g2.row_map(i + 1) - g2.row_map(i) == 1){
-            //id of the "in" vertex of the edge
-            ordinal_t v = g2.entries(g2.row_map(i));
+        //i must have 1 out edge
+        if(g.row_map(i + 1) - g.row_map(i) == 1){
+            ordinal_t v = g.entries(g.row_map(i));
             //vertex v has exactly 1 in edge
-            if(g1.row_map(v + 1) - g1.row_map(v) == 1){
-                //out edge
-                entries(row_map(i)) = v;
-                //in edge
-                //entries(row_map(v + 1) - 1) = i;
+            if(edge_count(v) == 1){
+                entries(i) = v;
             }
         }
     });
-    graph_type pruned(entries, row_map);
-    return pruned;
+    return entries;
 }
 
 matrix_t generate_coarse_mapping(const matrix_t g,
@@ -1382,7 +1343,7 @@ matrix_t generate_coarse_mapping(const matrix_t g,
 graph_type transpose(graph_type g){
     ordinal_t n = g.numRows();
     edge_view_t row_map("pruned row map", n+1);
-    edge_view_t edge_count("edge count", n);
+    vtx_view_t edge_count("edge count", n);
     Kokkos::parallel_for("count transpose edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         for(edge_offset_t j = g.row_map(i); j < g.row_map(i + 1); j++){
             ordinal_t v = g.entries(j);
@@ -1409,7 +1370,7 @@ graph_type transpose(graph_type g){
     return transposed;
 }
 
-graph_type transpose_and_sort(matrix_t interp, graph_type g){
+graph_type transpose_and_sort(matrix_t interp, vtx_view_t g){
     matrix_t interp_transpose = KokkosKernels::Impl::transpose_matrix(interp);
     ordinal_t nc = interp_transpose.numRows();
     Kokkos::parallel_for("sort tranpose entries", policy_t(1, nc), KOKKOS_LAMBDA(const ordinal_t i){
@@ -1417,10 +1378,10 @@ graph_type transpose_and_sort(matrix_t interp, graph_type g){
         edge_offset_t start = interp_transpose.graph.row_map(i);
         edge_offset_t end = interp_transpose.graph.row_map(i + 1);
         ordinal_t end_vertex = ORD_MAX;
+        //find the last vertex in the ordering
         for(edge_offset_t x = start; x < end; x++){
             ordinal_t u = interp_transpose.graph.entries(x);
-            edge_offset_t ec = g.row_map(u + 1) - g.row_map(u);
-            if(ec == 0){
+            if(g(u) == ORD_MAX){
                 //last vertex in path
                 //only one fine vertex in a coarse vertex can satisfy this condition
                 interp_transpose.graph.entries(x) = interp_transpose.graph.entries(end - 1);
@@ -1428,7 +1389,7 @@ graph_type transpose_and_sort(matrix_t interp, graph_type g){
                 end_vertex = u;
                 break;
             } else {
-                ordinal_t v = g.entries(g.row_map(u));
+                ordinal_t v = g(u);
                 if(interp.graph.entries(v) != i){
                     //last vertex in path contained in this coarse vertex
                     //only one fine vertex in a coarse vertex can satisfy either this or the previous condition
@@ -1441,10 +1402,11 @@ graph_type transpose_and_sort(matrix_t interp, graph_type g){
         }
         end--;
         while(end > start){
+            //find the vertex behind end_vertex
             for(edge_offset_t x = start; x < end; x++){
                 ordinal_t u = interp_transpose.graph.entries(x);
                 //u MUST have an edge
-                ordinal_t v = g.entries(g.row_map(u));
+                ordinal_t v = g(u);
                 if(v == end_vertex){
                     interp_transpose.graph.entries(x) = interp_transpose.graph.entries(end - 1);
                     interp_transpose.graph.entries(end - 1) = u;
@@ -1458,33 +1420,17 @@ graph_type transpose_and_sort(matrix_t interp, graph_type g){
     return interp_transpose.graph;
 }
 
-std::list<graph_type> coarsen_de_bruijn_full_cycle(graph_type g, ExperimentLoggerUtil& experiment){
-    //g contains out edges only
-    {
-        graph_type transposed = transpose(g);
-        //first parameter is 'in' edges, second parameter is 'out' edges
-        g = prune_edges(transposed, g);
-    }
-    std::list<graph_type> levels;
-    std::list<matrix_t> level_interp;
-    levels.push_back(g);
-    while(levels.rbegin()->numRows() > 0){
-        graph_type cur = *levels.rbegin();
-        printf("Calculating coarse graph %ld\n", levels.size());
-        printf("input vertices: %u; nnz: %lu\n", cur.numRows(), cur.entries.extent(0));
-        matrix_t interp = mapper.sgp_coarsen_HEC(cur, experiment);
-        graph_type next = coarsen_de_bruijn_graph(cur, interp);
-        levels.push_back(next);
-        level_interp.push_back(interp);
-    }
-    auto g_iter = levels.begin();
-    auto interp_iter = level_interp.begin();
+std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, ExperimentLoggerUtil& experiment){
     std::list<graph_type> glue_list;
-    while(interp_iter != level_interp.end()){
-        graph_type cur = transpose_and_sort(*interp_iter, *g_iter);
-        glue_list.push_back(cur);
-        interp_iter++;
-        g_iter++;
+    int count = 0;
+    while(cur.extent(0) > 0){
+        count++;
+        printf("Calculating coarse graph %d\n", count);
+        printf("input vertices: %lu\n", cur.extent(0));
+        matrix_t interp = mapper.sgp_coarsen_HEC(cur, experiment);
+        graph_type glue = transpose_and_sort(interp, cur);
+        glue_list.push_back(glue);
+        cur = coarsen_de_bruijn_graph(cur, interp);
     }
     return glue_list;
 }

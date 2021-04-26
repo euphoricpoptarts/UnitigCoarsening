@@ -93,7 +93,7 @@ void write_unitigs(char_view_t kmers, edge_view_t kmer_offsets, graph_type glue_
     edge_offset_t start_writes = 0, end_writes = 0;
     Kokkos::deep_copy(start_writes, start_writes_sub);
     Kokkos::deep_copy(end_writes, end_writes_sub);
-    vtx_view_t write_sizes("write sizes", end_writes - start_writes + 1);
+    edge_view_t write_sizes("write sizes", end_writes - start_writes + 1);
     Kokkos::parallel_scan("count writes", r_policy(start_writes, end_writes), KOKKOS_LAMBDA(const edge_offset_t i, edge_offset_t& update, const bool final){
         ordinal_t u = glue_action.entries(i);
         edge_offset_t size = kmer_offsets(u + 1) - kmer_offsets(u);
@@ -125,7 +125,7 @@ void compress_unitigs(char_view_t& kmers, edge_view_t& kmer_offsets, graph_type 
     edge_offset_t write_size = 0;
     //minus 2 because 0 is not processed, and row_map is one bigger than number of rows
     ordinal_t n = glue_action.row_map.extent(0) - 2;
-    vtx_view_t next_offsets("next offsets", n + 1);
+    edge_view_t next_offsets("next offsets", n + 1);
     Kokkos::parallel_scan("compute offsets", r_policy(1, n+1), KOKKOS_LAMBDA(const ordinal_t u, edge_offset_t& update, const bool final){
         edge_offset_t size = 0;
         bool first = true;
@@ -229,18 +229,24 @@ int main(int argc, char **argv) {
         vtx_view_t edge_map = generate_hashmap(kpmers, k + 1, kpmers.extent(0)/(k + 1));
         printf("kmer hashmap size: %lu\n", vtx_map.extent(0));
         printf("(k+1)-mer hashmap size: %lu\n", edge_map.extent(0));
-        graph_type g = assemble_graph(kmers, kpmers, edge_map, vtx_map, k);
         std::list<graph_type> glue_list;
-        char_mirror_t kmer_copy = move_to_main(kmers);
+        char_mirror_t kmer_copy;
         {
-            //don't need this anymore, delete them
-            Kokkos::resize(edge_map, 0);
-            Kokkos::resize(vtx_map, 0);
-            Kokkos::resize(kpmers, 0);
-            Kokkos::resize(kmers, 0);
-            printf("entries: %lu\n", g.entries.extent(0));
+            vtx_view_t g;
             using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
             coarsener_t coarsener;
+            {
+                graph_type g_base = assemble_graph(kmers, kpmers, edge_map, vtx_map, k);
+                printf("entries: %lu\n", g_base.entries.extent(0));
+                kmer_copy = move_to_main(kmers);
+                //don't need these anymore, delete them
+                Kokkos::resize(edge_map, 0);
+                Kokkos::resize(vtx_map, 0);
+                Kokkos::resize(kpmers, 0);
+                //will need this later but we made a copy
+                Kokkos::resize(kmers, 0);
+                g = coarsener.prune_edges(g_base);
+            }
             ExperimentLoggerUtil experiment;
             glue_list = coarsener.coarsen_de_bruijn_full_cycle(g, experiment);
         }

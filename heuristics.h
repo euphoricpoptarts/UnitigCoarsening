@@ -234,10 +234,10 @@ public:
         return interp;
     }
 
-    matrix_t sgp_coarsen_HEC(const graph_type g,
+    matrix_t sgp_coarsen_HEC(const vtx_view_t g,
         ExperimentLoggerUtil& experiment) {
 
-        ordinal_t n = g.numRows();
+        ordinal_t n = g.extent(0);
 
         vtx_view_t hn("heavies", n);
 
@@ -254,22 +254,20 @@ public:
         timer.reset();
 
         Kokkos::parallel_for("edge choose", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i) {
-            ordinal_t adj_size = g.row_map(i + 1) - g.row_map(i);
             //i has an out edge
-            if(adj_size > 0){
+            if(g(i) != ORD_MAX){
                 //only one edge is possible
                 //write its heaviest neighbor as me
-                ordinal_t v = g.entries(g.row_map(i));
+                ordinal_t v = g(i);
                 hn(v) = i;
             }
         });
         Kokkos::parallel_for("edge choose", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i) {
             //i has no in edge
             if(hn(i) == ORD_MAX){
-                ordinal_t adj_size = g.row_map(i + 1) - g.row_map(i);
                 //i has an out edge
-                if(adj_size > 0){
-                    ordinal_t v = g.entries(g.row_map(i));
+                if(g(i) != ORD_MAX){
+                    ordinal_t v = g(i);
                     hn(i) = v;
                 } else {
                     //no edges, assign to output vertex
