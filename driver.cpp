@@ -192,6 +192,18 @@ void compress_unitigs_maximally(char_view_t kmers, std::list<graph_type> glue_ac
     }
 }
 
+char_mirror_t move_to_main(char_view_t x){
+    char_mirror_t y("mirror", x.extent(0));
+    Kokkos::deep_copy(y, x);
+    return y;
+}
+
+char_view_t move_to_device(char_mirror_t x){
+    char_view_t y("device", x.extent(0));
+    Kokkos::deep_copy(y, x);
+    return y;
+}
+
 int main(int argc, char **argv) {
 
     if (argc < 5) {
@@ -218,15 +230,22 @@ int main(int argc, char **argv) {
         printf("kmer hashmap size: %lu\n", vtx_map.extent(0));
         printf("(k+1)-mer hashmap size: %lu\n", edge_map.extent(0));
         graph_type g = assemble_graph(kmers, kpmers, edge_map, vtx_map, k);
-        printf("entries: %lu\n", g.entries.extent(0));
-        //graph_type g;
-        //load_graph(g, filename);
-        //printf("vertices: %u; nnz: %lu\n", g.numRows(), g.entries.extent(0));
-        using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
-        coarsener_t coarsener;
-        ExperimentLoggerUtil experiment;
-        std::list<graph_type> glue_list = coarsener.coarsen_de_bruijn_full_cycle(g, experiment);
+        std::list<graph_type> glue_list;
+        char_mirror_t kmer_copy = move_to_main(kmers);
+        {
+            //don't need this anymore, delete them
+            Kokkos::resize(edge_map, 0);
+            Kokkos::resize(vtx_map, 0);
+            Kokkos::resize(kpmers, 0);
+            Kokkos::resize(kmers, 0);
+            printf("entries: %lu\n", g.entries.extent(0));
+            using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
+            coarsener_t coarsener;
+            ExperimentLoggerUtil experiment;
+            glue_list = coarsener.coarsen_de_bruijn_full_cycle(g, experiment);
+        }
         printf("glue list length: %lu\n", glue_list.size());
+        kmers = move_to_device(kmer_copy);
         compress_unitigs_maximally(kmers, glue_list, k, out_fname);
         printf("Total time: %.3fs\n", t.seconds());
         t.reset();
