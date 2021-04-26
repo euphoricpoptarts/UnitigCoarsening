@@ -8,7 +8,7 @@ namespace sgpar_kokkos{
 KOKKOS_INLINE_FUNCTION
 uint32_t fnv(const char_view_t chars, size_t offset, size_t k){
     uint32_t hash = 2166136261U;
-    for(uint32_t i = offset; i < offset + k; i++)
+    for(size_t i = offset; i < offset + k; i++)
     {
         hash = hash ^ (chars(i)); // xor next byte into the bottom of the hash
         hash = hash * 16777619; // Multiply by prime number found to work well
@@ -63,7 +63,7 @@ ordinal_t find_vtx(const char_view_t chars, const vtx_view_t vtx_map, size_t off
     return ORD_MAX;
 }
 
-vtx_view_t generate_hashmap(char_view_t kmers, int k, edge_offset_t size){
+vtx_view_t generate_hashmap(char_view_t kmers, size_t k, edge_offset_t size){
     size_t hashmap_size = 1;
     while(hashmap_size < 2*size) hashmap_size <<= 1;
     vtx_view_t out("hashmap", hashmap_size);
@@ -71,29 +71,14 @@ vtx_view_t generate_hashmap(char_view_t kmers, int k, edge_offset_t size){
         out(i) = ORD_MAX;
     });
     size_t hash_cast = hashmap_size - 1;
-    edge_subview_t counter("counter");
-    edge_subview_t s_counter("start counter");
     Kokkos::parallel_for("fill hashmap", size, KOKKOS_LAMBDA(const ordinal_t i){
         uint32_t hash = fnv(kmers, k*i, k) & hash_cast;
         bool success = Kokkos::atomic_compare_exchange_strong(&out(hash), ORD_MAX, i);
         //linear probing
         //all values are unique so no need to check
-        int retry_count = 0;
-        edge_offset_t s = Kokkos::atomic_fetch_add(&s_counter(), 1);
-        if(s > size - 100){
-            printf("started %u\n", s);
-        }
         while(!success){
-            retry_count++;
-            if(retry_count > 10000){
-                printf("struggling to find emtpy space; hashmap size: %lu; data entries: %d\n", hashmap_size, size);
-            }
             hash = (hash + 1) & hash_cast;
             success = Kokkos::atomic_compare_exchange_strong(&out(hash), ORD_MAX, i);
-        }
-        edge_offset_t c = Kokkos::atomic_fetch_add(&counter(), 1);
-        if(c > size - 100){
-            printf("finished %u\n", c);
         }
     });
     return out; 

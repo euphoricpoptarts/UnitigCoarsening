@@ -37,11 +37,11 @@ namespace sgpar {
      * Internal
      **********************************************************
      */
-#if defined(SGPAR_HUGEGRAPHS)
+#if defined(HUGE)
     typedef uint64_t ordinal_t;
 	static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
     typedef uint64_t edge_offset_t;
-#elif defined(SGPAR_LARGEGRAPHS)
+#elif defined(LARGE)
     typedef uint32_t ordinal_t;
 	static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
     typedef uint64_t edge_offset_t;

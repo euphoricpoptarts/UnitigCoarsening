@@ -13,5 +13,7 @@ add_compile_options(-O3)
 #add_compile_options(-g -DDEBUG)
 
 add_executable(main driver.cpp)
+add_executable(huge driver.cpp)
 
 #target_compile_definitions(main PUBLIC _KOKKOS EXPERIMENT HEC RADIX)
+target_compile_definitions(huge PUBLIC HUGE)
