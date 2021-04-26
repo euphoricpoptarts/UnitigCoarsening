@@ -70,12 +70,12 @@ int load_kmers(char_view_t& out, char *fname, int k) {
     return 0;
 }
 
-void write_to_f(char_view_t unitigs, edge_view_t unitig_offsets){
+void write_to_f(char_view_t unitigs, edge_view_t unitig_offsets, std::string fname){
     char_mirror_t chars("chars", unitigs.extent(0));
     Kokkos::deep_copy(chars, unitigs);
     edge_mirror_t offsets("offsets", unitig_offsets.extent(0));
     Kokkos::deep_copy(offsets, unitig_offsets);
-    std::ofstream of("dump/unitigs.txt", std::ofstream::out | std::ofstream::app);
+    std::ofstream of(fname, std::ofstream::out | std::ofstream::app);
     ordinal_t n = offsets.extent(0) - 1;
     for(ordinal_t i = 0; i < n; i++){
         edge_offset_t string_size = offsets(i + 1) - offsets(i);
@@ -86,7 +86,7 @@ void write_to_f(char_view_t unitigs, edge_view_t unitig_offsets){
     of.close();
 }
 
-void write_unitigs(char_view_t kmers, edge_view_t kmer_offsets, graph_type glue_action){
+void write_unitigs(char_view_t kmers, edge_view_t kmer_offsets, graph_type glue_action, std::string fname){
     edge_offset_t write_size = 0;
     c_edge_subview_t start_writes_sub = Kokkos::subview(glue_action.row_map, 0);
     c_edge_subview_t end_writes_sub = Kokkos::subview(glue_action.row_map, 1);
@@ -118,7 +118,7 @@ void write_unitigs(char_view_t kmers, edge_view_t kmer_offsets, graph_type glue_
             write_offset++;
         }
     });
-    write_to_f(writes, write_sizes);
+    write_to_f(writes, write_sizes, fname);
 }
 
 void compress_unitigs(char_view_t& kmers, edge_view_t& kmer_offsets, graph_type glue_action, int k){
@@ -180,13 +180,13 @@ edge_view_t sizes_init(ordinal_t n, int k){
     return sizes;
 }
 
-void compress_unitigs_maximally(char_view_t kmers, std::list<graph_type> glue_actions, int k){
+void compress_unitigs_maximally(char_view_t kmers, std::list<graph_type> glue_actions, int k, std::string fname){
     ordinal_t n = kmers.extent(0) / k;
     //there are issues compiling kernels if there is a std object in the function header
     edge_view_t sizes = sizes_init(n, k);
     auto glue_iter = glue_actions.begin();
     while(glue_iter != glue_actions.end()){
-        write_unitigs(kmers, sizes, *glue_iter);
+        write_unitigs(kmers, sizes, *glue_iter, fname);
         compress_unitigs(kmers, sizes, *glue_iter, k);
         glue_iter++;
     }
@@ -194,20 +194,23 @@ void compress_unitigs_maximally(char_view_t kmers, std::list<graph_type> glue_ac
 
 int main(int argc, char **argv) {
 
-    if (argc < 4) {
+    if (argc < 5) {
         printf("You input %d args\n", argc);
-        fprintf(stderr, "Usage: %s <k-mer file> <(k+1)-mer file> k\n", argv[0]);
+        fprintf(stderr, "Usage: %s <k-mer file> <(k+1)-mer file> k <output file>\n", argv[0]);
         return EXIT_FAILURE;
     }
     char *kmer_fname = argv[1];
     char *kpmer_fname = argv[2];
     int k = atoi(argv[3]);
+    std::string out_fname(argv[4]);
     Kokkos::initialize();
     {
         char_view_t kmers, kpmers;
+        Kokkos::Timer t;
         load_kmers(kmers, kmer_fname, k);
         load_kmers(kpmers, kpmer_fname, k+1);
-        Kokkos::Timer t;
+        printf("Read input data in %.3fs\n", t.seconds());
+        t.reset();
         printf("kmer size: %lu, kmers: %lu\n", kmers.extent(0), kmers.extent(0)/k);
         printf("(k+1)-mer size: %lu, (k+1)mers: %lu\n", kpmers.extent(0), kpmers.extent(0)/(k+1));
         vtx_view_t vtx_map = generate_hashmap(kmers, k, kmers.extent(0)/k);
@@ -224,7 +227,7 @@ int main(int argc, char **argv) {
         ExperimentLoggerUtil experiment;
         std::list<graph_type> glue_list = coarsener.coarsen_de_bruijn_full_cycle(g, experiment);
         printf("glue list length: %lu\n", glue_list.size());
-        compress_unitigs_maximally(kmers, glue_list, k);
+        compress_unitigs_maximally(kmers, glue_list, k, out_fname);
         printf("Total time: %.3fs\n", t.seconds());
         t.reset();
     }
