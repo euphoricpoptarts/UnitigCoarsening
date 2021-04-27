@@ -26,6 +26,7 @@ public:
     using wgt_view_t = Kokkos::View<scalar_t*, Device>;
     using edge_view_t = Kokkos::View<edge_offset_t*, Device>;
     using edge_subview_t = Kokkos::View<edge_offset_t, Device>;
+    using vtx_subview_t = Kokkos::View<ordinal_t, Device>;
     using graph_type = typename matrix_t::staticcrsgraph_type;
     using policy_t = Kokkos::RangePolicy<exec_space>;
     using team_policy_t = Kokkos::TeamPolicy<exec_space>;
@@ -134,30 +135,52 @@ vtx_view_t prune_edges(graph_type g){
     return entries;
 }
 
-graph_type transpose(graph_type g){
+//transposes the interpolation matrix
+graph_type transpose(matrix_t g){
     ordinal_t n = g.numRows();
-    edge_view_t row_map("pruned row map", n+1);
-    vtx_view_t edge_count("edge count", n);
+    ordinal_t nc = g.numCols();
+    edge_view_t row_map("pruned row map", nc+1);
+    vtx_view_t edge_count("edge count", nc);
     Kokkos::parallel_for("count transpose edges", n, KOKKOS_LAMBDA(const ordinal_t i){
-        for(edge_offset_t j = g.row_map(i); j < g.row_map(i + 1); j++){
-            ordinal_t v = g.entries(j);
+        ordinal_t v = g.graph.entries(i);
+        //a lot of vertices belong to the null aggregate, we want to process it separately
+        if(v != 0){
             Kokkos::atomic_increment(&edge_count(v));
         }
     });
-    Kokkos::parallel_scan("calc source offsets", policy_t(0, n), prefix_sum(edge_count, row_map));
-    edge_subview_t rm_subview = Kokkos::subview(row_map, n);
+    ordinal_t null_aggregate_size = 0;
+    vtx_subview_t nas_sv = Kokkos::subview(edge_count, 0);
+    Kokkos::parallel_reduce("count null aggregate vtx", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& sum){
+        ordinal_t v = g.graph.entries(i);
+        if(v == 0){
+            sum++;
+        }
+    }, null_aggregate_size);
+    Kokkos::deep_copy(nas_sv, null_aggregate_size);
+    Kokkos::parallel_scan("calc source offsets", policy_t(0, nc), prefix_sum(edge_count, row_map));
+    edge_subview_t rm_subview = Kokkos::subview(row_map, nc);
     edge_offset_t total_e = 0;
     Kokkos::deep_copy(total_e, rm_subview);
-    Kokkos::parallel_for("reset edge count", n, KOKKOS_LAMBDA(const ordinal_t i){
+    Kokkos::parallel_for("reset edge count", nc, KOKKOS_LAMBDA(const ordinal_t i){
         edge_count(i) = 0;
     });
     vtx_view_t entries("out entries", total_e);
-    assert(total_e == g.entries.extent(0));
+    assert(total_e == g.graph.entries.extent(0));
     Kokkos::parallel_for("write transpose edges", n, KOKKOS_LAMBDA(const ordinal_t i){
-        for(edge_offset_t j = g.row_map(i); j < g.row_map(i + 1); j++){
-            ordinal_t v = g.entries(j);
+        ordinal_t v = g.graph.entries(i);
+        if(v != 0){
             edge_offset_t insert = row_map(v) + Kokkos::atomic_fetch_add(&edge_count(v), 1);
             entries(insert) = i;
+        }
+    });
+    Kokkos::parallel_scan("write transpose edges", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
+        ordinal_t v = g.graph.entries(i);
+        if(v == 0){
+            if(final){
+                edge_offset_t insert = update;
+                entries(insert) = i;
+            }
+            update++;
         }
     });
     graph_type transposed(entries, row_map);
@@ -165,21 +188,21 @@ graph_type transpose(graph_type g){
 }
 
 graph_type transpose_and_sort(matrix_t interp, vtx_view_t g){
-    matrix_t interp_transpose = KokkosKernels::Impl::transpose_matrix(interp);
+    graph_type interp_transpose = transpose(interp);
     ordinal_t nc = interp_transpose.numRows();
     Kokkos::parallel_for("sort tranpose entries", policy_t(1, nc), KOKKOS_LAMBDA(const ordinal_t i){
         //bubble-sort entries where g is a directed acyclic graph
-        edge_offset_t start = interp_transpose.graph.row_map(i);
-        edge_offset_t end = interp_transpose.graph.row_map(i + 1);
+        edge_offset_t start = interp_transpose.row_map(i);
+        edge_offset_t end = interp_transpose.row_map(i + 1);
         ordinal_t end_vertex = ORD_MAX;
         //find the last vertex in the ordering
         for(edge_offset_t x = start; x < end; x++){
-            ordinal_t u = interp_transpose.graph.entries(x);
+            ordinal_t u = interp_transpose.entries(x);
             if(g(u) == ORD_MAX){
                 //last vertex in path
                 //only one fine vertex in a coarse vertex can satisfy this condition
-                interp_transpose.graph.entries(x) = interp_transpose.graph.entries(end - 1);
-                interp_transpose.graph.entries(end - 1) = u;
+                interp_transpose.entries(x) = interp_transpose.entries(end - 1);
+                interp_transpose.entries(end - 1) = u;
                 end_vertex = u;
                 break;
             } else {
@@ -187,8 +210,8 @@ graph_type transpose_and_sort(matrix_t interp, vtx_view_t g){
                 if(interp.graph.entries(v) != i){
                     //last vertex in path contained in this coarse vertex
                     //only one fine vertex in a coarse vertex can satisfy either this or the previous condition
-                    interp_transpose.graph.entries(x) = interp_transpose.graph.entries(end - 1);
-                    interp_transpose.graph.entries(end - 1) = u;
+                    interp_transpose.entries(x) = interp_transpose.entries(end - 1);
+                    interp_transpose.entries(end - 1) = u;
                     end_vertex = u;
                     break;
                 }
@@ -198,12 +221,13 @@ graph_type transpose_and_sort(matrix_t interp, vtx_view_t g){
         while(end > start){
             //find the vertex behind end_vertex
             for(edge_offset_t x = start; x < end; x++){
-                ordinal_t u = interp_transpose.graph.entries(x);
+                ordinal_t u = interp_transpose.entries(x);
                 //u MUST have an edge
+                //and v must be in the same aggregate
                 ordinal_t v = g(u);
                 if(v == end_vertex){
-                    interp_transpose.graph.entries(x) = interp_transpose.graph.entries(end - 1);
-                    interp_transpose.graph.entries(end - 1) = u;
+                    interp_transpose.entries(x) = interp_transpose.entries(end - 1);
+                    interp_transpose.entries(end - 1) = u;
                     end_vertex = u;
                     break;
                 }
@@ -211,7 +235,7 @@ graph_type transpose_and_sort(matrix_t interp, vtx_view_t g){
             end--;
         }
     });
-    return interp_transpose.graph;
+    return interp_transpose;
 }
 
 std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, ExperimentLoggerUtil& experiment){
