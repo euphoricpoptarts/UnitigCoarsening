@@ -102,10 +102,6 @@ public:
     //hn is a list of vertices such that vertex i wants to aggregate with vertex hn(i)
     ordinal_t parallel_map_construct(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t hn) {
 
-        vtx_view_t match("match", n);
-        Kokkos::parallel_for(policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i) {
-            match(i) = ORD_MAX;
-        });
         ordinal_t perm_length = 0;
         Kokkos::View<ordinal_t, Device> nvertices_coarse("nvertices");
         Kokkos::View<ordinal_t, Device> perm_length_dev("perm length");
@@ -142,12 +138,9 @@ public:
                 int condition = u < v;
                 //need to enforce an ordering condition to allow hard-stall conditions to be broken
                 if (condition ^ swap) {
-                    if (Kokkos::atomic_compare_exchange_strong(&match(u), ORD_MAX, v)) {
-                        if (u == v || Kokkos::atomic_compare_exchange_strong(&match(v), ORD_MAX, u)) {
-                            //ordinal_t cv = Kokkos::atomic_fetch_add(&nvertices_coarse(), 1);
-                            //u is allowed to acquire it's partner in the next step
-                            vcmap(u) = ORD_MAX - 1;//cv;
-                            vcmap(v) = ORD_MAX - 2;//cv;
+                    if (Kokkos::atomic_compare_exchange_strong(&vcmap(u), ORD_MAX, ORD_MAX - 1)) {
+                        if (u == v || Kokkos::atomic_compare_exchange_strong(&vcmap(v), ORD_MAX, ORD_MAX - 2)) {
+                            //do nothing here
                         }
                         else {
                             //u can join v's aggregate if it already has one
@@ -155,7 +148,7 @@ public:
                                 vcmap(u) = vcmap(v);
                             }
                             else {
-                                match(u) = ORD_MAX;
+                                vcmap(u) = ORD_MAX;
                             }
                         }
                     }
@@ -186,9 +179,6 @@ public:
                 if (vcmap(u) >= n) {
                     if(final){
                         next_perm(update) = u;
-                        //been noticing some memory erros on my machine, probably from memory overclock
-                        //this fixes the problem, and is lightweight
-                        match(u) = ORD_MAX;
                     }
                     update++;
                 }
