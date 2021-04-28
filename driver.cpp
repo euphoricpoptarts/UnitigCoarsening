@@ -48,7 +48,7 @@ int load_graph(graph_type& g, char *csr_filename) {
     return 0;
 }
 
-int load_kmers(char_view_t& out, char *fname, int k) {
+int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
 
     std::ifstream infp(fname);
     if (!infp.is_open()) {
@@ -121,7 +121,7 @@ void write_unitigs(char_view_t kmers, edge_view_t kmer_offsets, graph_type glue_
     write_to_f(writes, write_sizes, fname);
 }
 
-void compress_unitigs(char_view_t& kmers, edge_view_t& kmer_offsets, graph_type glue_action, int k){
+void compress_unitigs(char_view_t& kmers, edge_view_t& kmer_offsets, graph_type glue_action, edge_offset_t k){
     edge_offset_t write_size = 0;
     //minus 2 because 0 is not processed, and row_map is one bigger than number of rows
     ordinal_t n = glue_action.row_map.extent(0) - 2;
@@ -172,7 +172,7 @@ void compress_unitigs(char_view_t& kmers, edge_view_t& kmer_offsets, graph_type 
     kmer_offsets = next_offsets;
 }
 
-edge_view_t sizes_init(ordinal_t n, int k){
+edge_view_t sizes_init(ordinal_t n, edge_offset_t k){
     edge_view_t sizes("unitig sizes", n + 1);
     Kokkos::parallel_for("init sizes", n + 1, KOKKOS_LAMBDA(const ordinal_t i){
         sizes(i) = k*i;
@@ -180,7 +180,7 @@ edge_view_t sizes_init(ordinal_t n, int k){
     return sizes;
 }
 
-void compress_unitigs_maximally(char_view_t kmers, std::list<graph_type> glue_actions, int k, std::string fname){
+void compress_unitigs_maximally(char_view_t kmers, std::list<graph_type> glue_actions, edge_offset_t k, std::string fname){
     ordinal_t n = kmers.extent(0) / k;
     //there are issues compiling kernels if there is a std object in the function header
     edge_view_t sizes = sizes_init(n, k);
@@ -213,7 +213,7 @@ int main(int argc, char **argv) {
     }
     char *kmer_fname = argv[1];
     char *kpmer_fname = argv[2];
-    int k = atoi(argv[3]);
+    edge_offset_t k = atoi(argv[3]);
     std::string out_fname(argv[4]);
     Kokkos::initialize();
     {
@@ -226,9 +226,9 @@ int main(int argc, char **argv) {
         printf("kmer size: %lu, kmers: %lu\n", kmers.extent(0), kmers.extent(0)/k);
         printf("(k+1)-mer size: %lu, (k+1)mers: %lu\n", kpmers.extent(0), kpmers.extent(0)/(k+1));
         vtx_view_t vtx_map = generate_hashmap(kmers, k, kmers.extent(0)/k);
-        vtx_view_t edge_map = generate_hashmap(kpmers, k + 1, kpmers.extent(0)/(k + 1));
+        //vtx_view_t edge_map = generate_hashmap(kpmers, k + 1, kpmers.extent(0)/(k + 1));
         printf("kmer hashmap size: %lu\n", vtx_map.extent(0));
-        printf("(k+1)-mer hashmap size: %lu\n", edge_map.extent(0));
+        //printf("(k+1)-mer hashmap size: %lu\n", edge_map.extent(0));
         std::list<graph_type> glue_list;
         char_mirror_t kmer_copy;
         {
@@ -236,11 +236,12 @@ int main(int argc, char **argv) {
             using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
             coarsener_t coarsener;
             {
-                graph_type g_base = assemble_graph(kmers, kpmers, edge_map, vtx_map, k);
+                graph_type g_base = assemble_graph(kmers, kpmers, vtx_map, k);
                 printf("entries: %lu\n", g_base.entries.extent(0));
                 kmer_copy = move_to_main(kmers);
+                //this is likely the peak memory usage point of the program
                 //don't need these anymore, delete them
-                Kokkos::resize(edge_map, 0);
+                //Kokkos::resize(edge_map, 0);
                 Kokkos::resize(vtx_map, 0);
                 Kokkos::resize(kpmers, 0);
                 //will need this later but we made a copy
