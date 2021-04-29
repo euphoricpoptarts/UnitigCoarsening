@@ -19,6 +19,7 @@ public:
     using wgt_view_t = typename Kokkos::View<scalar_t*, Device>;
     using edge_view_t = typename Kokkos::View<edge_offset_t*, Device>;
     using edge_subview_t = typename Kokkos::View<edge_offset_t, Device>;
+    using vtx_subview_t = typename Kokkos::View<ordinal_t, Device>;
     using rand_view_t = typename Kokkos::View<uint64_t*, Device>;
     using graph_type = typename matrix_t::staticcrsgraph_type;
     using policy_t = typename Kokkos::RangePolicy<exec_space>;
@@ -29,6 +30,16 @@ public:
     using gen_t = typename pool_t::generator_type;
     using hasher_t = Kokkos::pod_hash<ordinal_t>;
     static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
+
+    struct interp_t
+    {
+        vtx_view_t entries;
+        ordinal_t nc, n;
+
+        interp_t(vtx_view_t _entries, ordinal_t _nc, ordinal_t _n) :
+            entries(_entries), nc(_nc), n(_n) {}
+    };
+
 
     template <class in, class out>
     Kokkos::View<out*, Device> sort_order(Kokkos::View<in*, Device> array, in max, in min) {
@@ -224,7 +235,7 @@ public:
         return interp;
     }
 
-    matrix_t sgp_coarsen_HEC(const vtx_view_t g,
+    interp_t sgp_coarsen_HEC(const vtx_view_t g,
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.extent(0);
@@ -271,23 +282,8 @@ public:
         nc = parallel_map_construct(vcmap, n, hn);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct, timer.seconds());
         timer.reset();
-
-        edge_view_t row_map("interpolate row map", n + 1);
-
-        Kokkos::parallel_for(policy_t(0, n + 1), KOKKOS_LAMBDA(ordinal_t u){
-            row_map(u) = u;
-        });
-
-        vtx_view_t entries("interpolate entries", n);
-        wgt_view_t values("interpolate values", n);
-        //compute the interpolation weights
-        Kokkos::parallel_for(policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u){
-            entries(u) = vcmap(u);
-            values(u) = 1.0;
-        });
-
-        graph_type graph(entries, row_map);
-        matrix_t interp("interpolate", nc, values, graph);
+    
+        interp_t interp(vcmap, nc, n);    
 
         return interp;
     }
