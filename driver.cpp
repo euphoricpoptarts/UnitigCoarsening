@@ -7,6 +7,7 @@
 #include <iostream>
 #include <fstream>
 #include <functional>
+#include <utility>
 
 #define CHECK_RETSTAT(func)                                                    \
 {                                                                              \
@@ -55,18 +56,23 @@ int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
         printf("Error: Could not open input file. Exiting ...\n");
         return EXIT_FAILURE;
     }
-    long n;
+    edge_offset_t n;
     infp >> n;
-    char_mirror_t char_mirror("char mirror", n*k);
+    //+1 for final null terminator
+    char_mirror_t char_mirror("char mirror", n*k + 1);
     for(long i = 0; i < n; i++){
         char* read_to = char_mirror.data() + i*k;
         int count = 0;
-        //may be a problem reading the null-terminator
+        //don't need to worry about reading null terminator into char_mirror
+        //because it will be overwritten for all but the last string
+        //we also allocated an extra char for the last string's null terminator
         infp >> read_to >> count;
     }
     infp.close();
     out = char_view_t("chars", n*k);
-    Kokkos::deep_copy(out, char_mirror);
+    //exclude the last character, which is the null terminator
+    char_mirror_t mirror_sub = Kokkos::subview(char_mirror, std::make_pair((edge_offset_t)0, n*k));
+    Kokkos::deep_copy(out, mirror_sub);
     return 0;
 }
 
