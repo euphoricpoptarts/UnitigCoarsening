@@ -229,6 +229,7 @@ int main(int argc, char **argv) {
         load_kmers(kpmers, kpmer_fname, k+1);
         printf("Read input data in %.3fs\n", t.seconds());
         t.reset();
+        Kokkos::Timer t2;
         printf("kmer size: %lu, kmers: %lu\n", kmers.extent(0), kmers.extent(0)/k);
         printf("(k+1)-mer size: %lu, (k+1)mers: %lu\n", kpmers.extent(0), kpmers.extent(0)/(k+1));
         vtx_view_t vtx_map = generate_hashmap(kmers, k, kmers.extent(0)/k);
@@ -237,6 +238,7 @@ int main(int argc, char **argv) {
         //printf("(k+1)-mer hashmap size: %lu\n", edge_map.extent(0));
         std::list<graph_type> glue_list;
         char_mirror_t kmer_copy;
+        ExperimentLoggerUtil experiment;
         {
             vtx_view_t g;
             using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
@@ -254,14 +256,23 @@ int main(int argc, char **argv) {
                 Kokkos::resize(kmers, 0);
                 g = coarsener.prune_edges(g_base);
             }
-            ExperimentLoggerUtil experiment;
+            printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
+            t.reset();
             glue_list = coarsener.coarsen_de_bruijn_full_cycle(g, experiment);
         }
         printf("glue list length: %lu\n", glue_list.size());
-        kmers = move_to_device(kmer_copy);
-        compress_unitigs_maximally(kmers, glue_list, k, out_fname);
-        printf("Total time: %.3fs\n", t.seconds());
+        printf("Time to generate glue list: %.3fs\n", t.seconds());
+        printf("Aggregation time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Map));
+        printf("Coarse graph build time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Build));
+        printf("Interpolation graph transpose time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose));
         t.reset();
+        kmers = move_to_device(kmer_copy);
+        t.reset();
+        compress_unitigs_maximally(kmers, glue_list, k, out_fname);
+        printf("Time to compact unitigs: %.3fs\n", t.seconds());
+        t.reset();
+        printf("Total time: %.3fs\n", t2.seconds());
+        t2.reset();
     }
     Kokkos::finalize();
     return 0;

@@ -25,6 +25,7 @@ public:
 		FMRecoarsen,
 		Heavy,
         InitTransfer,
+        InterpTranspose,
 		END
 	};
 	std::vector<std::string> measurementNames{
@@ -42,7 +43,8 @@ public:
 		"fm-refine",
 		"fm-recoarsen",
 		"heavy",
-        "initial-transfer-to-device"
+        "initial-transfer-to-device",
+        "interp-transpose"
 	};
 	std::vector<double> measurements;
 

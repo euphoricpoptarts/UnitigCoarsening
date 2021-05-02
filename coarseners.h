@@ -242,14 +242,22 @@ graph_type transpose_and_sort(interp_t interp, vtx_view_t g){
 std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, ExperimentLoggerUtil& experiment){
     std::list<graph_type> glue_list;
     int count = 0;
+    Kokkos::Timer timer;
     while(cur.extent(0) > 0){
         count++;
         printf("Calculating coarse graph %d\n", count);
         printf("input vertices: %lu\n", cur.extent(0));
+        timer.reset();
         interp_t interp = mapper.sgp_coarsen_HEC(cur, experiment);
+        experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
+        timer.reset();
         graph_type glue = transpose_and_sort(interp, cur);
         glue_list.push_back(glue);
+        experiment.addMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose, timer.seconds());
+        timer.reset();
         cur = coarsen_de_bruijn_graph(cur, interp);
+        experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Build, timer.seconds());
+        timer.reset();
     }
     return glue_list;
 }
