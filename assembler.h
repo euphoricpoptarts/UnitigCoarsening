@@ -120,6 +120,35 @@ struct prefix_sum1
     }
 };
 
+vtx_view_t assemble_pruned_graph(char_view_t kmers, char_view_t kpmers, vtx_view_t vtx_map, edge_offset_t k){
+    ordinal_t n = kmers.extent(0) / k;
+    ordinal_t np = kpmers.extent(0) / (k + 1);
+    //both the in and out edge counts for each vertex are packed into one char
+    char_view_t edge_count("edge count", n);
+    Kokkos::parallel_for("count edges", np, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t u = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1), k);
+        ordinal_t v = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1) + 1, k);
+        //u can have at most 4 edges
+        //so we count the in edges as multiples of 8 (first power of 2 greater than 4, easy to do bitwise ops)
+        Kokkos::atomic_add(&edge_count(u), (char)1);
+        Kokkos::atomic_add(&edge_count(v), (char)8);
+    });
+    vtx_view_t g("pruned out entries", n);
+    Kokkos::parallel_for("init g", n, KOKKOS_LAMBDA(const ordinal_t i){
+        g(i) = ORD_MAX;
+    });
+    Kokkos::parallel_for("write edges", np, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t u = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1), k);
+        ordinal_t v = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1) + 1, k);
+        //u has one out edge
+        //and v has one in edge
+        if((edge_count(u) & 7) == 1 && (edge_count(v) >> 3) == 1){
+            g(u) = v;
+        }
+    });
+    return g;
+}
+
 graph_type assemble_graph(char_view_t kmers, char_view_t kpmers, vtx_view_t vtx_map, edge_offset_t k){
     ordinal_t n = kmers.extent(0) / k;
     ordinal_t np = kpmers.extent(0) / (k + 1);
