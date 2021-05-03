@@ -49,6 +49,89 @@ int load_graph(graph_type& g, char *csr_filename) {
     return 0;
 }
 
+char_view_t read_kmers(char *fname){
+
+    FILE* infp = fopen(fname, "rb");
+    if (infp == NULL) {
+        std::cout << "Error: could not open output file " << fname << "! Exiting" << std::endl;
+        exit(1);
+    }
+
+    ordinal_t n;
+    edge_offset_t k;
+
+    assert(fread(&n, sizeof(ordinal_t), 1, infp) != 0);
+    assert(fread(&k, sizeof(edge_offset_t), 1, infp) != 0);
+    char_view_t kmers("kmers", n*k);
+    char_mirror_t kmers_m = Kokkos::create_mirror_view(kmers);
+    size_t nitems_read = fread(kmers_m.data(), sizeof(char), n*k , infp);
+    assert(nitems_read == ((size_t) n*k));
+    fclose(infp);
+    
+    Kokkos::deep_copy(kmers, kmers_m);
+
+    return kmers;
+}
+
+int save_kmers(char_view_t kmers, edge_offset_t k, char *fname){
+
+    FILE* writeBinaryPtr = fopen(fname, "wb");
+    if (writeBinaryPtr == NULL) {
+        std::cout << "Error: could not open output file " << fname << "! Exiting" << std::endl;
+        exit(1);
+    }
+
+    ordinal_t n = kmers.extent(0) / k;
+    char_mirror_t kmers_m("kmers mirror", kmers.extent(0));
+    Kokkos::deep_copy(kmers_m, kmers);
+
+    fwrite(&n, sizeof(ordinal_t), 1, writeBinaryPtr);
+    fwrite(&k, sizeof(edge_offset_t), 1, writeBinaryPtr);
+    fwrite(kmers_m.data(), sizeof(char), kmers.extent(0), writeBinaryPtr);
+    fclose(writeBinaryPtr);
+    return 0;
+}
+
+vtx_view_t read_pruned_graph(char *fname){
+
+    FILE* infp = fopen(fname, "rb");
+    if (infp == NULL) {
+        std::cout << "Error: could not open output file " << fname << "! Exiting" << std::endl;
+        exit(1);
+    }
+
+    ordinal_t n;
+
+    assert(fread(&n, sizeof(ordinal_t), 1, infp) != 0);
+    vtx_view_t g("g", n);
+    vtx_mirror_t g_m = Kokkos::create_mirror_view(g);
+    size_t nitems_read = fread(g_m.data(), sizeof(ordinal_t), n , infp);
+    assert(nitems_read == ((size_t) n));
+    fclose(infp);
+    
+    Kokkos::deep_copy(g, g_m);
+
+    return g;
+}
+
+int save_pruned_graph(vtx_view_t g, char *fname){
+
+    FILE* writeBinaryPtr = fopen(fname, "wb");
+    if (writeBinaryPtr == NULL) {
+        std::cout << "Error: could not open output file " << fname << "! Exiting" << std::endl;
+        exit(1);
+    }
+
+    ordinal_t n = g.extent(0);
+    vtx_mirror_t g_m("g mirror", n);
+    Kokkos::deep_copy(g_m, g);
+
+    fwrite(&n, sizeof(ordinal_t), 1, writeBinaryPtr);
+    fwrite(g_m.data(), sizeof(ordinal_t), n, writeBinaryPtr);
+    fclose(writeBinaryPtr);
+    return 0;
+}
+
 int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
 
     std::ifstream infp(fname);
@@ -210,17 +293,61 @@ char_view_t move_to_device(char_mirror_t x){
     return y;
 }
 
+#ifdef COMPACT
 int main(int argc, char **argv) {
 
     if (argc < 5) {
         printf("You input %d args\n", argc);
-        fprintf(stderr, "Usage: %s <k-mer file> <(k+1)-mer file> k <output file>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <k-mer binary> <g binary> k <output file>\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+    char *kmer_fname = argv[1];
+    char *g_fname = argv[2];
+    edge_offset_t k = atoi(argv[3]);
+    std::string out_fname(argv[4]);
+    Kokkos::initialize();
+    {
+        Kokkos::Timer t;
+        Kokkos::Timer t2;
+        ExperimentLoggerUtil experiment;
+        std::list<graph_type> glue_list;
+        {
+            vtx_view_t g = read_pruned_graph(g_fname);
+            using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
+            coarsener_t coarsener;
+            glue_list = coarsener.coarsen_de_bruijn_full_cycle(g, experiment);
+        }
+        printf("glue list length: %lu\n", glue_list.size());
+        printf("Time to generate glue list: %.3fs\n", t.seconds());
+        printf("Aggregation time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Map));
+        printf("Coarse graph build time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Build));
+        printf("Interpolation graph transpose time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose));
+        t.reset();
+        char_view_t kmers = read_kmers(kmer_fname);
+        printf("Time to transfer kmers back to device: %.3fs\n", t.seconds());
+        t.reset();
+        compress_unitigs_maximally(kmers, glue_list, k, out_fname);
+        printf("Time to compact unitigs: %.3fs\n", t.seconds());
+        t.reset();
+        printf("Total time: %.3fs\n", t2.seconds());
+        t2.reset();
+    }
+    Kokkos::finalize();
+    return 0;
+}
+#elif defined(PRUNE)
+int main(int argc, char **argv) {
+
+    if (argc < 6) {
+        printf("You input %d args\n", argc);
+        fprintf(stderr, "Usage: %s <k-mer file> <(k+1)-mer file> k <output kmer file> <output graph file>\n", argv[0]);
         return EXIT_FAILURE;
     }
     char *kmer_fname = argv[1];
     char *kpmer_fname = argv[2];
     edge_offset_t k = atoi(argv[3]);
-    std::string out_fname(argv[4]);
+    char *out_kname(argv[4]);
+    char *out_gname(argv[5]);
     Kokkos::initialize();
     {
         char_view_t kmers, kpmers;
@@ -246,34 +373,21 @@ int main(int argc, char **argv) {
             {
                 graph_type g_base = assemble_graph(kmers, kpmers, vtx_map, k);
                 printf("entries: %lu\n", g_base.entries.extent(0));
-                kmer_copy = move_to_main(kmers);
                 //this is likely the peak memory usage point of the program
                 //don't need these anymore, delete them
                 //Kokkos::resize(edge_map, 0);
                 Kokkos::resize(vtx_map, 0);
                 Kokkos::resize(kpmers, 0);
                 //will need this later but we made a copy
-                Kokkos::resize(kmers, 0);
                 g = coarsener.prune_edges(g_base);
             }
             printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
             t.reset();
-            glue_list = coarsener.coarsen_de_bruijn_full_cycle(g, experiment);
+            save_pruned_graph(g, out_gname);
+            save_kmers(kmers, k, out_kname);
         }
-        printf("glue list length: %lu\n", glue_list.size());
-        printf("Time to generate glue list: %.3fs\n", t.seconds());
-        printf("Aggregation time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Map));
-        printf("Coarse graph build time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Build));
-        printf("Interpolation graph transpose time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose));
-        t.reset();
-        kmers = move_to_device(kmer_copy);
-        t.reset();
-        compress_unitigs_maximally(kmers, glue_list, k, out_fname);
-        printf("Time to compact unitigs: %.3fs\n", t.seconds());
-        t.reset();
-        printf("Total time: %.3fs\n", t2.seconds());
-        t2.reset();
     }
     Kokkos::finalize();
     return 0;
 }
+#endif
