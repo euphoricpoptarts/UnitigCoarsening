@@ -8,6 +8,7 @@
 #include <fstream>
 #include <functional>
 #include <utility>
+#include <filesystem>
 
 #define CHECK_RETSTAT(func)                                                    \
 {                                                                              \
@@ -21,6 +22,7 @@
 
 using namespace sgpar;
 using namespace sgpar::sgpar_kokkos;
+namespace fs = std::filesystem;
 
 int load_graph(graph_type& g, char *csr_filename) {
 
@@ -49,30 +51,55 @@ int load_graph(graph_type& g, char *csr_filename) {
     return 0;
 }
 
+size_t getFileLength(const char *fname){
+    // Obtain the size of the file.
+    return fs::file_size(fname);
+}
+
 int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
 
+    Kokkos::Timer t;
     std::ifstream infp(fname);
     if (!infp.is_open()) {
         printf("Error: Could not open input file. Exiting ...\n");
         return EXIT_FAILURE;
     }
-    edge_offset_t n;
-    infp >> n;
-    //+1 for final null terminator
-    char_mirror_t char_mirror("char mirror", n*k + 1);
-    for(long i = 0; i < n; i++){
-        char* read_to = char_mirror.data() + i*k;
-        int count = 0;
-        //don't need to worry about reading null terminator into char_mirror
-        //because it will be overwritten for all but the last string
-        //we also allocated an extra char for the last string's null terminator
-        infp >> read_to >> count;
-    }
+
+    auto sz = getFileLength(fname);
+
+    // Create a buffer for file
+    std::string s(sz, '\0');
+    // Read the whole file into the buffer.
+    infp.read(s.data(), sz);
     infp.close();
+
+    edge_offset_t n;
+    const char* f = s.c_str();
+    printf("Time to load file: %.3f\n", t.seconds());
+    t.reset();
+#ifdef HUGE
+    sscanf(f, "%lu", &n);
+#elif defined(LARGE)
+    sscanf(f, "%lu", &n);
+#else
+    sscanf(f, "%u", &n);
+#endif
+    char_mirror_t char_mirror("char mirror", n*k);
+    char* read_to = char_mirror.data();
+    for(long i = 0; i < n; i++){
+        //file contains kmer counts, don't care about them
+        //seek the endline
+        while(*f != '\n') f++;
+        //increment past the endline
+        f++;
+        strncpy(read_to, f, k);
+        //increment output buffer for next kmer
+        read_to += k;
+        //advance past the kmer
+        f += k;
+    }
     out = char_view_t("chars", n*k);
-    //exclude the last character, which is the null terminator
-    char_mirror_t mirror_sub = Kokkos::subview(char_mirror, std::make_pair((edge_offset_t)0, n*k));
-    Kokkos::deep_copy(out, mirror_sub);
+    Kokkos::deep_copy(out, char_mirror);
     return 0;
 }
 
