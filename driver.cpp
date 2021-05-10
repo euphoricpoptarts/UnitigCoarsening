@@ -103,20 +103,18 @@ int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
     return 0;
 }
 
-void write_to_f(char_view_t unitigs, edge_view_t unitig_offsets, std::string fname){
+void write_to_f(char_view_t unitigs, std::string fname){
     char_mirror_t chars("chars", unitigs.extent(0));
     Kokkos::deep_copy(chars, unitigs);
-    edge_mirror_t offsets("offsets", unitig_offsets.extent(0));
-    Kokkos::deep_copy(offsets, unitig_offsets);
-    std::ofstream of(fname, std::ofstream::out | std::ofstream::app);
-    ordinal_t n = offsets.extent(0) - 1;
-    for(ordinal_t i = 0; i < n; i++){
-        edge_offset_t string_size = offsets(i + 1) - offsets(i);
-        char* buf_start = chars.data() + offsets(i);
-        std::string s(buf_start, string_size);
-        of << s << std::endl;
+    FILE *of = fopen(fname.c_str(), "a");
+    if (of == NULL) {
+        printf("Error: Could not open input file. Exiting ...\n");
+        exit(1);
     }
-    of.close();
+    //string is already formatted, dump it into file
+    //need to be cautious about non-integer type of chars.extent(0)
+    fprintf(of, "%.*s", chars.extent(0), chars.data());
+    fclose(of);
 }
 
 void write_unitigs(char_view_t kmers, edge_view_t kmer_offsets, graph_type glue_action, std::string fname){
@@ -129,7 +127,8 @@ void write_unitigs(char_view_t kmers, edge_view_t kmer_offsets, graph_type glue_
     edge_view_t write_sizes("write sizes", end_writes - start_writes + 1);
     Kokkos::parallel_scan("count writes", r_policy(start_writes, end_writes), KOKKOS_LAMBDA(const edge_offset_t i, edge_offset_t& update, const bool final){
         ordinal_t u = glue_action.entries(i);
-        edge_offset_t size = kmer_offsets(u + 1) - kmer_offsets(u);
+        //+1 for '\n'
+        edge_offset_t size = kmer_offsets(u + 1) - kmer_offsets(u) + 1;
         if(final){
             write_sizes(i - start_writes) = update;
             if(i + 1 == end_writes){
@@ -155,8 +154,9 @@ void write_unitigs(char_view_t kmers, edge_view_t kmer_offsets, graph_type glue_
             writes(write_offset) = kmers(j);
             write_offset++;
         }
+        writes(write_offset) = '\n';
     });
-    write_to_f(writes, write_sizes, fname);
+    write_to_f(writes, fname);
 }
 
 void compress_unitigs(char_view_t& kmers, edge_view_t& kmer_offsets, graph_type glue_action, edge_offset_t k){
