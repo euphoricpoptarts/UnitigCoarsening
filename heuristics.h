@@ -137,7 +137,11 @@ public:
             }
         });
         Kokkos::deep_copy(perm_length, perm_length_dev);
+#ifdef HUGE
+        printf("edgeful vertices: %lu\n", perm_length);
+#else
         printf("edgeful vertices: %u\n", perm_length);
+#endif
         //construct mapping using heaviest edges
         while (perm_length > 0) {
             vtx_view_t next_perm("next perm", perm_length);

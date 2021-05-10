@@ -141,8 +141,13 @@ void write_unitigs(char_view_t kmers, edge_view_t kmer_offsets, graph_type glue_
     edge_subview_t write_size_sub = Kokkos::subview(write_sizes, end_writes - start_writes);
     Kokkos::deep_copy(write_size, write_size_sub);
     char_view_t writes("writes", write_size);
+#if defined(HUGE) || defined(LARGE)
+    printf("write out unitigs size: %lu\n", write_size);
+    printf("write out unitigs count: %lu\n", end_writes - start_writes);
+#else
     printf("write out unitigs size: %u\n", write_size);
     printf("write out unitigs count: %u\n", end_writes - start_writes);
+#endif
     Kokkos::parallel_for("move writes", r_policy(start_writes, end_writes), KOKKOS_LAMBDA(const edge_offset_t i){
         ordinal_t u = glue_action.entries(i);
         edge_offset_t write_offset = write_sizes(i - start_writes);
@@ -182,7 +187,11 @@ void compress_unitigs(char_view_t& kmers, edge_view_t& kmer_offsets, graph_type 
     edge_subview_t write_size_sub = Kokkos::subview(next_offsets, n);
     Kokkos::deep_copy(write_size, write_size_sub);
     char_view_t writes("writes", write_size);
+#if defined(HUGE) || defined(LARGE)
+    printf("compressed unitigs size: %lu\n", write_size);
+#else
     printf("compressed unitigs size: %u\n", write_size);
+#endif
     Kokkos::parallel_for("move writes", r_policy(1, n+1), KOKKOS_LAMBDA(const edge_offset_t u){
         bool first = true;
         edge_offset_t write_offset = next_offsets(u - 1);
