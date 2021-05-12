@@ -211,7 +211,7 @@ public:
         return nc;
     }
 
-    matrix_t sgp_coarsen_mis_2(const matrix_t& g,
+    matrix_t coarsen_mis_2(const matrix_t& g,
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.numRows();
@@ -239,7 +239,7 @@ public:
         return interp;
     }
 
-    interp_t sgp_coarsen_HEC(const vtx_view_t g,
+    interp_t coarsen_HEC(const vtx_view_t g,
         ExperimentLoggerUtil& experiment) {
 
         ordinal_t n = g.extent(0);
@@ -361,7 +361,7 @@ public:
 
     };
 
-    matrix_t sgp_coarsen_match(const matrix_t& g,
+    matrix_t coarsen_match(const matrix_t& g,
         bool uniform_weights,
         ExperimentLoggerUtil& experiment,
         int match_choice) {

@@ -1,7 +1,6 @@
 #include "definitions_kokkos.h"
 
-namespace sgpar{
-namespace sgpar_kokkos{
+namespace unitig_compact {
 
 //fnv hash algorithm
 //we going deep
@@ -176,4 +175,4 @@ graph_type assemble_graph(char_view_t kmers, char_view_t kpmers, vtx_view_t vtx_
     return g;
 }
 
-}}
+}

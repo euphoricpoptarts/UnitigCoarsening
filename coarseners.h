@@ -248,7 +248,7 @@ std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, ExperimentLog
         printf("Calculating coarse graph %d\n", count);
         printf("input vertices: %lu\n", cur.extent(0));
         timer.reset();
-        interp_t interp = mapper.sgp_coarsen_HEC(cur, experiment);
+        interp_t interp = mapper.coarsen_HEC(cur, experiment);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
         timer.reset();
         graph_type glue = transpose_and_sort(interp, cur);
