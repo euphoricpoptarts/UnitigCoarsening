@@ -1,19 +1,24 @@
 #include "definitions_kokkos.h"
+#include <iostream>
+#include <fstream>
 
 namespace unitig_compact{
 
 void write_to_f(char_view_t unitigs, std::string fname){
     char_mirror_t chars("chars", unitigs.extent(0));
     Kokkos::deep_copy(chars, unitigs);
-    FILE *of = fopen(fname.c_str(), "a");
-    if (of == NULL) {
+    std::ofstream of(fname, std::ofstream::out | std::ofstream::app);
+    //FILE *of = fopen(fname.c_str(), "a");
+    if (!of.is_open()) {
         printf("Error: Could not open input file. Exiting ...\n");
         exit(1);
     }
     //string is already formatted, dump it into file
     //need to be cautious about non-integer type of chars.extent(0)
-    fprintf(of, "%.*s", chars.extent(0), chars.data());
-    fclose(of);
+    //fprintf(of, "%.*s", chars.extent(0), chars.data());
+    of.write(chars.data(), chars.extent(0));
+    //fclose(of);
+    of.close();
 }
 
 void write_unitigs(char_view_t kmers, edge_view_t kmer_offsets, graph_type glue_action, std::string fname){
