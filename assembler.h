@@ -26,27 +26,6 @@ bool cmp(const char_view_t s1_chars, const char_view_t s2_chars, const edge_offs
     return true;
 }
 
-// public domain implementation from http://en.wikibooks.org/wiki/C_Programming/Strings#The_strncmp_function
-KOKKOS_INLINE_FUNCTION
-int __strncmp(const char *s1, const char *s2, size_t n) {
-	unsigned char uc1, uc2;
-	/* Nothing to compare?  Return zero.  */
-	if (n == 0)
-		return 0;
-	/* Loop, comparing bytes.  */
-	while (n-- > 0 && *s1 == *s2) {
-	/* If we've run out of bytes or hit a null, return zero
-	since we already know *s1 == *s2.  */
-		if (n == 0)
-			return 0;
-		s1++;
-		s2++;
-	}
-	uc1 = (*(unsigned char *) s1);
-	uc2 = (*(unsigned char *) s2);
-	return ((uc1 < uc2) ? -1 : (uc1 > uc2));
- }
-
 //check if edge formed by appending extension to kmer at offset exists in edges using a hashmap
 KOKKOS_INLINE_FUNCTION
 bool find_edge(const char_view_t chars, const char_view_t edges, const vtx_view_t edge_map, edge_offset_t offset, edge_offset_t k, char extension){
@@ -91,7 +70,7 @@ ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_m
     hash = hash & hash_cast;
     while(vtx_map(hash) != ORD_MAX){
         edge_offset_t hash_offset = vtx_map(hash)*k;
-        if(__strncmp(edge_chars.data() + offset, vtx_chars.data() + hash_offset, k) == 0){
+        if(cmp(edge_chars, vtx_chars, offset, hash_offset, k)){
             return vtx_map(hash);
         }
         hash = (hash + 1) & hash_cast;

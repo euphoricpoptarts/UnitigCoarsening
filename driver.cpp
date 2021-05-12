@@ -151,14 +151,14 @@ int main(int argc, char **argv) {
             {
                 graph_type g_base = assemble_graph(kmers, kpmers, vtx_map, k);
                 printf("entries: %lu\n", g_base.entries.extent(0));
-                //kmer_copy = move_to_main(kmers);
+                kmer_copy = move_to_main(kmers);
                 //this is likely the peak memory usage point of the program
                 //don't need these anymore, delete them
                 //Kokkos::resize(edge_map, 0);
                 Kokkos::resize(vtx_map, 0);
                 Kokkos::resize(kpmers, 0);
                 //will need this later but we made a copy
-                //Kokkos::resize(kmers, 0);
+                Kokkos::resize(kmers, 0);
                 g = coarsener.prune_edges(g_base);
             }
             printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
@@ -171,7 +171,7 @@ int main(int argc, char **argv) {
         printf("Coarse graph build time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Build));
         printf("Interpolation graph transpose time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose));
         t.reset();
-        //kmers = move_to_device(kmer_copy);
+        kmers = move_to_device(kmer_copy);
         t.reset();
         compress_unitigs_maximally(kmers, glue_list, k, out_fname);
         printf("Time to compact unitigs: %.3fs\n", t.seconds());
