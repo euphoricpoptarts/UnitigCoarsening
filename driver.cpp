@@ -84,7 +84,10 @@ int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
 #else
     sscanf(f, "%u", &n);
 #endif
+    t.reset();
     char_mirror_t char_mirror("char mirror", n*k);
+    printf("Time to init chars host memory: %.3f\n", t.seconds());
+    t.reset();
     char* read_to = char_mirror.data();
     for(long i = 0; i < n; i++){
         //file contains kmer counts, don't care about them
@@ -98,8 +101,13 @@ int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
         //advance past the kmer
         f += k;
     }
+    t.reset();
     out = char_view_t("chars", n*k);
+    printf("Time to init chars device memory: %.3f\n", t.seconds());
+    t.reset();
     Kokkos::deep_copy(out, char_mirror);
+    printf("Time to copy chars to device memory: %.3f\n", t.seconds());
+    t.reset();
     return 0;
 }
 
@@ -129,18 +137,19 @@ int main(int argc, char **argv) {
     Kokkos::initialize();
     {
         char_view_t kmers, kpmers;
-        Kokkos::Timer t;
+        Kokkos::Timer t, t2, t3;
         load_kmers(kmers, kmer_fname, k);
         load_kmers(kpmers, kpmer_fname, k+1);
         printf("Read input data in %.3fs\n", t.seconds());
         t.reset();
-        Kokkos::Timer t2;
+        t2.reset();
+        t3.reset();
         printf("kmer size: %lu, kmers: %lu\n", kmers.extent(0), kmers.extent(0)/k);
         printf("(k+1)-mer size: %lu, (k+1)mers: %lu\n", kpmers.extent(0), kpmers.extent(0)/(k+1));
         vtx_view_t vtx_map = generate_hashmap(kmers, k, kmers.extent(0)/k);
-        //vtx_view_t edge_map = generate_hashmap(kpmers, k + 1, kpmers.extent(0)/(k + 1));
         printf("kmer hashmap size: %lu\n", vtx_map.extent(0));
-        //printf("(k+1)-mer hashmap size: %lu\n", edge_map.extent(0));
+        printf("Time to generate hashmap: %.3f\n", t3.seconds());
+        t3.reset();
         std::list<graph_type> glue_list;
         char_mirror_t kmer_copy;
         ExperimentLoggerUtil experiment;
@@ -149,8 +158,11 @@ int main(int argc, char **argv) {
             using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
             coarsener_t coarsener;
             {
+                t3.reset();
                 graph_type g_base = assemble_graph(kmers, kpmers, vtx_map, k);
                 printf("entries: %lu\n", g_base.entries.extent(0));
+                printf("Time to assemble base graph: %.3f\n", t3.seconds());
+                t3.reset();
                 //kmer_copy = move_to_main(kmers);
                 //this is likely the peak memory usage point of the program
                 //don't need these anymore, delete them
