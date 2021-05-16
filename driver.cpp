@@ -173,7 +173,7 @@ int main(int argc, char **argv) {
         t.reset();
         //kmers = move_to_device(kmer_copy);
         t.reset();
-        compress_unitigs_maximally(kmers, glue_list, k, out_fname);
+        //compress_unitigs_maximally(kmers, glue_list, k, out_fname);
         printf("Time to compact unitigs: %.3fs\n", t.seconds());
         t.reset();
         printf("Total time: %.3fs\n", t2.seconds());

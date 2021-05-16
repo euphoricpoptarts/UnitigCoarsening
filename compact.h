@@ -139,3 +139,4 @@ void compress_unitigs_maximally(char_view_t kmers, std::list<graph_type> glue_ac
 }
 
 }
+

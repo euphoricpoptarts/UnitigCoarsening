@@ -26,6 +26,7 @@ public:
     using wgt_view_t = Kokkos::View<scalar_t*, Device>;
     using edge_view_t = Kokkos::View<edge_offset_t*, Device>;
     using edge_subview_t = Kokkos::View<edge_offset_t, Device>;
+    using c_edge_subview_t = Kokkos::View<const edge_offset_t, Device>;
     using vtx_subview_t = Kokkos::View<ordinal_t, Device>;
     using graph_type = typename matrix_t::staticcrsgraph_type;
     using policy_t = Kokkos::RangePolicy<exec_space>;
@@ -239,10 +240,130 @@ graph_type transpose_and_sort(interp_t interp, vtx_view_t g){
     return interp_transpose;
 }
 
+graph_type collect_outputs_first(graph_type glue_action){
+    c_edge_subview_t start_writes_sub = Kokkos::subview(glue_action.row_map, 0);
+    c_edge_subview_t end_writes_sub = Kokkos::subview(glue_action.row_map, 1);
+    edge_offset_t start_writes = 0, end_writes = 0;
+    //expecting start_writes to be 0
+    Kokkos::deep_copy(start_writes, start_writes_sub);
+    Kokkos::deep_copy(end_writes, end_writes_sub);
+    edge_view_t row_map("row map", end_writes - start_writes + 1);
+    edge_offset_t size = end_writes - start_writes;
+    Kokkos::parallel_for("init write sizes", policy_t(0, size + 1), KOKKOS_LAMBDA(const edge_offset_t i){
+        row_map(i) = i;
+    });
+    vtx_view_t entries_subview = Kokkos::subview(glue_action.entries, std::make_pair(start_writes, end_writes));
+    vtx_view_t entries("entries", size);
+    Kokkos::deep_copy(entries, entries_subview);
+    graph_type output(entries, row_map);
+    return output;
+}
+
+graph_type collect_unitigs_first(graph_type glue_action){
+    c_edge_subview_t start_writes_sub = Kokkos::subview(glue_action.row_map, 1);
+    edge_offset_t start_writes = 0;
+    edge_offset_t end_writes = glue_action.entries.extent(0);
+    Kokkos::deep_copy(start_writes, start_writes_sub);
+    edge_view_t row_map("row map", glue_action.row_map.extent(0) - 1);
+    typename graph_type::row_map_type row_map_subview = Kokkos::subview(glue_action.row_map, std::make_pair((edge_offset_t)1, (edge_offset_t)glue_action.row_map.extent(0)));
+    Kokkos::deep_copy(row_map, row_map_subview);
+    edge_offset_t size = row_map.extent(0);
+    Kokkos::parallel_for("init write sizes", policy_t(0, size), KOKKOS_LAMBDA(const edge_offset_t i){
+        row_map(i) -= start_writes;
+    });
+    vtx_view_t entries_subview = Kokkos::subview(glue_action.entries, std::make_pair(start_writes, end_writes));
+    vtx_view_t entries("entries", end_writes - start_writes);
+    Kokkos::deep_copy(entries, entries_subview);
+    graph_type output(entries, row_map);
+    return output;
+}
+
+//collect the fine vertices corresponding to each coarse vertex in the null aggregate
+graph_type collect_outputs(graph_type glue_old, graph_type glue_action){
+    edge_offset_t write_size = 0;
+    c_edge_subview_t start_writes_sub = Kokkos::subview(glue_action.row_map, 0);
+    c_edge_subview_t end_writes_sub = Kokkos::subview(glue_action.row_map, 1);
+    edge_offset_t start_writes = 0, end_writes = 0;
+    //expecting start_writes to be 0
+    Kokkos::deep_copy(start_writes, start_writes_sub);
+    Kokkos::deep_copy(end_writes, end_writes_sub);
+    edge_view_t write_sizes("write sizes", end_writes - start_writes + 1);
+    Kokkos::parallel_scan("count writes", policy_t(start_writes, end_writes), KOKKOS_LAMBDA(const edge_offset_t i, edge_offset_t& update, const bool final){
+        ordinal_t u = glue_action.entries(i);
+        edge_offset_t size = glue_old.row_map(u + 1) - glue_old.row_map(u);
+        if(final){
+            write_sizes(i - start_writes) = update;
+            if(i + 1 == end_writes){
+                write_sizes(end_writes - start_writes) = update + size;
+            }
+        }
+        update += size;
+    });
+    edge_subview_t write_size_sub = Kokkos::subview(write_sizes, end_writes - start_writes);
+    Kokkos::deep_copy(write_size, write_size_sub);
+    vtx_view_t writes("writes", write_size);
+    Kokkos::parallel_for("move writes", team_policy_t(end_writes - start_writes, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
+        const edge_offset_t i = thread.league_rank() + start_writes;
+        ordinal_t u = glue_action.entries(i);
+        edge_offset_t write_offset = write_sizes(i - start_writes);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, glue_old.row_map(u), glue_old.row_map(u + 1)), [=] (const edge_offset_t j){
+            edge_offset_t offset = write_offset + (j - glue_old.row_map(u));
+            writes(offset) = glue_old.entries(j);
+        });
+    });
+    graph_type output(writes, write_sizes);
+    return output;
+}
+
+//collect the fine vertices corresponding to each coarse vertex in each coarser aggregate
+graph_type collect_unitigs(graph_type glue_old, graph_type glue_action){
+    edge_offset_t write_size = 0;
+    //minus 2 because 0 is not processed, and row_map is one bigger than number of rows
+    ordinal_t n = glue_action.row_map.extent(0) - 2;
+    edge_view_t next_offsets("next offsets", n + 1);
+    Kokkos::parallel_scan("count entries", policy_t(1, n + 1), KOKKOS_LAMBDA(const ordinal_t u, edge_offset_t& update, const bool final){
+        edge_offset_t size = 0;
+        for(edge_offset_t i = glue_action.row_map(u); i < glue_action.row_map(u + 1); i++){
+            ordinal_t f = glue_action.entries(i);
+            size += glue_old.row_map(f + 1) - glue_old.row_map(f);
+        }
+        if(final){
+            next_offsets(u - 1) = update;
+            if(u == n){
+                next_offsets(n) = update + size;
+            }
+        }
+        update += size;
+    });
+    edge_subview_t write_size_sub = Kokkos::subview(next_offsets, n);
+    Kokkos::deep_copy(write_size, write_size_sub);
+    vtx_view_t writes("writes", write_size);
+    Kokkos::parallel_for("move old entries", team_policy_t(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
+        const edge_offset_t u = thread.league_rank() + 1;
+        edge_offset_t write_offset = next_offsets(u - 1);
+        //not likely to be very many here, about 2 to 7
+        for(edge_offset_t i = glue_action.row_map(u); i < glue_action.row_map(u + 1); i++){
+            ordinal_t f = glue_action.entries(i);
+            edge_offset_t start = glue_old.row_map(f);
+            edge_offset_t end = glue_old.row_map(f + 1);
+            //this grows larger the deeper we are in the coarsening hierarchy
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t j){
+                edge_offset_t offset = write_offset + (j - start);
+                writes(offset) = glue_old.entries(j);
+            });
+            write_offset += (end - start);
+        }
+    });
+    graph_type output(writes, next_offsets);
+    return output;
+}
+
 std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, ExperimentLoggerUtil& experiment){
     std::list<graph_type> glue_list;
     int count = 0;
     Kokkos::Timer timer;
+    bool first = true;
+    graph_type glue_last;
     while(cur.extent(0) > 0){
         count++;
         printf("Calculating coarse graph %d\n", count);
@@ -252,8 +373,17 @@ std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, ExperimentLog
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
         timer.reset();
         graph_type glue = transpose_and_sort(interp, cur);
-        glue_list.push_back(glue);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose, timer.seconds());
+        timer.reset();
+        if(first){
+            glue_list.push_back(collect_outputs_first(glue));
+            glue_last = collect_unitigs_first(glue); 
+        } else {
+            glue_list.push_back(collect_outputs(glue_last, glue));
+            glue_last = collect_unitigs(glue_last, glue);
+        }
+        first = false;
+        printf("Time to compact unitigs: %.3f\n", timer.seconds());
         timer.reset();
         cur = coarsen_de_bruijn_graph(cur, interp);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Build, timer.seconds());
