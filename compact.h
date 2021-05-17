@@ -21,6 +21,57 @@ void write_to_f(char_view_t unitigs, std::string fname){
     of.close();
 }
 
+void write_unitigs2(char_view_t kmers, edge_offset_t k, graph_type glue_action, std::string fname){
+    edge_offset_t null_size = glue_action.numRows();
+    edge_view_t write_sizes("write sizes", null_size + 1);
+    Kokkos::parallel_scan("count writes", r_policy(0, null_size), KOKKOS_LAMBDA(const edge_offset_t i, edge_offset_t& update, const bool final){
+        //+1 for '\n'
+        //k-1 for prefix of first k-mer
+        edge_offset_t size = glue_action.row_map(i + 1) - glue_action.row_map(i) + 1 + (k - 1);
+        if(final){
+            write_sizes(i) = update;
+            if(i + 1 == null_size){
+                write_sizes(null_size) = update + size;
+            }
+        }
+        update += size;
+    });
+    edge_offset_t write_size = 0;
+    edge_subview_t write_size_sub = Kokkos::subview(write_sizes, null_size);
+    Kokkos::deep_copy(write_size, write_size_sub);
+    char_view_t writes("writes", write_size);
+#if defined(HUGE) || defined(LARGE)
+    printf("write out unitigs size: %lu\n", write_size);
+    printf("write out unitigs count: %lu\n", null_size);
+#else
+    printf("write out unitigs size: %u\n", write_size);
+    printf("write out unitigs count: %u\n", null_size);
+#endif
+    Kokkos::parallel_for("move writes", policy(null_size, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
+        ordinal_t i = thread.league_rank();
+        edge_offset_t write_offset = write_sizes(i);
+        edge_offset_t start = glue_action.row_map(i);
+        edge_offset_t end = glue_action.row_map(i + 1);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=] (const edge_offset_t j){
+            ordinal_t u = glue_action.entries(j);
+            if(j > start){
+                edge_offset_t offset = write_offset + (k - 1) + (j - start);
+                writes(offset) = kmers((u + 1)*k - 1);
+            } else {
+                edge_offset_t offset = write_offset;
+                for(edge_offset_t x = u*k; x < k*(u+1); x++){
+                    writes(offset) = kmers(x);
+                    offset++;
+                }
+            }
+            if(j + 1 == end){
+                writes(write_sizes(i + 1) - 1) = '\n';
+            }
+        });
+    });
+    write_to_f(writes, fname);
+}
+
 void write_unitigs(char_view_t kmers, edge_view_t kmer_offsets, graph_type glue_action, std::string fname){
     edge_offset_t write_size = 0;
     c_edge_subview_t start_writes_sub = Kokkos::subview(glue_action.row_map, 0);
@@ -128,12 +179,23 @@ edge_view_t sizes_init(ordinal_t n, edge_offset_t k){
 
 void compress_unitigs_maximally(char_view_t kmers, std::list<graph_type> glue_actions, edge_offset_t k, std::string fname){
     ordinal_t n = kmers.extent(0) / k;
-    //there are issues compiling kernels if there is a std object in the function header
     edge_view_t sizes = sizes_init(n, k);
     auto glue_iter = glue_actions.begin();
     while(glue_iter != glue_actions.end()){
         write_unitigs(kmers, sizes, *glue_iter, fname);
         compress_unitigs(kmers, sizes, *glue_iter, k);
+        glue_iter++;
+    }
+}
+
+void compress_unitigs_maximally2(char_view_t kmers, std::list<graph_type> glue_actions, edge_offset_t k, std::string fname){
+    ordinal_t n = kmers.extent(0) / k;
+    auto glue_iter = glue_actions.begin();
+    printf("Total graphs: %d\n", glue_actions.size());
+    int count = 0;
+    while(glue_iter != glue_actions.end()){
+        printf("Current graph: %d\n", ++count);
+        write_unitigs2(kmers, k, *glue_iter, fname);
         glue_iter++;
     }
 }
