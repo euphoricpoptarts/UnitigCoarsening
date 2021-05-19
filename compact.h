@@ -95,14 +95,17 @@ void write_unitigs(char_view_t kmers, edge_view_t kmer_offsets, graph_type glue_
     printf("write out unitigs size: %u\n", write_size);
     printf("write out unitigs count: %u\n", end_writes - start_writes);
 #endif
-    Kokkos::parallel_for("move writes", r_policy(start_writes, end_writes), KOKKOS_LAMBDA(const edge_offset_t i){
+    Kokkos::parallel_for("move writes", policy(end_writes - start_writes, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
+        const edge_offset_t i = thread.league_rank() + start_writes;
         ordinal_t u = glue_action.entries(i);
         edge_offset_t write_offset = write_sizes(i - start_writes);
-        for(edge_offset_t j = kmer_offsets(u); j < kmer_offsets(u + 1); j++){
-            writes(write_offset) = kmers(j);
-            write_offset++;
-        }
-        writes(write_offset) = '\n';
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, kmer_offsets(u), kmer_offsets(u + 1)), [=] (const edge_offset_t j){
+            edge_offset_t offset = write_offset + (j - kmer_offsets(u));
+            writes(offset) = kmers(j);
+            if(offset + 2 == write_sizes(i + 1 - start_writes)){
+                writes(offset + 1) = '\n';
+            }
+        });
     });
     write_to_f(writes, fname);
 }
@@ -140,9 +143,11 @@ void compress_unitigs(char_view_t& kmers, edge_view_t& kmer_offsets, graph_type 
 #else
     printf("compressed unitigs size: %u\n", write_size);
 #endif
-    Kokkos::parallel_for("move writes", r_policy(1, n+1), KOKKOS_LAMBDA(const edge_offset_t u){
-        bool first = true;
+    Kokkos::parallel_for("move old entries", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
+        const edge_offset_t u = thread.league_rank() + 1;
         edge_offset_t write_offset = next_offsets(u - 1);
+        //not likely to be very many here, about 2 to 7
+        bool first = true;
         for(edge_offset_t i = glue_action.row_map(u); i < glue_action.row_map(u + 1); i++){
             ordinal_t f = glue_action.entries(i);
             edge_offset_t start = kmer_offsets(f);
@@ -152,12 +157,37 @@ void compress_unitigs(char_view_t& kmers, edge_view_t& kmer_offsets, graph_type 
                 start += (k - 1);
             }
             first = false;
-            for(edge_offset_t j = start; j < end; j++){
-                writes(write_offset) = kmers(j);
-                write_offset++;
-            }
+            //this grows larger the deeper we are in the coarsening hierarchy
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t j){
+                edge_offset_t offset = write_offset + (j - start);
+                writes(offset) = kmers(j);
+            });
+            write_offset += (end - start);
         }
     });
+    //Kokkos::parallel_for("move old entries", policy(n, 32), KOKKOS_LAMBDA(const member& thread){
+    //    const edge_offset_t u = thread.league_rank() + 1;
+    //    edge_offset_t write_offset = next_offsets(u - 1);
+    //    //not likely to be very many here, about 2 to 7
+    //    Kokkos::parallel_scan(Kokkos::TeamThreadRange(thread, glue_action.row_map(u), glue_action.row_map(u + 1)), [=] (const edge_offset_t i, edge_offset_t& update, const bool final){
+    //        ordinal_t f = glue_action.entries(i);
+    //        edge_offset_t start = kmer_offsets(f);
+    //        edge_offset_t end = kmer_offsets(f + 1);
+    //        if(i > glue_action.row_map(u)){
+    //            //subtract for overlap of k-mers/unitigs
+    //            start += (k - 1);
+    //        }
+    //        if(final){
+    //            edge_offset_t offset = write_offset + update;
+    //            //this grows larger the deeper we are in the coarsening hierarchy
+    //            for(edge_offset_t j = start; j < end; j++) {
+    //                writes(offset) = kmers(j);
+    //                offset++;
+    //            }
+    //        }
+    //        update += (end - start);
+    //    });
+    //});
     kmers = writes;
     kmer_offsets = next_offsets;
 }
@@ -175,8 +205,13 @@ void compress_unitigs_maximally(char_view_t kmers, std::list<graph_type> glue_ac
     edge_view_t sizes = sizes_init(n, k);
     auto glue_iter = glue_actions.begin();
     while(glue_iter != glue_actions.end()){
+        Kokkos::Timer t;
         write_unitigs(kmers, sizes, *glue_iter, fname);
+        printf("Write time: %.3f\n", t.seconds());
+        t.reset();
         compress_unitigs(kmers, sizes, *glue_iter, k);
+        printf("Compact time: %.3f\n", t.seconds());
+        t.reset();
         glue_iter++;
     }
 }
