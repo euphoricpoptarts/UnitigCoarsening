@@ -26,6 +26,8 @@ public:
 		Heavy,
         InitTransfer,
         InterpTranspose,
+        CompactGlues,
+        CoarsenPair,
 		END
 	};
 	std::vector<std::string> measurementNames{
@@ -44,7 +46,9 @@ public:
 		"fm-recoarsen",
 		"heavy",
         "initial-transfer-to-device",
-        "interp-transpose"
+        "interp-transpose",
+        "compact-glues",
+        "coarsen-pair",
 	};
 	std::vector<double> measurements;
 

@@ -111,48 +111,39 @@ public:
     }
 
     //hn is a list of vertices such that vertex i wants to aggregate with vertex hn(i)
-    ordinal_t parallel_map_construct(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t hn) {
+    ordinal_t parallel_map_construct(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t hn, ExperimentLoggerUtil& experiment) {
 
-        ordinal_t perm_length = 0;
+        ordinal_t perm_length = n;
         Kokkos::View<ordinal_t, Device> nvertices_coarse("nvertices");
-        Kokkos::View<ordinal_t, Device> perm_length_dev("perm length");
         //coarse vertex 0 is used to map vertices with no edges
         ordinal_t nvc = 1;
         Kokkos::deep_copy(nvertices_coarse, nvc);
-        Kokkos::deep_copy(perm_length_dev, perm_length);
 
         int swap = 1;
         //find vertices that must be aggregated
-        vtx_view_t curr_perm("rem vtx", n);
-        Kokkos::parallel_scan("find vtx not already mapped", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i, ordinal_t& update, const bool final) {
-            if(vcmap(i) != 0){
-                ordinal_t insert = update;
-                if(final){
-                    curr_perm(insert) = i;
-                }
-                update++;
-            }
-            if(final && (i + 1) == n){
-                perm_length_dev() = update;
-            }
-        });
-        Kokkos::deep_copy(perm_length, perm_length_dev);
+        vtx_view_t rem_vtx;
 #ifdef HUGE
         printf("edgeful vertices: %lu\n", perm_length);
 #else
         printf("edgeful vertices: %u\n", perm_length);
 #endif
+        int count = 0;
         //construct mapping using heaviest edges
         while (perm_length > 0) {
-            vtx_view_t next_perm("next perm", perm_length);
-            Kokkos::View<ordinal_t, Device> next_length("next_length");
-
             Kokkos::parallel_for("compute mappings", policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i) {
-                ordinal_t u = curr_perm(i);
+                ordinal_t u;
+                //on first pass we don't have a set of remaining vertices
+                if(count == 0){
+                    u = i;
+                } else {
+                    u = rem_vtx(i);
+                }
+                //v can be ORD_MAX on the first pass, but shouldn't be on following passes
                 ordinal_t v = hn(u);
                 int condition = u < v;
                 //need to enforce an ordering condition to allow hard-stall conditions to be broken
-                if (condition ^ swap) {
+                //but these hard-stall conditions are rare; so we wait to break them until a few iterations have occurred
+                if (v != ORD_MAX && (count < 5 || condition ^ swap)) {
                     if (Kokkos::atomic_compare_exchange_strong(&vcmap(u), ORD_MAX, ORD_MAX - 1)) {
                         if (u == v || Kokkos::atomic_compare_exchange_strong(&vcmap(v), ORD_MAX, ORD_MAX - 2)) {
                             //do nothing here
@@ -173,7 +164,12 @@ public:
             Kokkos::View<ordinal_t, Device> old_nvc("nvertices old");
             Kokkos::deep_copy(old_nvc, nvertices_coarse);
             Kokkos::parallel_scan("assign aggregates", policy_t(0, perm_length), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
-                ordinal_t u = curr_perm(i);
+                ordinal_t u;
+                if(count == 0){
+                    u = i;
+                } else {
+                    u = rem_vtx(i);
+                }
                 if(vcmap(u) == (ORD_MAX - 1)){
                     if(final){
                         ordinal_t cv = update + old_nvc();
@@ -188,23 +184,41 @@ public:
             });
             Kokkos::fence();
             //add the ones that failed to be reprocessed next round
-            //maybe count these then create next_perm to save memory?
-            Kokkos::parallel_scan("find vtx not already mapped (in loop)", policy_t(0, perm_length), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final) {
-                ordinal_t u = curr_perm(i);
+            Kokkos::Timer timer;
+            ordinal_t next_length = 0;
+            Kokkos::parallel_reduce("count vtx not already mapped", policy_t(0, perm_length), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update) {
+                ordinal_t u;
+                if(count == 0){
+                    u = i;
+                } else {
+                    u = rem_vtx(i);
+                }
+                if (vcmap(u) >= n) {
+                    update++;
+                }
+            }, next_length);
+            vtx_view_t next_perm("next perm", next_length);
+            Kokkos::parallel_scan("write vtx not already mapped", policy_t(0, perm_length), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final) {
+                ordinal_t u;
+                if(count == 0){
+                    u = i;
+                } else {
+                    u = rem_vtx(i);
+                }
                 if (vcmap(u) >= n) {
                     if(final){
                         next_perm(update) = u;
                     }
                     update++;
                 }
-                if(final && (i + 1) == perm_length){
-                    next_length() = update;
-                }
             });
             Kokkos::fence();
             swap = swap ^ 1;
-            Kokkos::deep_copy(perm_length, next_length);
-            curr_perm = next_perm;
+            perm_length = next_length;
+            rem_vtx = next_perm;
+            experiment.addMeasurement(ExperimentLoggerUtil::Measurement::CoarsenPair, timer.seconds());
+            timer.reset();
+            count++;
         }
         ordinal_t nc = 0;
         Kokkos::deep_copy(nc, nvertices_coarse);
@@ -283,7 +297,7 @@ public:
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Heavy, timer.seconds());
         timer.reset();
         ordinal_t nc = 0;
-        nc = parallel_map_construct(vcmap, n, hn);
+        nc = parallel_map_construct(vcmap, n, hn, experiment);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct, timer.seconds());
         timer.reset();
     
