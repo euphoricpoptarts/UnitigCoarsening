@@ -66,7 +66,7 @@ void write_unitigs(char_view_t kmers, edge_view_t kmer_offsets, graph_type glue_
     write_to_f(writes, fname);
 }
 
-void compress_unitigs(char_view_t& kmers, edge_view_t& kmer_offsets, graph_type glue_action, edge_offset_t k){
+void compress_unitigs(char_view_t& kmers, edge_view_t& kmer_offsets, graph_type glue_action, edge_offset_t k, int iteration){
     edge_offset_t write_size = 0;
     //minus 2 because 0 is not processed, and row_map is one bigger than number of rows
     ordinal_t n = glue_action.row_map.extent(0) - 2;
@@ -99,28 +99,52 @@ void compress_unitigs(char_view_t& kmers, edge_view_t& kmer_offsets, graph_type 
 #else
     printf("compressed unitigs size: %u\n", write_size);
 #endif
-    Kokkos::parallel_for("move old entries", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
-        const edge_offset_t u = thread.league_rank() + 1;
-        edge_offset_t write_offset = next_offsets(u - 1);
-        //not likely to be very many here, about 2 to 7
-        bool first = true;
-        for(edge_offset_t i = glue_action.row_map(u); i < glue_action.row_map(u + 1); i++){
-            ordinal_t f = glue_action.entries(i);
-            edge_offset_t start = kmer_offsets(f);
-            edge_offset_t end = kmer_offsets(f + 1);
-            if(!first){
-                //subtract for overlap of k-mers/unitigs
-                start += (k - 1);
+    if(iteration > 0){
+        Kokkos::parallel_for("move old entries", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
+            const edge_offset_t u = thread.league_rank() + 1;
+            edge_offset_t write_offset = next_offsets(u - 1);
+            //not likely to be very many here, about 2 to 7
+            bool first = true;
+            for(edge_offset_t i = glue_action.row_map(u); i < glue_action.row_map(u + 1); i++){
+                ordinal_t f = glue_action.entries(i);
+                edge_offset_t start = kmer_offsets(f);
+                edge_offset_t end = kmer_offsets(f + 1);
+                if(!first){
+                    //subtract for overlap of k-mers/unitigs
+                    start += (k - 1);
+                }
+                first = false;
+                //this grows larger the deeper we are in the coarsening hierarchy
+                Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t j){
+                    edge_offset_t offset = write_offset + (j - start);
+                    writes(offset) = kmers(j);
+                });
+                write_offset += (end - start);
             }
-            first = false;
-            //this grows larger the deeper we are in the coarsening hierarchy
-            Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t j){
-                edge_offset_t offset = write_offset + (j - start);
-                writes(offset) = kmers(j);
-            });
-            write_offset += (end - start);
-        }
-    });
+        });
+    }
+    else {
+        Kokkos::parallel_for("move old entries", r_policy(0, n), KOKKOS_LAMBDA(const edge_offset_t& x){
+            const edge_offset_t u = x + 1;
+            edge_offset_t write_offset = next_offsets(u - 1);
+            //not likely to be very many here, about 2 to 7
+            bool first = true;
+            for(edge_offset_t i = glue_action.row_map(u); i < glue_action.row_map(u + 1); i++){
+                ordinal_t f = glue_action.entries(i);
+                edge_offset_t start = kmer_offsets(f);
+                edge_offset_t end = kmer_offsets(f + 1);
+                if(!first){
+                    //subtract for overlap of k-mers/unitigs
+                    start += (k - 1);
+                }
+                first = false;
+                //this grows larger the deeper we are in the coarsening hierarchy
+                for(edge_offset_t j = start; j < end; j++) {
+                    writes(write_offset++) = kmers(j);
+                }
+            }
+        });
+    }
     //Kokkos::parallel_for("move old entries", policy(n, 32), KOKKOS_LAMBDA(const member& thread){
     //    const edge_offset_t u = thread.league_rank() + 1;
     //    edge_offset_t write_offset = next_offsets(u - 1);
@@ -161,12 +185,13 @@ void compress_unitigs_maximally(char_view_t kmers, std::list<graph_type> glue_ac
     //there are issues compiling kernels if there is a std object in the function header
     edge_view_t sizes = sizes_init(n, k);
     auto glue_iter = glue_actions.begin();
+    int iteration = 0;
     while(glue_iter != glue_actions.end()){
         Kokkos::Timer t;
         write_unitigs(kmers, sizes, *glue_iter, fname);
         printf("Write time: %.3f\n", t.seconds());
         t.reset();
-        compress_unitigs(kmers, sizes, *glue_iter, k);
+        compress_unitigs(kmers, sizes, *glue_iter, k, iteration++);
         printf("Compact time: %.3f\n", t.seconds());
         t.reset();
         glue_iter++;
