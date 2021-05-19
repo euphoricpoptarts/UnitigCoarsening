@@ -180,8 +180,12 @@ int main(int argc, char **argv) {
         printf("glue list length: %lu\n", glue_list.size());
         printf("Time to generate glue list: %.3fs\n", t.seconds());
         printf("Aggregation time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Map));
+        printf("Heavy edge time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Heavy));
+        printf("Pairing time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct));
+        printf("Pairing time specific: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::CoarsenPair));
         printf("Coarse graph build time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Build));
         printf("Interpolation graph transpose time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose));
+        printf("Glue compact time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::CompactGlues));
         t.reset();
         //kmers = move_to_device(kmer_copy);
         t.reset();

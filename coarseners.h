@@ -197,6 +197,7 @@ graph_type transpose_non_null(interp_t g){
 graph_type transpose_and_sort(interp_t interp, vtx_view_t g){
     graph_type interp_transpose = transpose_non_null(interp);
     ordinal_t nc = interp_transpose.numRows();
+    Kokkos::Timer timer;
     Kokkos::parallel_for("sort tranpose entries", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i){
         //bubble-sort entries where g is a directed acyclic graph
         ordinal_t vtx_id = i + 1;
@@ -243,6 +244,8 @@ graph_type transpose_and_sort(interp_t interp, vtx_view_t g){
             end--;
         }
     });
+    printf("Time to sort transposed entries: %.3f\n", timer.seconds());
+    timer.reset();
     return interp_transpose;
 }
 
@@ -332,7 +335,6 @@ graph_type collect_unitigs(graph_type glue_old, graph_type glue_action){
     Kokkos::deep_copy(write_size, write_size_sub);
     vtx_view_t writes("writes", write_size);
     if(glue_old.entries.extent(0) / glue_old.numRows() > 8){
-        printf("Meme team\n");
         Kokkos::parallel_for("move old entries", team_policy_t(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
             const edge_offset_t u = thread.league_rank();
             edge_offset_t write_offset = next_offsets(u);
@@ -350,7 +352,6 @@ graph_type collect_unitigs(graph_type glue_old, graph_type glue_action){
             }
         });
     } else {
-        printf("Check these singles\n");
         Kokkos::parallel_for("move old entries", policy_t(0, n), KOKKOS_LAMBDA(const edge_offset_t u){
             edge_offset_t write_offset = next_offsets(u);
             //not likely to be very many here, about 2 to 7
@@ -396,7 +397,7 @@ std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, ExperimentLog
             glue_last = collect_unitigs(glue_last, glue);
         }
         first = false;
-        printf("Time to compact unitigs: %.3f\n", timer.seconds());
+        experiment.addMeasurement(ExperimentLoggerUtil::Measurement::CompactGlues, timer.seconds());
         timer.reset();
         cur = coarsen_de_bruijn_graph(cur, interp);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Build, timer.seconds());
