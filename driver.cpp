@@ -101,6 +101,7 @@ int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
         //advance past the kmer
         f += k;
     }
+    printf("Time to write chars contiguously: %.3f\n", t.seconds());
     t.reset();
     out = char_view_t("chars", n*k);
     printf("Time to init chars device memory: %.3f\n", t.seconds());
@@ -154,25 +155,25 @@ int main(int argc, char **argv) {
         char_mirror_t kmer_copy;
         ExperimentLoggerUtil experiment;
         {
-            vtx_view_t g;
+            vtx_view_t g = assemble_pruned_graph(kmers, kpmers, vtx_map, k);
             using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
             coarsener_t coarsener;
-            {
-                t3.reset();
-                graph_type g_base = assemble_graph(kmers, kpmers, vtx_map, k);
-                printf("entries: %lu\n", g_base.entries.extent(0));
-                printf("Time to assemble base graph: %.3f\n", t3.seconds());
-                t3.reset();
-                //kmer_copy = move_to_main(kmers);
-                //this is likely the peak memory usage point of the program
-                //don't need these anymore, delete them
-                //Kokkos::resize(edge_map, 0);
-                Kokkos::resize(vtx_map, 0);
-                Kokkos::resize(kpmers, 0);
-                //will need this later but we made a copy
-                //Kokkos::resize(kmers, 0);
-                g = coarsener.prune_edges(g_base);
-            }
+            //{
+            //    t3.reset();
+            //    graph_type g_base = assemble_graph(kmers, kpmers, vtx_map, k);
+            //    printf("entries: %lu\n", g_base.entries.extent(0));
+            //    printf("Time to assemble base graph: %.3f\n", t3.seconds());
+            //    t3.reset();
+            //    //kmer_copy = move_to_main(kmers);
+            //    //this is likely the peak memory usage point of the program
+            //    //don't need these anymore, delete them
+            //    //Kokkos::resize(edge_map, 0);
+            //    Kokkos::resize(vtx_map, 0);
+            //    Kokkos::resize(kpmers, 0);
+            //    //will need this later but we made a copy
+            //    //Kokkos::resize(kmers, 0);
+            //    g = coarsener.prune_edges(g_base);
+            //}
             printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
             t.reset();
             glue_list = coarsener.coarsen_de_bruijn_full_cycle(g, experiment);

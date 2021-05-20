@@ -122,11 +122,6 @@ public:
         int swap = 1;
         //find vertices that must be aggregated
         vtx_view_t rem_vtx;
-#ifdef HUGE
-        printf("edgeful vertices: %lu\n", perm_length);
-#else
-        printf("edgeful vertices: %u\n", perm_length);
-#endif
         int count = 0;
         //construct mapping using heaviest edges
         while (perm_length > 0) {
