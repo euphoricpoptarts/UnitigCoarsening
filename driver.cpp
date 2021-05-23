@@ -215,9 +215,9 @@ void find_l_minimizer(char_view_t& kmers, edge_offset_t k, edge_offset_t l){
     });
     printf("Counted lmins in %.3f seconds\n", t.seconds());
     t.reset();
-    for(ordinal_t i = 0; i < large_buckets; i++){
-        printf("bucket %u contains %u\n", i, lmin_counter(i));
-    }
+    //for(ordinal_t i = 0; i < large_buckets; i++){
+    //    printf("bucket %u contains %u\n", i, lmin_counter(i));
+    //}
 }
 
 char_mirror_t move_to_main(char_view_t x){
