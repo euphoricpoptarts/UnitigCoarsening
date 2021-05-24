@@ -63,39 +63,116 @@ ordinal_t find_vtx(const char_view_t chars, const vtx_view_t vtx_map, edge_offse
 }
 
 //check if vtx found in edge_chars at offset exists in vtx_chars using a hashmap
+//KOKKOS_INLINE_FUNCTION
+//ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_map, const char_view_t edge_chars, edge_offset_t offset, edge_offset_t k){
+//    uint32_t hash = fnv(edge_chars, offset, k);
+//    uint32_t hash_cast = vtx_map.extent(0) - 1;
+//    hash = hash & hash_cast;
+//    while(vtx_map(hash) != ORD_MAX){
+//        edge_offset_t hash_offset = vtx_map(hash)*k;
+//        if(cmp(edge_chars, vtx_chars, offset, hash_offset, k)){
+//            return vtx_map(hash);
+//        }
+//        hash = (hash + 1) & hash_cast;
+//    }
+//    return ORD_MAX;
+//}
+
 KOKKOS_INLINE_FUNCTION
-ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_map, const char_view_t edge_chars, edge_offset_t offset, edge_offset_t k){
-    uint32_t hash = fnv(edge_chars, offset, k);
-    uint32_t hash_cast = vtx_map.extent(0) - 1;
-    hash = hash & hash_cast;
-    while(vtx_map(hash) != ORD_MAX){
-        edge_offset_t hash_offset = vtx_map(hash)*k;
-        if(cmp(edge_chars, vtx_chars, offset, hash_offset, k)){
-            return vtx_map(hash);
-        }
-        hash = (hash + 1) & hash_cast;
+ordinal_t find_vtx_from_edge(const vtx_view_t char_map, const vtx_view_t vtx_map, const char_view_t edge_chars, edge_offset_t offset, edge_offset_t k){
+    edge_offset_t tree_pos = 0;
+    for(edge_offset_t j = offset; j < offset + k; j++){
+        char c = edge_chars(j);
+        edge_offset_t key = char_map(c);
+        tree_pos += key;
+        tree_pos = vtx_map(tree_pos);
     }
-    return ORD_MAX;
+    return vtx_map(tree_pos);
 }
 
+//vtx_view_t generate_hashmap(char_view_t kmers, edge_offset_t k, ordinal_t size){
+//    size_t hashmap_size = 1;
+//    while(hashmap_size < 2*size) hashmap_size <<= 1;
+//    vtx_view_t out("hashmap", hashmap_size);
+//    Kokkos::parallel_for("init hashmap", hashmap_size, KOKKOS_LAMBDA(const ordinal_t i){
+//        out(i) = ORD_MAX;
+//    });
+//    size_t hash_cast = hashmap_size - 1;
+//    Kokkos::parallel_for("fill hashmap", size, KOKKOS_LAMBDA(const ordinal_t i){
+//        uint32_t hash = fnv(kmers, k*i, k) & hash_cast;
+//        bool success = Kokkos::atomic_compare_exchange_strong(&out(hash), ORD_MAX, i);
+//        //linear probing
+//        //all values are unique so no need to check
+//        while(!success){
+//            hash = (hash + 1) & hash_cast;
+//            success = Kokkos::atomic_compare_exchange_strong(&out(hash), ORD_MAX, i);
+//        }
+//    });
+//    return out; 
+//}
+
 vtx_view_t generate_hashmap(char_view_t kmers, edge_offset_t k, ordinal_t size){
-    size_t hashmap_size = 1;
-    while(hashmap_size < 2*size) hashmap_size <<= 1;
-    vtx_view_t out("hashmap", hashmap_size);
-    Kokkos::parallel_for("init hashmap", hashmap_size, KOKKOS_LAMBDA(const ordinal_t i){
+    edge_offset_t out_size = kmers.extent(0) * 4;
+    vtx_view_t out("hashmap", out_size);
+    edge_subview_t tree_count("tree count");
+    Kokkos::parallel_for("init hashmap", out_size, KOKKOS_LAMBDA(const edge_offset_t i){
         out(i) = ORD_MAX;
     });
-    size_t hash_cast = hashmap_size - 1;
-    Kokkos::parallel_for("fill hashmap", size, KOKKOS_LAMBDA(const ordinal_t i){
-        uint32_t hash = fnv(kmers, k*i, k) & hash_cast;
-        bool success = Kokkos::atomic_compare_exchange_strong(&out(hash), ORD_MAX, i);
-        //linear probing
-        //all values are unique so no need to check
-        while(!success){
-            hash = (hash + 1) & hash_cast;
-            success = Kokkos::atomic_compare_exchange_strong(&out(hash), ORD_MAX, i);
-        }
+    //init first 4 levels as a dense 4-tree
+    edge_offset_t allocate = 4 + 16 + 64 + 256;
+    Kokkos::parallel_for("init tree", allocate, KOKKOS_LAMBDA(const edge_offset_t i){
+        out(i) = 4*i + 4;
     });
+    allocate += 1024;
+    Kokkos::deep_copy(tree_count, allocate);
+    vtx_mirror_t char_map_mirror("char map mirror", 256);
+    char_map_mirror('A') = 0;
+    char_map_mirror('C') = 1;
+    char_map_mirror('G') = 2;
+    char_map_mirror('T') = 3;
+    vtx_view_t char_map("char map", 256);
+    Kokkos::deep_copy(char_map, char_map_mirror);
+    vtx_view_t succeeded("successes", size);
+    ordinal_t success_count = 0;
+    while(success_count < size){
+    Kokkos::parallel_reduce("fill hashmap", size, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update){
+        if(succeeded(i) == 1){
+            update++;
+        } else {
+            bool failed = false;
+            edge_offset_t tree_pos = 0;
+            for(edge_offset_t j = k*i; j < k*(i + 1); j++){
+                char c = kmers(j);
+                edge_offset_t key = char_map(c);
+                tree_pos += key;
+                if(out(tree_pos) < ORD_MAX - 1){
+                    tree_pos = out(tree_pos);
+                } else {
+                    //allocate 4 new leaves
+                    if(Kokkos::atomic_compare_exchange_strong(&out(tree_pos), ORD_MAX, ORD_MAX - 1)){
+                        edge_offset_t new_pos = Kokkos::atomic_fetch_add(&tree_count(), 4);
+                        out(tree_pos) = new_pos;
+                        //Kokkos::atomic_compare_exchange_strong(&out(tree_pos), ORD_MAX - 1, (ordinal_t) new_pos);
+                        tree_pos = new_pos;
+                    } else {
+                        failed = true;
+                        break;
+                        //somebody else is in the process of allocating them
+                        //this is technically a lock
+                        //while(out(tree_pos) == ORD_MAX - 1){ }
+                        //tree_pos = out(tree_pos);
+                    }
+                }
+            }
+            if(!failed){
+                out(tree_pos) = i;
+                succeeded(i) = 1;
+                update++;
+            }
+        }
+    }, success_count);
+    printf("Total successes: %u\n", success_count);
+    }
     return out; 
 }
 
@@ -126,12 +203,19 @@ vtx_view_t assemble_pruned_graph(char_view_t kmers, char_view_t kpmers, vtx_view
     char_view_t edge_count("edge count", n);
     vtx_view_t in("in vertex", np);
     vtx_view_t out("out vertex", np);
+    vtx_mirror_t char_map_mirror("char map mirror", 256);
+    char_map_mirror('A') = 0;
+    char_map_mirror('C') = 1;
+    char_map_mirror('G') = 2;
+    char_map_mirror('T') = 3;
+    vtx_view_t char_map("char map", 256);
+    Kokkos::deep_copy(char_map, char_map_mirror);
     Kokkos::parallel_for("translate edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1), k);
+        ordinal_t u = find_vtx_from_edge(char_map, vtx_map, kpmers, i*(k+1), k);
         out(i) = u;
     });
     Kokkos::parallel_for("translate edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t v = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1) + 1, k);
+        ordinal_t v = find_vtx_from_edge(char_map, vtx_map, kpmers, i*(k+1) + 1, k);
         in(i) = v;
     });
     Kokkos::parallel_for("count edges", np, KOKKOS_LAMBDA(const ordinal_t i){
@@ -167,12 +251,19 @@ graph_type assemble_graph(char_view_t kmers, char_view_t kpmers, vtx_view_t vtx_
     edge_view_t row_map("row map", n+1);
     vtx_view_t in("in vertex", np);
     vtx_view_t out("out vertex", np);
+    vtx_mirror_t char_map_mirror("char map mirror", 256);
+    char_map_mirror('A') = 0;
+    char_map_mirror('C') = 1;
+    char_map_mirror('G') = 2;
+    char_map_mirror('T') = 3;
+    vtx_view_t char_map("char map", 256);
+    Kokkos::deep_copy(char_map, char_map_mirror);
     Kokkos::parallel_for("translate edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1), k);
+        ordinal_t u = find_vtx_from_edge(char_map, vtx_map, kpmers, i*(k+1), k);
         out(i) = u;
     });
     Kokkos::parallel_for("translate edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t v = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1) + 1, k);
+        ordinal_t v = find_vtx_from_edge(char_map, vtx_map, kpmers, i*(k+1) + 1, k);
         in(i) = v;
     });
     vtx_view_t edge_count("edge count", n);
