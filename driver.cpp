@@ -185,13 +185,55 @@ ordinal_t get_lmin(const char_view_t chars, const vtx_view_t lmin_map, const vtx
     return lmin_order;
 }
 
+template< class ScalarType, int N >
+struct array_type {
+    ScalarType the_array[N];
+
+    KOKKOS_INLINE_FUNCTION   // Default constructor - Initialize to 0's
+    array_type() {
+        for (int i = 0; i < N; i++ ) { the_array[i] = 0; }
+    }
+
+    KOKKOS_INLINE_FUNCTION   // Copy Constructor
+    array_type(const array_type & rhs) {
+        for (int i = 0; i < N; i++ ){
+            the_array[i] = rhs.the_array[i];
+        }
+    }
+
+    KOKKOS_INLINE_FUNCTION   // add operator
+    array_type& operator += (const array_type& src) {
+        for ( int i = 0; i < N; i++ ) {
+            the_array[i]+=src.the_array[i];
+        }
+        return *this;
+    }
+
+    KOKKOS_INLINE_FUNCTION   // volatile add operator
+    void operator += (const volatile array_type& src) volatile {
+        for ( int i = 0; i < N; i++ ) {
+            the_array[i]+=src.the_array[i];
+        }
+    }
+};
+
+using reduce_t = array_type<ordinal_t, 64>;
+namespace Kokkos { //reduction identity must be defined in Kokkos namespace
+   template<>
+   struct reduction_identity< reduce_t > {
+      KOKKOS_FORCEINLINE_FUNCTION static reduce_t sum() {
+         return reduce_t();
+      }
+   };
+}
+
 void find_l_minimizer(char_view_t& kmers, edge_offset_t k, edge_offset_t l){
     ordinal_t size = kmers.extent(0)/k;
     pool_t rand_pool(std::time(nullptr));
     ordinal_t lmin_buckets = 1;
     lmin_buckets <<= 2*l;
     vtx_view_t lmin_bucket_map = generate_permutation(lmin_buckets, rand_pool);
-    ordinal_t large_buckets = 32;//lmin_buckets;
+    ordinal_t large_buckets = 64;//lmin_buckets;
     ordinal_t large_buckets_mask = large_buckets - 1;
     vtx_mirror_t char_map_mirror("char map mirror", 256);
     char_map_mirror('A') = 0;
@@ -208,16 +250,18 @@ void find_l_minimizer(char_view_t& kmers, edge_offset_t k, edge_offset_t l){
     });
     printf("Found lmins in %.3f seconds\n", t.seconds());
     t.reset();
-    Kokkos::parallel_for("count lmins", size, KOKKOS_LAMBDA(const ordinal_t i){
+    reduce_t r;
+    Kokkos::parallel_reduce("count lmins", size, KOKKOS_LAMBDA(const ordinal_t i, reduce_t& update){
         ordinal_t lmin = lmins(i);
         lmin = lmin & large_buckets_mask;
-        Kokkos::atomic_increment(&lmin_counter(lmin));
-    });
+        //Kokkos::atomic_increment(&lmin_counter(lmin));
+        update.the_array[lmin] += 1;
+    }, Kokkos::Sum<reduce_t>(r));
     printf("Counted lmins in %.3f seconds\n", t.seconds());
     t.reset();
-    //for(ordinal_t i = 0; i < large_buckets; i++){
-    //    printf("bucket %u contains %u\n", i, lmin_counter(i));
-    //}
+    for(ordinal_t i = 0; i < large_buckets; i++){
+        printf("bucket %u contains %u\n", i, r.the_array[i]);
+    }
 }
 
 char_mirror_t move_to_main(char_view_t x){
