@@ -119,6 +119,50 @@ struct prefix_sum1
     }
 };
 
+void assemble_pruned_graph(char_view_t kmers, char_view_t kpmers, vtx_view_t vtx_map, edge_offset_t k, vtx_view_t g){
+    ordinal_t n = kmers.extent(0) / k;
+    ordinal_t np = kpmers.extent(0) / (k + 1);
+    //both the in and out edge counts for each vertex are packed into one char
+    char_view_t edge_count("edge count", n);
+    vtx_view_t in("in vertex", np);
+    vtx_view_t out("out vertex", np);
+    Kokkos::parallel_for("translate edges", np, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t u = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1), k);
+        out(i) = u;
+    });
+    Kokkos::parallel_for("translate edges", np, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t v = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1) + 1, k);
+        in(i) = v;
+    });
+    Kokkos::parallel_for("count edges", np, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t u = out(i);
+        //u can have at most 4 out edges
+        if(u != ORD_MAX){
+            Kokkos::atomic_add(&edge_count(u), (char)1);
+        }
+    });
+    Kokkos::parallel_for("count edges", np, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t v = in(i);
+        //v can have at most 4 in edges
+        //so we count the in edges as multiples of 8 (first power of 2 greater than 4, easy to do bitwise ops)
+        if(v != ORD_MAX){
+            Kokkos::atomic_add(&edge_count(v), (char)8);
+        }
+    });
+    ordinal_t count;
+    Kokkos::parallel_reduce("write edges", np, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update){
+        ordinal_t u = out(i);
+        ordinal_t v = in(i);
+        //u has one out edge
+        //and v has one in edge
+        if(u != ORD_MAX && v != ORD_MAX && (edge_count(u) & 7) == 1 && (edge_count(v) >> 3) == 1){
+            g(u) = v;
+            update++;
+        }
+    }, count);
+    printf("Edges written: %u\n", count);
+}
+
 vtx_view_t assemble_pruned_graph(char_view_t kmers, char_view_t kpmers, vtx_view_t vtx_map, edge_offset_t k){
     ordinal_t n = kmers.extent(0) / k;
     ordinal_t np = kpmers.extent(0) / (k + 1);
