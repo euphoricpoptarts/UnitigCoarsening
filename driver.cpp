@@ -245,7 +245,8 @@ struct array_type {
     }
 };
 
-using reduce_t = array_type<ordinal_t, 64>;
+const int large_buckets = 64;
+using reduce_t = array_type<ordinal_t, large_buckets>;
 namespace Kokkos { //reduction identity must be defined in Kokkos namespace
    template<>
    struct reduction_identity< reduce_t > {
@@ -266,7 +267,6 @@ bucket_kmers find_l_minimizer(char_view_t& kmers, edge_offset_t k, edge_offset_t
     ordinal_t size = kmers.extent(0)/k;
     ordinal_t lmin_buckets = 1;
     lmin_buckets <<= 2*l;
-    ordinal_t large_buckets = 64;//lmin_buckets;
     ordinal_t large_buckets_mask = large_buckets - 1;
     vtx_mirror_t char_map_mirror("char map mirror", 256);
     char_map_mirror('A') = 0;
@@ -309,6 +309,7 @@ bucket_kmers find_l_minimizer(char_view_t& kmers, edge_offset_t k, edge_offset_t
     printf("Partitioned kmers in %.3f seconds\n", t.seconds());
     t.reset();
     char_view_t kmers_partitioned(Kokkos::ViewAllocateWithoutInitializing("kmers partitioned"), kmers.extent(0));
+    Kokkos::View<const char*, Kokkos::MemoryTraits<Kokkos::RandomAccess>> kmers_read = kmers;
     Kokkos::parallel_for("write kmers", policy(size, 32), KOKKOS_LAMBDA(const member& thread){
         ordinal_t write_id = thread.league_rank();
         ordinal_t i = kmer_ids(write_id);
@@ -316,7 +317,7 @@ bucket_kmers find_l_minimizer(char_view_t& kmers, edge_offset_t k, edge_offset_t
         edge_offset_t start = k*i;
         edge_offset_t end = start + k;
         Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t j){
-            kmers_partitioned(write_idx + (j - start)) = kmers(j);
+            kmers_partitioned(write_idx + (j - start)) = kmers_read(j);
         });
     });
     printf("Wrote partitioned kmers in %.3f seconds\n", t.seconds());
@@ -333,7 +334,6 @@ bucket_kmers find_l_minimizer_edge(char_view_t& kmers, edge_offset_t k, edge_off
     ordinal_t size = kmers.extent(0)/k;
     ordinal_t lmin_buckets = 1;
     lmin_buckets <<= 2*l;
-    ordinal_t large_buckets = 64;//lmin_buckets;
     ordinal_t large_buckets_mask = large_buckets - 1;
     vtx_mirror_t char_map_mirror("char map mirror", 256);
     char_map_mirror('A') = 0;
@@ -399,6 +399,7 @@ bucket_kmers find_l_minimizer_edge(char_view_t& kmers, edge_offset_t k, edge_off
     printf("Partitioned kmers in %.3f seconds\n", t.seconds());
     t.reset();
     char_view_t kmers_partitioned(Kokkos::ViewAllocateWithoutInitializing("kmers partitioned"), buckets_m(large_buckets) * k);
+    Kokkos::View<const char*, Kokkos::MemoryTraits<Kokkos::RandomAccess>> kmers_read = kmers;
     Kokkos::parallel_for("write kmers", policy(buckets_m(large_buckets), 32), KOKKOS_LAMBDA(const member& thread){
         ordinal_t write_id = thread.league_rank();
         ordinal_t i = kmer_writes(write_id);
@@ -406,7 +407,7 @@ bucket_kmers find_l_minimizer_edge(char_view_t& kmers, edge_offset_t k, edge_off
         edge_offset_t start = k*i;
         edge_offset_t end = start + k;
         Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t j){
-            kmers_partitioned(write_idx + (j - start)) = kmers(j);
+            kmers_partitioned(write_idx + (j - start)) = kmers_read(j);
         });
     });
     printf("Wrote partitioned kmers in %.3f seconds\n", t.seconds());
@@ -476,8 +477,8 @@ int main(int argc, char **argv) {
             char_view_t kmer_s = Kokkos::subview(kmer_b.kmers, std::make_pair(kmer_b.buckets_row_map[i]*k, kmer_b.buckets_row_map[i+1]*k));
             char_view_t kpmer_s = Kokkos::subview(kpmer_b.kmers, std::make_pair(kpmer_b.buckets_row_map[i]*(k+1), kpmer_b.buckets_row_map[i+1]*(k+1)));
             vtx_view_t vtx_map = generate_hashmap(kmer_s, k, kmer_count);
-            assemble_pruned_graph(kmer_s, kpmer_s, vtx_map, k, g);
-            printf("Time to assemble bucket %i: %.3f\n", i, t2.seconds());
+            assemble_pruned_graph(kmer_s, kpmer_s, vtx_map, k, g, kmer_b.buckets_row_map[i]);
+            printf("Time to assemble bucket %i: %.4f\n", i, t2.seconds());
             printf("Bucket %i has %u kmers and %u k+1-mers\n", i, kmer_count, kpmer_count);
             t2.reset();
         }

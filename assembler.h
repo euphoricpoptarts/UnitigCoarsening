@@ -80,7 +80,7 @@ ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_m
 
 vtx_view_t generate_hashmap(char_view_t kmers, edge_offset_t k, ordinal_t size){
     size_t hashmap_size = 1;
-    while(hashmap_size < 2*size) hashmap_size <<= 1;
+    while(hashmap_size < 1.5*size) hashmap_size <<= 1;
     vtx_view_t out("hashmap", hashmap_size);
     Kokkos::parallel_for("init hashmap", hashmap_size, KOKKOS_LAMBDA(const ordinal_t i){
         out(i) = ORD_MAX;
@@ -119,7 +119,7 @@ struct prefix_sum1
     }
 };
 
-void assemble_pruned_graph(char_view_t kmers, char_view_t kpmers, vtx_view_t vtx_map, edge_offset_t k, vtx_view_t g){
+void assemble_pruned_graph(char_view_t kmers, char_view_t kpmers, vtx_view_t vtx_map, edge_offset_t k, vtx_view_t g, ordinal_t offset){
     ordinal_t n = kmers.extent(0) / k;
     ordinal_t np = kpmers.extent(0) / (k + 1);
     //both the in and out edge counts for each vertex are packed into one char
@@ -156,7 +156,7 @@ void assemble_pruned_graph(char_view_t kmers, char_view_t kpmers, vtx_view_t vtx
         //u has one out edge
         //and v has one in edge
         if(u != ORD_MAX && v != ORD_MAX && (edge_count(u) & 7) == 1 && (edge_count(v) >> 3) == 1){
-            g(u) = v;
+            g(u + offset) = v + offset;
             update++;
         }
     }, count);
