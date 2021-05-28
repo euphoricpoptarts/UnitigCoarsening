@@ -470,14 +470,27 @@ int main(int argc, char **argv) {
         Kokkos::parallel_for("init g", kmer_b.size, KOKKOS_LAMBDA(const ordinal_t i){
             g(i) = ORD_MAX;
         });
+        ordinal_t largest_n = 0, largest_np = 0;;
+        for(int i = 0; i < kmer_b.buckets; i++){
+            ordinal_t kmer_count = kmer_b.buckets_row_map[i+1] - kmer_b.buckets_row_map[i];
+            ordinal_t kpmer_count = kpmer_b.buckets_row_map[i+1] - kpmer_b.buckets_row_map[i];
+            if(kmer_count > largest_n){
+                largest_n = kmer_count;
+            }
+            if(kpmer_count > largest_np){
+                largest_np = kpmer_count;
+            }
+        }
+        vtx_view_t hashmap = init_hashmap(largest_n);
+        assembler_data assembler = init_assembler(largest_n, largest_np);
         for(int i = 0; i < kmer_b.buckets; i++){
             Kokkos::Timer t2;
             ordinal_t kmer_count = kmer_b.buckets_row_map[i+1] - kmer_b.buckets_row_map[i];
             ordinal_t kpmer_count = kpmer_b.buckets_row_map[i+1] - kpmer_b.buckets_row_map[i];
             char_view_t kmer_s = Kokkos::subview(kmer_b.kmers, std::make_pair(kmer_b.buckets_row_map[i]*k, kmer_b.buckets_row_map[i+1]*k));
             char_view_t kpmer_s = Kokkos::subview(kpmer_b.kmers, std::make_pair(kpmer_b.buckets_row_map[i]*(k+1), kpmer_b.buckets_row_map[i+1]*(k+1)));
-            vtx_view_t vtx_map = generate_hashmap(kmer_s, k, kmer_count);
-            assemble_pruned_graph(kmer_s, kpmer_s, vtx_map, k, g, kmer_b.buckets_row_map[i]);
+            generate_hashmap(hashmap, kmer_s, k, kmer_count);
+            assemble_pruned_graph(assembler, kmer_s, kpmer_s, hashmap, k, g, kmer_b.buckets_row_map[i]);
             printf("Time to assemble bucket %i: %.4f\n", i, t2.seconds());
             printf("Bucket %i has %u kmers and %u k+1-mers\n", i, kmer_count, kpmer_count);
             t2.reset();

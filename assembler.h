@@ -78,25 +78,29 @@ ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_m
     return ORD_MAX;
 }
 
-vtx_view_t generate_hashmap(char_view_t kmers, edge_offset_t k, ordinal_t size){
+vtx_view_t init_hashmap(ordinal_t max_size){
     size_t hashmap_size = 1;
-    while(hashmap_size < 1.5*size) hashmap_size <<= 1;
-    vtx_view_t out("hashmap", hashmap_size);
+    while(hashmap_size < 1.5*max_size) hashmap_size <<= 1;
+    vtx_view_t hashmap("hashmap", hashmap_size);
+    return hashmap;
+}
+
+void generate_hashmap(vtx_view_t hashmap, char_view_t kmers, edge_offset_t k, ordinal_t size){
+    size_t hashmap_size = hashmap.extent(0);
     Kokkos::parallel_for("init hashmap", hashmap_size, KOKKOS_LAMBDA(const ordinal_t i){
-        out(i) = ORD_MAX;
+        hashmap(i) = ORD_MAX;
     });
     size_t hash_cast = hashmap_size - 1;
     Kokkos::parallel_for("fill hashmap", size, KOKKOS_LAMBDA(const ordinal_t i){
         uint32_t hash = fnv(kmers, k*i, k) & hash_cast;
-        bool success = Kokkos::atomic_compare_exchange_strong(&out(hash), ORD_MAX, i);
+        bool success = Kokkos::atomic_compare_exchange_strong(&hashmap(hash), ORD_MAX, i);
         //linear probing
         //all values are unique so no need to check
         while(!success){
             hash = (hash + 1) & hash_cast;
-            success = Kokkos::atomic_compare_exchange_strong(&out(hash), ORD_MAX, i);
+            success = Kokkos::atomic_compare_exchange_strong(&hashmap(hash), ORD_MAX, i);
         }
     });
-    return out; 
 }
 
 struct prefix_sum1
@@ -119,43 +123,57 @@ struct prefix_sum1
     }
 };
 
-void assemble_pruned_graph(char_view_t kmers, char_view_t kpmers, vtx_view_t vtx_map, edge_offset_t k, vtx_view_t g, ordinal_t offset){
+struct assembler_data {
+    vtx_view_t in;
+    vtx_view_t out;
+    char_view_t edge_count;
+};
+
+assembler_data init_assembler(ordinal_t max_n, ordinal_t max_np){
+    assembler_data d;
+    d.in = vtx_view_t("in vertex", max_np);
+    d.out = vtx_view_t("out vertex", max_np);
+    d.edge_count = char_view_t("edge count", max_n);
+    return d;
+}
+
+void assemble_pruned_graph(assembler_data assembler, char_view_t kmers, char_view_t kpmers, vtx_view_t vtx_map, edge_offset_t k, vtx_view_t g, ordinal_t offset){
     ordinal_t n = kmers.extent(0) / k;
     ordinal_t np = kpmers.extent(0) / (k + 1);
     //both the in and out edge counts for each vertex are packed into one char
-    char_view_t edge_count("edge count", n);
-    vtx_view_t in("in vertex", np);
-    vtx_view_t out("out vertex", np);
+    Kokkos::parallel_for("reset edge count", n, KOKKOS_LAMBDA(const ordinal_t i){
+        assembler.edge_count(i) = 0;
+    });
     Kokkos::parallel_for("translate edges", np, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t u = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1), k);
-        out(i) = u;
+        assembler.out(i) = u;
     });
     Kokkos::parallel_for("translate edges", np, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t v = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1) + 1, k);
-        in(i) = v;
+        assembler.in(i) = v;
     });
     Kokkos::parallel_for("count edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = out(i);
+        ordinal_t u = assembler.out(i);
         //u can have at most 4 out edges
         if(u != ORD_MAX){
-            Kokkos::atomic_add(&edge_count(u), (char)1);
+            Kokkos::atomic_add(&assembler.edge_count(u), (char)1);
         }
     });
     Kokkos::parallel_for("count edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t v = in(i);
+        ordinal_t v = assembler.in(i);
         //v can have at most 4 in edges
         //so we count the in edges as multiples of 8 (first power of 2 greater than 4, easy to do bitwise ops)
         if(v != ORD_MAX){
-            Kokkos::atomic_add(&edge_count(v), (char)8);
+            Kokkos::atomic_add(&assembler.edge_count(v), (char)8);
         }
     });
     ordinal_t count;
     Kokkos::parallel_reduce("write edges", np, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update){
-        ordinal_t u = out(i);
-        ordinal_t v = in(i);
+        ordinal_t u = assembler.out(i);
+        ordinal_t v = assembler.in(i);
         //u has one out edge
         //and v has one in edge
-        if(u != ORD_MAX && v != ORD_MAX && (edge_count(u) & 7) == 1 && (edge_count(v) >> 3) == 1){
+        if(u != ORD_MAX && v != ORD_MAX && (assembler.edge_count(u) & 7) == 1 && (assembler.edge_count(v) >> 3) == 1){
             g(u + offset) = v + offset;
             update++;
         }
