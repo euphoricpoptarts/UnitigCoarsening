@@ -56,6 +56,12 @@ size_t getFileLength(const char *fname){
     return fs::file_size(fname);
 }
 
+//input file looks like
+//4
+//AAAA
+//GGGG
+//CCCC
+//TTTA
 int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
 
     Kokkos::Timer t;
@@ -65,44 +71,65 @@ int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
         return EXIT_FAILURE;
     }
 
-    auto sz = getFileLength(fname);
+    size_t sz = getFileLength(fname);
 
+    size_t chunk_size = sz / 64;
+    size_t offset = 0;
     // Create a buffer for file
-    std::string s(sz, '\0');
-    // Read the whole file into the buffer.
-    infp.read(s.data(), sz);
-    infp.close();
+    char* s = new char[chunk_size];
+    edge_offset_t n = 0, total_read = 0;
+    char_mirror_t char_mirror;
+    char* read_to = 0;
+    printf("Time to init buffer: %.3f\n", t.seconds());
+    t.reset();
+    while(offset < sz){
+        // Read a chunk of the file into the buffer.
+        infp.seekg(offset);
+        if(offset + chunk_size > sz){
+            chunk_size = sz - offset;
+        }
+        infp.read(s, chunk_size);
 
-    edge_offset_t n;
-    const char* f = s.c_str();
-    printf("Time to load file: %.3f\n", t.seconds());
-    t.reset();
+        const char* f = s;
+        if(offset == 0){
 #ifdef HUGE
-    sscanf(f, "%lu", &n);
+            sscanf(f, "%lu", &n);
 #elif defined(LARGE)
-    sscanf(f, "%lu", &n);
+            sscanf(f, "%lu", &n);
 #else
-    sscanf(f, "%u", &n);
+            sscanf(f, "%u", &n);
 #endif
-    t.reset();
-    char_mirror_t char_mirror("char mirror", n*k);
-    printf("Time to init chars host memory: %.3f\n", t.seconds());
-    t.reset();
-    char* read_to = char_mirror.data();
-    for(long i = 0; i < n; i++){
-        //file contains kmer counts, don't care about them
-        //seek the endline
-        while(*f != '\n') f++;
-        //increment past the endline
-        f++;
-        strncpy(read_to, f, k);
-        //increment output buffer for next kmer
-        read_to += k;
-        //advance past the kmer
-        f += k;
+            char_mirror = char_mirror_t("char mirror", n*k);
+            read_to = char_mirror.data();
+        }
+        size_t last_read = 0;
+        while(f - s < chunk_size){
+            //file contains kmer counts, don't care about them
+            //seek the endline
+            while(f - s < chunk_size && *f != '\n') f++;
+            //increment past the endline
+            f++;
+            if(f + k - s > chunk_size){
+                break;
+            } else {
+                last_read = f + k - s;
+            }
+            strncpy(read_to, f, k);
+            total_read++;
+            //increment output buffer for next kmer
+            read_to += k;
+            //advance past the kmer
+            f += k;
+        }
+        offset += last_read;
+        if(total_read == n){
+            break;
+        }
     }
-    printf("Time to write chars contiguously: %.3f\n", t.seconds());
+    printf("Time to read and process input: %.3f\n", t.seconds());
     t.reset();
+    delete[] s;
+    infp.close();
     out = char_view_t("chars", n*k);
     printf("Time to init chars device memory: %.3f\n", t.seconds());
     t.reset();
