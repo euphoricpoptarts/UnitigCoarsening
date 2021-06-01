@@ -99,7 +99,8 @@ int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
 #else
             sscanf(f, "%u", &n);
 #endif
-            char_mirror = char_mirror_t("char mirror", n*k);
+            out = char_view_t("chars", n*k);
+            char_mirror = Kokkos::create_mirror_view(out);
             read_to = char_mirror.data();
         }
         size_t last_read = 0;
@@ -130,7 +131,6 @@ int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
     t.reset();
     delete[] s;
     infp.close();
-    out = char_view_t("chars", n*k);
     printf("Time to init chars device memory: %.3f\n", t.seconds());
     t.reset();
     Kokkos::deep_copy(out, char_mirror);
