@@ -63,7 +63,7 @@ size_t getFileLength(const char *fname){
 //GGGG
 //CCCC
 //TTTA
-int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
+int load_kmers(char_view_t& out, char *fname, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_bucket_map, bool is_edge_list) {
 
     Kokkos::Timer t;
     std::ifstream infp(fname);
@@ -74,7 +74,7 @@ int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
 
     size_t sz = getFileLength(fname);
 
-    size_t chunk_size = sz / 64;
+    size_t chunk_size = sz / 4;
     size_t offset = 0;
     // Create a buffer for file
     char* s = new char[chunk_size];
@@ -83,7 +83,11 @@ int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
     char* read_to = 0;
     printf("Time to init buffer: %.3f\n", t.seconds());
     t.reset();
+    out = char_view_t("chars", chunk_size);
+    char_mirror = Kokkos::create_mirror_view(out);
+    double bucket_time = 0;
     while(offset < sz){
+        t.reset();
         // Read a chunk of the file into the buffer.
         infp.seekg(offset);
         if(offset + chunk_size > sz){
@@ -100,11 +104,12 @@ int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
 #else
             sscanf(f, "%u", &n);
 #endif
-            out = char_view_t("chars", n*k);
-            char_mirror = Kokkos::create_mirror_view(out);
-            read_to = char_mirror.data();
         }
+        read_to = char_mirror.data();
         size_t last_read = 0;
+        ordinal_t kmers_read = 0;
+        printf("read chunk in %.3f seconds\n", t.seconds());
+        t.reset();
         while(f - s < chunk_size){
             //file contains kmer counts, don't care about them
             //seek the endline
@@ -117,6 +122,7 @@ int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
                 last_read = f + k - s;
             }
             strncpy(read_to, f, k);
+            kmers_read++;
             total_read++;
             //increment output buffer for next kmer
             read_to += k;
@@ -124,19 +130,23 @@ int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
             f += k;
         }
         offset += last_read;
+        Kokkos::deep_copy(out, char_mirror);
+        printf("packed chunk in %.3f seconds\n", t.seconds());
+        t.reset();
+        if(!is_edge_list){
+            bucket_kmers kmer_b = find_l_minimizer(out, k, l, lmin_bucket_map, kmers_read);
+        } else {
+            bucket_kpmers kpmer_b = find_l_minimizer_edge(out, k, l, lmin_bucket_map, kmers_read);
+        }
+        bucket_time += t.seconds();
+        t.reset();
         if(total_read == n){
             break;
         }
     }
-    printf("Time to read and process input: %.3f\n", t.seconds());
-    t.reset();
+    printf("bucketed chunks in %.3f seconds\n", bucket_time);
     delete[] s;
     infp.close();
-    printf("Time to init chars device memory: %.3f\n", t.seconds());
-    t.reset();
-    Kokkos::deep_copy(out, char_mirror);
-    printf("Time to copy chars to device memory: %.3f\n", t.seconds());
-    t.reset();
     return 0;
 }
 
@@ -216,138 +226,138 @@ int main(int argc, char **argv) {
     {
         char_view_t kmers, kpmers;
         Kokkos::Timer t, t2;//, t3;
-        load_kmers(kmers, kmer_fname, k);
-        load_kmers(kpmers, kpmer_fname, k+1);
-        printf("Read input data in %.3fs\n", t.seconds());
-        t.reset();
-        t2.reset();
         pool_t rand_pool(std::time(nullptr));
         ordinal_t lmin_buckets = 1;
         lmin_buckets <<= 2*l;
         vtx_view_t lmin_bucket_map = generate_permutation(lmin_buckets, rand_pool);
-        bucket_kmers kmer_b = find_l_minimizer(kmers, k, l, lmin_bucket_map);
-        Kokkos::resize(kmers, 0);
-        bucket_kpmers kpmer_b = find_l_minimizer_edge(kpmers, k + 1, l, lmin_bucket_map);
-        Kokkos::resize(kpmers, 0);
-        printf("Computed l-minimizers in %.3f\n", t.seconds());
-        t.reset();
-        //t2.reset();
-        //t3.reset();
-        printf("kmer size: %lu, kmers: %lu\n", kmer_b.kmers.extent(0), kmer_b.size);
-        printf("(k+1)-mer size: %lu, (k+1)mers: %lu\n", kpmer_b.kmers.extent(0), kpmer_b.size);
-        vtx_view_t g("graph", kmer_b.size);
-        Kokkos::parallel_for("init g", kmer_b.size, KOKKOS_LAMBDA(const ordinal_t i){
-            g(i) = ORD_MAX;
-        });
-        ordinal_t largest_n = 0, largest_np = 0, largest_cross = 0;
-        ordinal_t bucket_count = kmer_b.buckets;
-        for(int i = 0; i < bucket_count; i++){
-            ordinal_t kmer_count = kmer_b.buckets_row_map[i+1] - kmer_b.buckets_row_map[i];
-            ordinal_t kpmer_count = kpmer_b.buckets_row_map[i+1] - kpmer_b.buckets_row_map[i];
-            ordinal_t cross_count = kpmer_b.crosscut_row_map(bucket_count*(i + 1)) - kpmer_b.crosscut_row_map(bucket_count*i);
-            kpmer_count += cross_count;
-            if(kmer_count > largest_n){
-                largest_n = kmer_count;
-            }
-            if(kpmer_count > largest_np){
-                largest_np = kpmer_count;
-            }
-            if(cross_count > largest_cross){
-                largest_cross = cross_count;
-            }
-        }
-        printf("largest_np: %u\n", largest_np);
-        vtx_view_t hashmap = init_hashmap(largest_n);
-        assembler_data assembler = init_assembler(largest_n, largest_np);
-        std::vector<crosses> cross_list;
-        for(int i = 0; i < kmer_b.buckets; i++){
-            Kokkos::Timer t2;
-            ordinal_t kmer_count = kmer_b.buckets_row_map[i+1] - kmer_b.buckets_row_map[i];
-            ordinal_t kpmer_count = kpmer_b.buckets_row_map[i+1] - kpmer_b.buckets_row_map[i];
-            char_view_t kmer_s = Kokkos::subview(kmer_b.kmers, std::make_pair(kmer_b.buckets_row_map[i]*k, kmer_b.buckets_row_map[i+1]*k));
-            char_view_t kpmer_s = Kokkos::subview(kpmer_b.kmers, std::make_pair(kpmer_b.buckets_row_map[i]*(k+1), kpmer_b.buckets_row_map[i+1]*(k+1)));
-            char_view_t cross_s = Kokkos::subview(kpmer_b.crosscut, std::make_pair(kpmer_b.crosscut_row_map(bucket_count*i)*(k+1), kpmer_b.crosscut_row_map(bucket_count*(i+1))*(k+1)));
-            generate_hashmap(hashmap, kmer_s, k, kmer_count);
-            crosses c = assemble_pruned_graph(assembler, kmer_s, kpmer_s, hashmap, cross_s, k, g, kmer_b.buckets_row_map[i]);
-            cross_list.push_back(c);
-            printf("Time to assemble bucket %i: %.4f\n", i, t2.seconds());
-            //printf("Bucket %i has %u kmers and %u k+1-mers\n", i, kmer_count, kpmer_count);
-            t2.reset();
-        }
-        //vtx_view_t in_cross_buf("in cross buffer", largest_cross);
-        ordinal_t cross_written_count = 0;
-        for(int i = 0; i < bucket_count; i++){
-            for(int j = 0; j < bucket_count; j++){
-                if(i != j){
-                    ordinal_t out_bucket_begin = kpmer_b.crosscut_row_map(bucket_count*i + j) - kpmer_b.crosscut_row_map(bucket_count*i);
-                    ordinal_t in_bucket_begin = kpmer_b.crosscut_row_map(bucket_count*j + i) - kpmer_b.crosscut_row_map(bucket_count*j);
-                    ordinal_t bucket_size = kpmer_b.crosscut_row_map(bucket_count*i + j + 1) - kpmer_b.crosscut_row_map(bucket_count*i + j);
-                    vtx_view_t out_cross = cross_list[i].out;
-                    vtx_view_t in_cross = cross_list[j].in;
-                    ordinal_t local_count = 0;
-                    Kokkos::parallel_reduce("fill crosses", bucket_size, KOKKOS_LAMBDA(const ordinal_t x, ordinal_t& update){
-                        ordinal_t u = out_cross(out_bucket_begin + x);
-                        ordinal_t v = in_cross(in_bucket_begin + x);
-                        if(u != ORD_MAX && v != ORD_MAX){
-                            g(u) = v;
-                            update++;
-                        }
-                    }, local_count);
-                    cross_written_count += local_count;
-                }
-            }
-        }
-        printf("Cross edges written: %u\n", cross_written_count);
-        printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
-        t.reset();
-        //vtx_view_t vtx_map = generate_hashmap(kmers, k, kmers.extent(0)/k);
-        //printf("kmer hashmap size: %lu\n", vtx_map.extent(0));
-        //printf("Time to generate hashmap: %.3f\n", t3.seconds());
-        //t3.reset();
-        std::list<graph_type> glue_list;
-        //char_mirror_t kmer_copy;
-        ExperimentLoggerUtil experiment;
-        //{
-        //    vtx_view_t g = assemble_pruned_graph(kmers, kpmers, vtx_map, k);
-            using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
-            coarsener_t coarsener;
-        //    //{
-        //    //    t3.reset();
-        //    //    graph_type g_base = assemble_graph(kmers, kpmers, vtx_map, k);
-        //    //    printf("entries: %lu\n", g_base.entries.extent(0));
-        //    //    printf("Time to assemble base graph: %.3f\n", t3.seconds());
-        //    //    t3.reset();
-        //    //    //kmer_copy = move_to_main(kmers);
-        //    //    //this is likely the peak memory usage point of the program
-        //    //    //don't need these anymore, delete them
-        //    //    //Kokkos::resize(edge_map, 0);
-        //    //    Kokkos::resize(vtx_map, 0);
-        //    //    Kokkos::resize(kpmers, 0);
-        //    //    //will need this later but we made a copy
-        //    //    //Kokkos::resize(kmers, 0);
-        //    //    g = coarsener.prune_edges(g_base);
-        //    //}
-        //    printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
-        //    t.reset();
-            glue_list = coarsener.coarsen_de_bruijn_full_cycle(g, experiment);
-        //}
-        //printf("glue list length: %lu\n", glue_list.size());
-        printf("Time to generate glue list: %.3fs\n", t.seconds());
-        printf("Aggregation time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Map));
-        printf("Heavy edge time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Heavy));
-        printf("Pairing time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct));
-        printf("Pairing time specific: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::CoarsenPair));
-        printf("Coarse graph build time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Build));
-        printf("Interpolation graph transpose time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose));
-        printf("Glue compact time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::CompactGlues));
-        t.reset();
-        ////kmers = move_to_device(kmer_copy);
+        load_kmers(kmers, kmer_fname, k, l, lmin_bucket_map, false);
+        load_kmers(kpmers, kpmer_fname, k+1, l, lmin_bucket_map, true);
+        printf("Read input data in %.3fs\n", t.seconds());
         //t.reset();
-        compress_unitigs_maximally2(kmer_b.kmers, glue_list, k, out_fname);
-        printf("Time to compact unitigs: %.3fs\n", t.seconds());
-        t.reset();
-        printf("Total time: %.3fs\n", t2.seconds());
-        t2.reset();
+        //t2.reset();
+        //bucket_kmers kmer_b = find_l_minimizer(kmers, k, l, lmin_bucket_map);
+        //Kokkos::resize(kmers, 0);
+        //bucket_kpmers kpmer_b = find_l_minimizer_edge(kpmers, k + 1, l, lmin_bucket_map);
+        //Kokkos::resize(kpmers, 0);
+        //printf("Computed l-minimizers in %.3f\n", t.seconds());
+        //t.reset();
+        ////t2.reset();
+        ////t3.reset();
+        //printf("kmer size: %lu, kmers: %lu\n", kmer_b.kmers.extent(0), kmer_b.size);
+        //printf("(k+1)-mer size: %lu, (k+1)mers: %lu\n", kpmer_b.kmers.extent(0), kpmer_b.size);
+        //vtx_view_t g("graph", kmer_b.size);
+        //Kokkos::parallel_for("init g", kmer_b.size, KOKKOS_LAMBDA(const ordinal_t i){
+        //    g(i) = ORD_MAX;
+        //});
+        //ordinal_t largest_n = 0, largest_np = 0, largest_cross = 0;
+        //ordinal_t bucket_count = kmer_b.buckets;
+        //for(int i = 0; i < bucket_count; i++){
+        //    ordinal_t kmer_count = kmer_b.buckets_row_map[i+1] - kmer_b.buckets_row_map[i];
+        //    ordinal_t kpmer_count = kpmer_b.buckets_row_map[i+1] - kpmer_b.buckets_row_map[i];
+        //    ordinal_t cross_count = kpmer_b.crosscut_row_map(bucket_count*(i + 1)) - kpmer_b.crosscut_row_map(bucket_count*i);
+        //    kpmer_count += cross_count;
+        //    if(kmer_count > largest_n){
+        //        largest_n = kmer_count;
+        //    }
+        //    if(kpmer_count > largest_np){
+        //        largest_np = kpmer_count;
+        //    }
+        //    if(cross_count > largest_cross){
+        //        largest_cross = cross_count;
+        //    }
+        //}
+        //printf("largest_np: %u\n", largest_np);
+        //vtx_view_t hashmap = init_hashmap(largest_n);
+        //assembler_data assembler = init_assembler(largest_n, largest_np);
+        //std::vector<crosses> cross_list;
+        //for(int i = 0; i < kmer_b.buckets; i++){
+        //    Kokkos::Timer t2;
+        //    ordinal_t kmer_count = kmer_b.buckets_row_map[i+1] - kmer_b.buckets_row_map[i];
+        //    ordinal_t kpmer_count = kpmer_b.buckets_row_map[i+1] - kpmer_b.buckets_row_map[i];
+        //    char_view_t kmer_s = Kokkos::subview(kmer_b.kmers, std::make_pair(kmer_b.buckets_row_map[i]*k, kmer_b.buckets_row_map[i+1]*k));
+        //    char_view_t kpmer_s = Kokkos::subview(kpmer_b.kmers, std::make_pair(kpmer_b.buckets_row_map[i]*(k+1), kpmer_b.buckets_row_map[i+1]*(k+1)));
+        //    char_view_t cross_s = Kokkos::subview(kpmer_b.crosscut, std::make_pair(kpmer_b.crosscut_row_map(bucket_count*i)*(k+1), kpmer_b.crosscut_row_map(bucket_count*(i+1))*(k+1)));
+        //    generate_hashmap(hashmap, kmer_s, k, kmer_count);
+        //    crosses c = assemble_pruned_graph(assembler, kmer_s, kpmer_s, hashmap, cross_s, k, g, kmer_b.buckets_row_map[i]);
+        //    cross_list.push_back(c);
+        //    printf("Time to assemble bucket %i: %.4f\n", i, t2.seconds());
+        //    //printf("Bucket %i has %u kmers and %u k+1-mers\n", i, kmer_count, kpmer_count);
+        //    t2.reset();
+        //}
+        ////vtx_view_t in_cross_buf("in cross buffer", largest_cross);
+        //ordinal_t cross_written_count = 0;
+        //for(int i = 0; i < bucket_count; i++){
+        //    for(int j = 0; j < bucket_count; j++){
+        //        if(i != j){
+        //            ordinal_t out_bucket_begin = kpmer_b.crosscut_row_map(bucket_count*i + j) - kpmer_b.crosscut_row_map(bucket_count*i);
+        //            ordinal_t in_bucket_begin = kpmer_b.crosscut_row_map(bucket_count*j + i) - kpmer_b.crosscut_row_map(bucket_count*j);
+        //            ordinal_t bucket_size = kpmer_b.crosscut_row_map(bucket_count*i + j + 1) - kpmer_b.crosscut_row_map(bucket_count*i + j);
+        //            vtx_view_t out_cross = cross_list[i].out;
+        //            vtx_view_t in_cross = cross_list[j].in;
+        //            ordinal_t local_count = 0;
+        //            Kokkos::parallel_reduce("fill crosses", bucket_size, KOKKOS_LAMBDA(const ordinal_t x, ordinal_t& update){
+        //                ordinal_t u = out_cross(out_bucket_begin + x);
+        //                ordinal_t v = in_cross(in_bucket_begin + x);
+        //                if(u != ORD_MAX && v != ORD_MAX){
+        //                    g(u) = v;
+        //                    update++;
+        //                }
+        //            }, local_count);
+        //            cross_written_count += local_count;
+        //        }
+        //    }
+        //}
+        //printf("Cross edges written: %u\n", cross_written_count);
+        //printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
+        //t.reset();
+        ////vtx_view_t vtx_map = generate_hashmap(kmers, k, kmers.extent(0)/k);
+        ////printf("kmer hashmap size: %lu\n", vtx_map.extent(0));
+        ////printf("Time to generate hashmap: %.3f\n", t3.seconds());
+        ////t3.reset();
+        //std::list<graph_type> glue_list;
+        ////char_mirror_t kmer_copy;
+        //ExperimentLoggerUtil experiment;
+        ////{
+        ////    vtx_view_t g = assemble_pruned_graph(kmers, kpmers, vtx_map, k);
+        //    using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
+        //    coarsener_t coarsener;
+        ////    //{
+        ////    //    t3.reset();
+        ////    //    graph_type g_base = assemble_graph(kmers, kpmers, vtx_map, k);
+        ////    //    printf("entries: %lu\n", g_base.entries.extent(0));
+        ////    //    printf("Time to assemble base graph: %.3f\n", t3.seconds());
+        ////    //    t3.reset();
+        ////    //    //kmer_copy = move_to_main(kmers);
+        ////    //    //this is likely the peak memory usage point of the program
+        ////    //    //don't need these anymore, delete them
+        ////    //    //Kokkos::resize(edge_map, 0);
+        ////    //    Kokkos::resize(vtx_map, 0);
+        ////    //    Kokkos::resize(kpmers, 0);
+        ////    //    //will need this later but we made a copy
+        ////    //    //Kokkos::resize(kmers, 0);
+        ////    //    g = coarsener.prune_edges(g_base);
+        ////    //}
+        ////    printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
+        ////    t.reset();
+        //    glue_list = coarsener.coarsen_de_bruijn_full_cycle(g, experiment);
+        ////}
+        ////printf("glue list length: %lu\n", glue_list.size());
+        //printf("Time to generate glue list: %.3fs\n", t.seconds());
+        //printf("Aggregation time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Map));
+        //printf("Heavy edge time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Heavy));
+        //printf("Pairing time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::MapConstruct));
+        //printf("Pairing time specific: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::CoarsenPair));
+        //printf("Coarse graph build time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Build));
+        //printf("Interpolation graph transpose time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose));
+        //printf("Glue compact time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::CompactGlues));
+        //t.reset();
+        //////kmers = move_to_device(kmer_copy);
+        ////t.reset();
+        //compress_unitigs_maximally2(kmer_b.kmers, glue_list, k, out_fname);
+        //printf("Time to compact unitigs: %.3fs\n", t.seconds());
+        //t.reset();
+        //printf("Total time: %.3fs\n", t2.seconds());
+        //t2.reset();
     }
     Kokkos::finalize();
     return 0;

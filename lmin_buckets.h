@@ -117,8 +117,7 @@ struct bucket_kpmers {
     ordinal_t crosscut_size;
 };
 
-bucket_kmers find_l_minimizer(char_view_t& kmers, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_bucket_map){
-    ordinal_t size = kmers.extent(0)/k;
+bucket_kmers find_l_minimizer(char_view_t& kmers, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_bucket_map, ordinal_t size){
     ordinal_t lmin_buckets = 1;
     lmin_buckets <<= 2*l;
     ordinal_t large_buckets_mask = large_buckets - 1;
@@ -184,8 +183,7 @@ bucket_kmers find_l_minimizer(char_view_t& kmers, edge_offset_t k, edge_offset_t
     return output;
 }
 
-bucket_kpmers find_l_minimizer_edge(char_view_t& kmers, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_bucket_map){
-    ordinal_t size = kmers.extent(0)/k;
+bucket_kpmers find_l_minimizer_edge(char_view_t& kmers, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_bucket_map, ordinal_t size){
     ordinal_t lmin_buckets = 1;
     lmin_buckets <<= 2*l;
     ordinal_t large_buckets_mask = large_buckets - 1;
@@ -203,7 +201,7 @@ bucket_kpmers find_l_minimizer_edge(char_view_t& kmers, edge_offset_t k, edge_of
     Kokkos::parallel_for("calc lmins", size, KOKKOS_LAMBDA(const ordinal_t i){
         get_double_lmin(kmers, lmin_bucket_map, char_map, k*i, k, l, out_lmins(i), in_lmins(i));
     });
-    printf("Found lmins in %.3f seconds\n", t.seconds());
+    //printf("Found lmins in %.3f seconds\n", t.seconds());
     t.reset();
     reduce_t r;
     vtx_view_t cross_buckets_count("buckets", large_buckets*large_buckets);
@@ -219,7 +217,7 @@ bucket_kpmers find_l_minimizer_edge(char_view_t& kmers, edge_offset_t k, edge_of
             Kokkos::atomic_increment(&cross_buckets_count(lmin_in*large_buckets + lmin_out));
         }
     }, Kokkos::Sum<reduce_t>(r));
-    printf("Counted lmins in %.3f seconds\n", t.seconds());
+    //printf("Counted lmins in %.3f seconds\n", t.seconds());
     t.reset();
     vtx_mirror_t buckets_m("buckets mirror", large_buckets + 1);
     for(ordinal_t i = 0; i < large_buckets; i++){
@@ -268,7 +266,7 @@ bucket_kpmers find_l_minimizer_edge(char_view_t& kmers, edge_offset_t k, edge_of
             cross_writes(insert) = i;
         }
     });
-    printf("Partitioned kmers in %.3f seconds\n", t.seconds());
+    //printf("Partitioned kmers in %.3f seconds\n", t.seconds());
     t.reset();
     char_view_t kmers_partitioned(Kokkos::ViewAllocateWithoutInitializing("kmers partitioned"), buckets_m(large_buckets) * k);
     Kokkos::parallel_for("write kmers", policy(buckets_m(large_buckets), 32), KOKKOS_LAMBDA(const member& thread){
