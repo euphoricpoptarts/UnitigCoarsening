@@ -117,7 +117,11 @@ struct bucket_kpmers {
     ordinal_t crosscut_size;
 };
 
-bucket_kmers find_l_minimizer(char_view_t& kmers, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_bucket_map, ordinal_t size){
+template <class T>
+T find_l_minimizer(char_view_t& kmers, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_bucket_map, ordinal_t size);
+
+template <>
+bucket_kmers find_l_minimizer<bucket_kmers>(char_view_t& kmers, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_bucket_map, ordinal_t size){
     ordinal_t lmin_buckets = 1;
     lmin_buckets <<= 2*l;
     ordinal_t large_buckets_mask = large_buckets - 1;
@@ -161,7 +165,7 @@ bucket_kmers find_l_minimizer(char_view_t& kmers, edge_offset_t k, edge_offset_t
     });
     printf("Partitioned kmers in %.3f seconds\n", t.seconds());
     t.reset();
-    char_view_t kmers_partitioned(Kokkos::ViewAllocateWithoutInitializing("kmers partitioned"), kmers.extent(0));
+    char_view_t kmers_partitioned(Kokkos::ViewAllocateWithoutInitializing("kmers partitioned"), size*k);
     Kokkos::View<const char*, Kokkos::MemoryTraits<Kokkos::RandomAccess>> kmers_read = kmers;
     Kokkos::parallel_for("write kmers", policy(size, 32), KOKKOS_LAMBDA(const member& thread){
         ordinal_t write_id = thread.league_rank();
@@ -183,7 +187,9 @@ bucket_kmers find_l_minimizer(char_view_t& kmers, edge_offset_t k, edge_offset_t
     return output;
 }
 
-bucket_kpmers find_l_minimizer_edge(char_view_t& kmers, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_bucket_map, ordinal_t size){
+
+template <>
+bucket_kpmers find_l_minimizer<bucket_kpmers>(char_view_t& kmers, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_bucket_map, ordinal_t size){
     ordinal_t lmin_buckets = 1;
     lmin_buckets <<= 2*l;
     ordinal_t large_buckets_mask = large_buckets - 1;
