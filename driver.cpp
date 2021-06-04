@@ -167,13 +167,11 @@ int main(int argc, char **argv) {
         char_view_t kmers, kpmers;
         Kokkos::Timer t, t2, t3;
         load_kmers(kmers, kmer_fname, k);
-        load_kmers(kpmers, kpmer_fname, k+1);
         printf("Read input data in %.3fs\n", t.seconds());
         t.reset();
         t2.reset();
         t3.reset();
         printf("kmer size: %lu, kmers: %lu\n", kmers.extent(0), kmers.extent(0)/k);
-        printf("(k+1)-mer size: %lu, (k+1)mers: %lu\n", kpmers.extent(0), kpmers.extent(0)/(k+1));
         vtx_view_t vtx_map = generate_hashmap(kmers, k, kmers.extent(0)/k);
         printf("kmer hashmap size: %lu\n", vtx_map.extent(0));
         printf("Time to generate hashmap: %.3f\n", t3.seconds());
@@ -182,7 +180,7 @@ int main(int argc, char **argv) {
         char_mirror_t kmer_copy;
         ExperimentLoggerUtil experiment;
         {
-            vtx_view_t g = assemble_pruned_graph(kmers, kpmers, vtx_map, k);
+            vtx_view_t g = assemble_pruned_graph(kmers, vtx_map, k);
             using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
             coarsener_t coarsener;
             //{

@@ -78,6 +78,32 @@ ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_m
     return ORD_MAX;
 }
 
+//check if vtx found in edge_chars at offset exists in vtx_chars using a hashmap
+KOKKOS_INLINE_FUNCTION
+ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_map, edge_offset_t offset, edge_offset_t k, ordinal_t size){
+    uint32_t hash = fnv(vtx_chars, offset, k - 1);
+    uint32_t hash_cast = vtx_map.extent(0) - 1;
+    hash = hash & hash_cast;
+    while(vtx_map(hash) != ORD_MAX){
+        ordinal_t addr = vtx_map(hash);
+        bool nullified = false;
+        if(addr >= size){
+            addr -= size;
+            nullified = true;
+        }
+        edge_offset_t hash_offset = addr*k;
+        if(cmp(vtx_chars, vtx_chars, offset, hash_offset, k - 1)){
+            if(!nullified){
+                return addr;
+            } else {
+                return addr + size;
+            }
+        }
+        hash = (hash + 1) & hash_cast;
+    }
+    return ORD_MAX;
+}
+
 vtx_view_t generate_hashmap(char_view_t kmers, edge_offset_t k, ordinal_t size){
     size_t hashmap_size = 1;
     while(hashmap_size < 2*size) hashmap_size <<= 1;
@@ -87,11 +113,25 @@ vtx_view_t generate_hashmap(char_view_t kmers, edge_offset_t k, ordinal_t size){
     });
     size_t hash_cast = hashmap_size - 1;
     Kokkos::parallel_for("fill hashmap", size, KOKKOS_LAMBDA(const ordinal_t i){
-        uint32_t hash = fnv(kmers, k*i, k) & hash_cast;
+        uint32_t hash = fnv(kmers, k*i, k - 1) & hash_cast;
         bool success = Kokkos::atomic_compare_exchange_strong(&out(hash), ORD_MAX, i);
         //linear probing
-        //all values are unique so no need to check
         while(!success){
+            ordinal_t written = out(hash);
+            if(written >= size){
+                written = written - size;
+                if(cmp(kmers, kmers, k*i, k*written, k - 1)){
+                    //hash value matches k-1 mer
+                    //but has been nullified
+                    //do nothing
+                    break;
+                }
+            } else if(cmp(kmers, kmers, k*i, k*written, k - 1)){
+                //hash value matches k-1 mer
+                //nullify it
+                Kokkos::atomic_compare_exchange_strong(&out(hash), written, i + size);
+                break;
+            } 
             hash = (hash + 1) & hash_cast;
             success = Kokkos::atomic_compare_exchange_strong(&out(hash), ORD_MAX, i);
         }
@@ -119,42 +159,34 @@ struct prefix_sum1
     }
 };
 
-vtx_view_t assemble_pruned_graph(char_view_t kmers, char_view_t kpmers, vtx_view_t vtx_map, edge_offset_t k){
+vtx_view_t assemble_pruned_graph(char_view_t kmers, vtx_view_t vtx_map, edge_offset_t k){
     ordinal_t n = kmers.extent(0) / k;
-    ordinal_t np = kpmers.extent(0) / (k + 1);
     //both the in and out edge counts for each vertex are packed into one char
     char_view_t edge_count("edge count", n);
-    vtx_view_t in("in vertex", np);
-    vtx_view_t out("out vertex", np);
-    Kokkos::parallel_for("translate edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1), k);
-        out(i) = u;
-    });
-    Kokkos::parallel_for("translate edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t v = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1) + 1, k);
+    vtx_view_t in("in vertex", n);
+    Kokkos::parallel_for("translate edges", n, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t v = find_vtx_from_edge(kmers, vtx_map, i*k + 1, k, n);
         in(i) = v;
     });
-    Kokkos::parallel_for("count edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = out(i);
-        //u can have at most 4 out edges
-        Kokkos::atomic_add(&edge_count(u), (char)1);
-    });
-    Kokkos::parallel_for("count edges", np, KOKKOS_LAMBDA(const ordinal_t i){
+    Kokkos::parallel_for("count edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t v = in(i);
-        //v can have at most 4 in edges
-        //so we count the in edges as multiples of 8 (first power of 2 greater than 4, easy to do bitwise ops)
-        Kokkos::atomic_add(&edge_count(v), (char)8);
+        if(v != ORD_MAX){
+            if(v > n){
+                v = v - n;
+            }
+            Kokkos::atomic_add(&edge_count(v), (char)1);
+        }
     });
     vtx_view_t g("pruned out entries", n);
     Kokkos::parallel_for("init g", n, KOKKOS_LAMBDA(const ordinal_t i){
         g(i) = ORD_MAX;
     });
-    Kokkos::parallel_for("write edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = out(i);
+    Kokkos::parallel_for("write edges", n, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t u = i;
         ordinal_t v = in(i);
-        //u has one out edge
-        //and v has one in edge
-        if((edge_count(u) & 7) == 1 && (edge_count(v) >> 3) == 1){
+        //u has one out edge (if v < n)
+        //and v has one in edge (if edge_count(v) == 1)
+        if(v < n && edge_count(v) == 1){
             g(u) = v;
         }
     });
