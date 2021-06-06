@@ -85,8 +85,8 @@ struct prefix_sum
 
 vtx_view_t coarsen_de_bruijn_graph(vtx_view_t g, interp_t interp){
     ordinal_t n = g.extent(0);
-    ordinal_t nc = interp.nc;
-    vtx_view_t entries("entries", nc - 1);
+    ordinal_t nc = interp.nc - 2;
+    vtx_view_t entries("entries", nc);
     Kokkos::parallel_for("init entries", nc, KOKKOS_LAMBDA(const ordinal_t i){
         entries(i) = ORD_MAX;
     });
@@ -95,13 +95,15 @@ vtx_view_t coarsen_de_bruijn_graph(vtx_view_t g, interp_t interp){
         if(u > 0){
             //u is not the null aggregate
             ordinal_t f = g(i);
-            if(f != ORD_MAX){
+            if(f < ORD_MAX - 1){
                 //f is a real edge
                 //v can't be the null aggregate if an edge points to it
                 ordinal_t v = interp.entries(f);
                 if(u != v){
-                    entries(u - 1) = v - 1;
+                    entries(u - 2) = v - 2;
                 }
+            } else if (f == ORD_MAX - 1){
+                entries(u - 2) = ORD_MAX - 1;
             }
         }
     });

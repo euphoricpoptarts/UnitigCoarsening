@@ -167,16 +167,28 @@ bucket_kmers find_l_minimizer<bucket_kmers>(char_view_t& kmers, edge_offset_t k,
     t.reset();
     char_view_t kmers_partitioned(Kokkos::ViewAllocateWithoutInitializing("kmers partitioned"), size*k);
     Kokkos::View<const char*, Kokkos::MemoryTraits<Kokkos::RandomAccess>> kmers_read = kmers;
-    Kokkos::parallel_for("write kmers", policy(size, 32), KOKKOS_LAMBDA(const member& thread){
-        ordinal_t write_id = thread.league_rank();
-        ordinal_t i = kmer_ids(write_id);
-        edge_offset_t write_idx = k*write_id;
-        edge_offset_t start = k*i;
-        edge_offset_t end = start + k;
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t j){
-            kmers_partitioned(write_idx + (j - start)) = kmers_read(j);
+    if(typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::HostSpace)){
+        Kokkos::parallel_for("write kmers device", policy(size, 1, 32), KOKKOS_LAMBDA(const member& thread){
+            ordinal_t write_id = thread.league_rank();
+            ordinal_t i = kmer_ids(write_id);
+            edge_offset_t write_idx = k*write_id;
+            edge_offset_t start = k*i;
+            edge_offset_t end = start + k;
+            Kokkos::parallel_for(Kokkos::ThreadVectorRange(thread, start, end), [=](const edge_offset_t j){
+                kmers_partitioned(write_idx + (j - start)) = kmers_read(j);
+            });
         });
-    });
+    } else {
+        Kokkos::parallel_for("write kmers host", size, KOKKOS_LAMBDA(const ordinal_t write_id){
+            ordinal_t i = kmer_ids(write_id);
+            edge_offset_t write_idx = k*write_id;
+            edge_offset_t start = k*i;
+            edge_offset_t end = start + k;
+            for(edge_offset_t j = start; j < end; j++){
+                kmers_partitioned(write_idx + (j - start)) = kmers_read(j);
+            }
+        });
+    }
     printf("Wrote partitioned kmers in %.3f seconds\n", t.seconds());
     t.reset();
     bucket_kmers output;

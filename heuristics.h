@@ -116,7 +116,8 @@ public:
         ordinal_t perm_length = n;
         Kokkos::View<ordinal_t, Device> nvertices_coarse("nvertices");
         //coarse vertex 0 is used to map vertices with no edges
-        ordinal_t nvc = 1;
+        //coarse vertex 1 is used to map vertices with edges outside it's partition
+        ordinal_t nvc = 2;
         Kokkos::deep_copy(nvertices_coarse, nvc);
 
         int swap = 1;
@@ -139,7 +140,7 @@ public:
                 int condition = u < v;
                 //need to enforce an ordering condition to allow hard-stall conditions to be broken
                 //but these hard-stall conditions are rare; so we wait to break them until a few iterations have occurred
-                if (v != ORD_MAX && (count < 5 || condition ^ swap)) {
+                if (v != ORD_MAX && (count < 5 || (condition ^ swap))) {
                     if (Kokkos::atomic_compare_exchange_strong(&vcmap(u), ORD_MAX, ORD_MAX - 1)) {
                         if (u == v || Kokkos::atomic_compare_exchange_strong(&vcmap(v), ORD_MAX, ORD_MAX - 2)) {
                             //do nothing here
@@ -273,7 +274,7 @@ public:
 
         Kokkos::parallel_for("edge choose", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i) {
             //i has an out edge
-            if(g(i) != ORD_MAX){
+            if(g(i) < ORD_MAX - 1){
                 //only one edge is possible
                 //write its heaviest neighbor as me
                 ordinal_t v = g(i);
@@ -284,9 +285,11 @@ public:
             //i has no in edge
             if(hn(i) == ORD_MAX){
                 //i has an out edge
-                if(g(i) != ORD_MAX){
+                if(g(i) < ORD_MAX - 1){
                     ordinal_t v = g(i);
                     hn(i) = v;
+                } else if(g(i) == ORD_MAX - 1) {
+                    vcmap(i) = 1;
                 } else {
                     //no edges, assign to output vertex
                     vcmap(i) = 0;
