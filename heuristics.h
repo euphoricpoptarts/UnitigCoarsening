@@ -125,6 +125,7 @@ public:
         int count = 0;
         //construct mapping using heaviest edges
         while (perm_length > 0) {
+            Kokkos::Timer timer;
             Kokkos::parallel_for("compute mappings", policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i) {
                 ordinal_t u;
                 //on first pass we don't have a set of remaining vertices
@@ -156,6 +157,8 @@ public:
                 }
             });
             Kokkos::fence();
+            experiment.addMeasurement(ExperimentLoggerUtil::Measurement::CoarsenCAS, timer.seconds());
+            timer.reset();
             Kokkos::View<ordinal_t, Device> old_nvc("nvertices old");
             Kokkos::deep_copy(old_nvc, nvertices_coarse);
             Kokkos::parallel_scan("assign aggregates", policy_t(0, perm_length), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
@@ -178,8 +181,9 @@ public:
                 }
             });
             Kokkos::fence();
+            experiment.addMeasurement(ExperimentLoggerUtil::Measurement::CoarsenLabel, timer.seconds());
+            timer.reset();
             //add the ones that failed to be reprocessed next round
-            Kokkos::Timer timer;
             ordinal_t next_length = 0;
             Kokkos::parallel_reduce("count vtx not already mapped", policy_t(0, perm_length), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update) {
                 ordinal_t u;
@@ -211,7 +215,7 @@ public:
             swap = swap ^ 1;
             perm_length = next_length;
             rem_vtx = next_perm;
-            experiment.addMeasurement(ExperimentLoggerUtil::Measurement::CoarsenPair, timer.seconds());
+            experiment.addMeasurement(ExperimentLoggerUtil::Measurement::CoarsenRepeat, timer.seconds());
             timer.reset();
             count++;
         }

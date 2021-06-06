@@ -27,7 +27,9 @@ public:
         InitTransfer,
         InterpTranspose,
         CompactGlues,
-        CoarsenPair,
+        CoarsenRepeat,
+        CoarsenCAS,
+        CoarsenLabel,
 		END
 	};
 	std::vector<std::string> measurementNames{
@@ -48,7 +50,9 @@ public:
         "initial-transfer-to-device",
         "interp-transpose",
         "compact-glues",
-        "coarsen-pair",
+        "coarsen-repeat-gather",
+        "coarsen-cas-ops",
+        "coarsen-label-aggregates"
 	};
 	std::vector<double> measurements;
 
