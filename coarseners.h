@@ -85,8 +85,8 @@ struct prefix_sum
 
 vtx_view_t coarsen_de_bruijn_graph(vtx_view_t g, interp_t interp){
     ordinal_t n = g.extent(0);
-    ordinal_t nc = interp.nc;
-    vtx_view_t entries("entries", nc - 1);
+    ordinal_t nc = interp.nc - 1;
+    vtx_view_t entries("entries", nc);
     Kokkos::parallel_for("init entries", nc, KOKKOS_LAMBDA(const ordinal_t i){
         entries(i) = ORD_MAX;
     });
