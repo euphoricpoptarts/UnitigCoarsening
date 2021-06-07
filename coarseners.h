@@ -92,7 +92,7 @@ vtx_view_t coarsen_de_bruijn_graph(vtx_view_t g, interp_t interp){
     });
     Kokkos::parallel_for("write edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t u = interp.entries(i);
-        if(u > 0){
+        if(u > 1){
             //u is not the null aggregate
             ordinal_t f = g(i);
             if(f < ORD_MAX - 1){
@@ -278,17 +278,17 @@ std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, ExperimentLog
         interp_t interp = mapper.coarsen_HEC(cur, experiment);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
         timer.reset();
-        graph_type glue = transpose_and_sort(interp, cur);
-        experiment.addMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose, timer.seconds());
-        timer.reset();
-        if(first){
-            glue_list.push_back(collect_outputs_first(interp));
-            glue_last = glue; 
-        } else {
-            vtx_view_t nulls = transpose_null(interp);
-            glue_list.push_back(compacter.collect_outputs(glue_last, nulls));
-            glue_last = compacter.collect_unitigs(glue_last, glue);
-        }
+        //graph_type glue = transpose_and_sort(interp, cur);
+        //experiment.addMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose, timer.seconds());
+        //timer.reset();
+        //if(first){
+        //    glue_list.push_back(collect_outputs_first(interp));
+        //    glue_last = glue; 
+        //} else {
+        //    vtx_view_t nulls = transpose_null(interp);
+        //    glue_list.push_back(compacter.collect_outputs(glue_last, nulls));
+        //    glue_last = compacter.collect_unitigs(glue_last, glue);
+        //}
         first = false;
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::CompactGlues, timer.seconds());
         timer.reset();

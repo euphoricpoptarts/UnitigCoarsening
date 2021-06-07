@@ -140,7 +140,7 @@ public:
                 int condition = u < v;
                 //need to enforce an ordering condition to allow hard-stall conditions to be broken
                 //but these hard-stall conditions are rare; so we wait to break them until a few iterations have occurred
-                if (v != ORD_MAX && (count < 5 || (condition ^ swap))) {
+                if (v != ORD_MAX && (condition ^ swap)) {
                     if (Kokkos::atomic_compare_exchange_strong(&vcmap(u), ORD_MAX, ORD_MAX - 1)) {
                         if (u == v || Kokkos::atomic_compare_exchange_strong(&vcmap(v), ORD_MAX, ORD_MAX - 2)) {
                             //do nothing here
@@ -193,7 +193,7 @@ public:
                 } else {
                     u = rem_vtx(i);
                 }
-                if (vcmap(u) >= n) {
+                if (vcmap(u) >= ORD_MAX - 2) {
                     update++;
                 }
             }, next_length);
@@ -205,7 +205,7 @@ public:
                 } else {
                     u = rem_vtx(i);
                 }
-                if (vcmap(u) >= n) {
+                if (vcmap(u) >= ORD_MAX - 2) {
                     if(final){
                         next_perm(update) = u;
                     }

@@ -189,7 +189,7 @@ crosses assemble_pruned_graph(assembler_data assembler, char_view_t kmers, char_
         //u has one out edge
         //and v has one in edge
         if(u != ORD_MAX && v != ORD_MAX && (assembler.edge_count(u) & 7) == 1 && (assembler.edge_count(v) >> 3) == 1){
-            g(u + offset) = v + offset;
+            g(u + offset) = v;// + offset;
             update++;
         }
     }, count);

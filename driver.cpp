@@ -403,7 +403,7 @@ int main(int argc, char **argv) {
                         ordinal_t u = out_cross(out_bucket_begin + x);
                         ordinal_t v = in_cross(in_bucket_begin + x);
                         if(u != ORD_MAX && v != ORD_MAX){
-                            g(u) = v;
+                            g(u) = ORD_MAX - 1;//v;
                             update++;
                         }
                     }, local_count);
@@ -443,7 +443,10 @@ int main(int argc, char **argv) {
         //    //}
         //    printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
         //    t.reset();
-            glue_list = coarsener.coarsen_de_bruijn_full_cycle(g, experiment);
+        for(int i = 0; i < kmer_b.buckets; i++) {
+            vtx_view_t g_s = Kokkos::subview(g, std::make_pair(kmer_b.buckets_row_map[i], kmer_b.buckets_row_map[i+1]));
+            glue_list = coarsener.coarsen_de_bruijn_full_cycle(g_s, experiment);
+        }
         //}
         //printf("glue list length: %lu\n", glue_list.size());
         printf("Time to generate glue list: %.3fs\n", t.seconds());
@@ -459,7 +462,7 @@ int main(int argc, char **argv) {
         t.reset();
         ////kmers = move_to_device(kmer_copy);
         //t.reset();
-        compress_unitigs_maximally2(kmer_b.kmers, glue_list, k, out_fname);
+        //compress_unitigs_maximally2(kmer_b.kmers, glue_list, k, out_fname);
         printf("Time to compact unitigs: %.3fs\n", t.seconds());
         t.reset();
         printf("Total time: %.3fs\n", t2.seconds());
