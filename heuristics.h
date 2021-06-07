@@ -192,7 +192,7 @@ public:
                 } else {
                     u = rem_vtx(i);
                 }
-                if (vcmap(u) >= n) {
+                if (vcmap(u) >= ORD_MAX - 2) {
                     update++;
                 }
             }, next_length);
@@ -204,7 +204,7 @@ public:
                 } else {
                     u = rem_vtx(i);
                 }
-                if (vcmap(u) >= n) {
+                if (vcmap(u) >= ORD_MAX - 2) {
                     if(final){
                         next_perm(update) = u;
                     }
