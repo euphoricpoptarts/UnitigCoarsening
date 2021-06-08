@@ -85,25 +85,24 @@ struct prefix_sum
 
 vtx_view_t coarsen_de_bruijn_graph(vtx_view_t g, interp_t interp){
     ordinal_t n = g.extent(0);
-    ordinal_t nc = interp.nc - 2;
+    //-1 so as not to count the null aggregate
+    ordinal_t nc = interp.nc - 1;
     vtx_view_t entries("entries", nc);
     Kokkos::parallel_for("init entries", nc, KOKKOS_LAMBDA(const ordinal_t i){
         entries(i) = ORD_MAX;
     });
     Kokkos::parallel_for("write edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t u = interp.entries(i);
-        if(u > 1){
+        if(u > 0){
             //u is not the null aggregate
             ordinal_t f = g(i);
-            if(f < ORD_MAX - 1){
+            if(f != ORD_MAX){
                 //f is a real edge
                 //v can't be the null aggregate if an edge points to it
                 ordinal_t v = interp.entries(f);
                 if(u != v){
-                    entries(u - 2) = v - 2;
+                    entries(u - 1) = v - 1;
                 }
-            } else if (f == ORD_MAX - 1){
-                entries(u - 2) = ORD_MAX - 1;
             }
         }
     });
@@ -278,17 +277,17 @@ std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, ExperimentLog
         interp_t interp = mapper.coarsen_HEC(cur, experiment);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
         timer.reset();
-        //graph_type glue = transpose_and_sort(interp, cur);
-        //experiment.addMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose, timer.seconds());
-        //timer.reset();
-        //if(first){
-        //    glue_list.push_back(collect_outputs_first(interp));
-        //    glue_last = glue; 
-        //} else {
-        //    vtx_view_t nulls = transpose_null(interp);
-        //    glue_list.push_back(compacter.collect_outputs(glue_last, nulls));
-        //    glue_last = compacter.collect_unitigs(glue_last, glue);
-        //}
+        graph_type glue = transpose_and_sort(interp, cur);
+        experiment.addMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose, timer.seconds());
+        timer.reset();
+        if(first){
+            glue_list.push_back(collect_outputs_first(interp));
+            glue_last = glue; 
+        } else {
+            vtx_view_t nulls = transpose_null(interp);
+            glue_list.push_back(compacter.collect_outputs(glue_last, nulls));
+            glue_last = compacter.collect_unitigs(glue_last, glue);
+        }
         first = false;
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::CompactGlues, timer.seconds());
         timer.reset();
@@ -296,6 +295,11 @@ std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, ExperimentLog
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Build, timer.seconds());
         timer.reset();
     }
+    ordinal_t total_rows = 0;
+    for(graph_type g : glue_list){
+        total_rows += g.numRows();
+    }
+    printf("Total vtx after glueing: %u\n", total_rows);
     return glue_list;
 }
 

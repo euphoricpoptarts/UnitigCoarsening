@@ -117,7 +117,7 @@ public:
         Kokkos::View<ordinal_t, Device> nvertices_coarse("nvertices");
         //coarse vertex 0 is used to map vertices with no edges
         //coarse vertex 1 is used to map vertices with edges outside it's partition
-        ordinal_t nvc = 2;
+        ordinal_t nvc = 1;
         Kokkos::deep_copy(nvertices_coarse, nvc);
 
         int swap = 1;
@@ -274,7 +274,7 @@ public:
 
         Kokkos::parallel_for("edge choose", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i) {
             //i has an out edge
-            if(g(i) < ORD_MAX - 1){
+            if(g(i) != ORD_MAX){
                 //only one edge is possible
                 //write its heaviest neighbor as me
                 ordinal_t v = g(i);
@@ -285,11 +285,9 @@ public:
             //i has no in edge
             if(hn(i) == ORD_MAX){
                 //i has an out edge
-                if(g(i) < ORD_MAX - 1){
+                if(g(i) != ORD_MAX){
                     ordinal_t v = g(i);
                     hn(i) = v;
-                } else if(g(i) == ORD_MAX - 1) {
-                    vcmap(i) = 1;
                 } else {
                     //no edges, assign to output vertex
                     vcmap(i) = 0;

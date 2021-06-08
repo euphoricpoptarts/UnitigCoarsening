@@ -390,27 +390,27 @@ int main(int argc, char **argv) {
         }
         //vtx_view_t in_cross_buf("in cross buffer", largest_cross);
         ordinal_t cross_written_count = 0;
-        for(int i = 0; i < bucket_count; i++){
-            for(int j = 0; j < bucket_count; j++){
-                if(i != j){
-                    ordinal_t out_bucket_begin = kpmer_b.crosscut_row_map(bucket_count*i + j) - kpmer_b.crosscut_row_map(bucket_count*i);
-                    ordinal_t in_bucket_begin = kpmer_b.crosscut_row_map(bucket_count*j + i) - kpmer_b.crosscut_row_map(bucket_count*j);
-                    ordinal_t bucket_size = kpmer_b.crosscut_row_map(bucket_count*i + j + 1) - kpmer_b.crosscut_row_map(bucket_count*i + j);
-                    vtx_view_t out_cross = cross_list[i].out;
-                    vtx_view_t in_cross = cross_list[j].in;
-                    ordinal_t local_count = 0;
-                    Kokkos::parallel_reduce("fill crosses", bucket_size, KOKKOS_LAMBDA(const ordinal_t x, ordinal_t& update){
-                        ordinal_t u = out_cross(out_bucket_begin + x);
-                        ordinal_t v = in_cross(in_bucket_begin + x);
-                        if(u != ORD_MAX && v != ORD_MAX){
-                            g(u) = ORD_MAX - 1;//v;
-                            update++;
-                        }
-                    }, local_count);
-                    cross_written_count += local_count;
-                }
-            }
-        }
+        //for(int i = 0; i < bucket_count; i++){
+        //    for(int j = 0; j < bucket_count; j++){
+        //        if(i != j){
+        //            ordinal_t out_bucket_begin = kpmer_b.crosscut_row_map(bucket_count*i + j) - kpmer_b.crosscut_row_map(bucket_count*i);
+        //            ordinal_t in_bucket_begin = kpmer_b.crosscut_row_map(bucket_count*j + i) - kpmer_b.crosscut_row_map(bucket_count*j);
+        //            ordinal_t bucket_size = kpmer_b.crosscut_row_map(bucket_count*i + j + 1) - kpmer_b.crosscut_row_map(bucket_count*i + j);
+        //            vtx_view_t out_cross = cross_list[i].out;
+        //            vtx_view_t in_cross = cross_list[j].in;
+        //            ordinal_t local_count = 0;
+        //            Kokkos::parallel_reduce("fill crosses", bucket_size, KOKKOS_LAMBDA(const ordinal_t x, ordinal_t& update){
+        //                ordinal_t u = out_cross(out_bucket_begin + x);
+        //                ordinal_t v = in_cross(in_bucket_begin + x);
+        //                if(u != ORD_MAX && v != ORD_MAX){
+        //                    g(u) = ORD_MAX - 1;//v;
+        //                    update++;
+        //                }
+        //            }, local_count);
+        //            cross_written_count += local_count;
+        //        }
+        //    }
+        //}
         printf("Cross edges written: %u\n", cross_written_count);
         printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
         t.reset();

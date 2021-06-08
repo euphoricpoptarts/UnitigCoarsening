@@ -32,7 +32,7 @@ struct array_type {
     }
 };
 
-const int large_buckets = 64;
+const int large_buckets = 4;
 using reduce_t = array_type<unitig_compact::ordinal_t, large_buckets>;
 namespace Kokkos { //reduction identity must be defined in Kokkos namespace
    template<>
