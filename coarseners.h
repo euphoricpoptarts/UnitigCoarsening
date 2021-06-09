@@ -63,6 +63,11 @@ public:
     ordinal_t min_allowed_vtx = 10;
     unsigned int max_levels = 200;
 
+struct crosses {
+    vtx_view_t in;
+    vtx_view_t out;
+};
+
 struct prefix_sum
 {
     vtx_view_t input;
@@ -93,7 +98,7 @@ vtx_view_t coarsen_de_bruijn_graph(vtx_view_t g, interp_t interp){
     });
     Kokkos::parallel_for("write edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t u = interp.entries(i);
-        if(u > 0){
+        if(u > 0 && u != ORD_MAX){
             //u is not the null aggregate
             ordinal_t f = g(i);
             if(f != ORD_MAX){
@@ -140,19 +145,19 @@ vtx_view_t prune_edges(graph_type g){
     return entries;
 }
 
-vtx_view_t transpose_null(interp_t g){
+vtx_view_t transpose_null(interp_t g, ordinal_t null_id){
     ordinal_t n = g.n;
     ordinal_t null_aggregate_size = 0;
     Kokkos::parallel_reduce("count null aggregate vtx", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& sum){
         ordinal_t v = g.entries(i);
-        if(v == 0){
+        if(v == null_id){
             sum++;
         }
     }, null_aggregate_size);
     vtx_view_t nulls("null aggregate fine vertices", null_aggregate_size);
     Kokkos::parallel_scan("write null aggregate fine vertices", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
         ordinal_t v = g.entries(i);
-        if(v == 0){
+        if(v == null_id){
             if(final){
                 edge_offset_t insert = update;
                 nulls(insert) = i;
@@ -247,13 +252,13 @@ graph_type transpose_and_sort(interp_t interp, vtx_view_t g){
             end--;
         }
     });
-    printf("Time to sort transposed entries: %.3f\n", timer.seconds());
+    //printf("Time to sort transposed entries: %.3f\n", timer.seconds());
     timer.reset();
     return interp_transpose;
 }
 
-graph_type collect_outputs_first(interp_t interp) {
-    vtx_view_t entries = transpose_null(interp);
+graph_type collect_outputs_first(interp_t interp, ordinal_t null_id) {
+    vtx_view_t entries = transpose_null(interp, null_id);
     edge_offset_t size = entries.extent(0);
     edge_view_t row_map("row map", size + 1);
     Kokkos::parallel_for("init write sizes", policy_t(0, size + 1), KOKKOS_LAMBDA(const edge_offset_t i){
@@ -263,12 +268,96 @@ graph_type collect_outputs_first(interp_t interp) {
     return output;
 }
 
-std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, ExperimentLoggerUtil& experiment){
-    std::list<graph_type> glue_list;
+vtx_view_t coarsen_crosses(crosses c, vtx_view_t& rem_idx, interp_t interp){
+    ordinal_t null_count = 0;
+    Kokkos::parallel_reduce("count nulls", rem_idx.extent(0), KOKKOS_LAMBDA(const ordinal_t x, ordinal_t& update){
+        ordinal_t i = rem_idx(x);
+        ordinal_t f = c.in(i);
+        if(f == ORD_MAX){
+            f = c.out(i);
+        }
+        if(f != ORD_MAX && interp.entries(f) == 0){
+            update++;
+        }
+    }, null_count);
+    vtx_view_t cross_glues("cross glues", null_count);
+    Kokkos::parallel_scan("write nulls", rem_idx.extent(0), KOKKOS_LAMBDA(const ordinal_t x, ordinal_t &update, const bool final){
+        ordinal_t i = rem_idx(x);
+        ordinal_t f = c.in(i);
+        if(f == ORD_MAX){
+            f = c.out(i);
+        }
+        if(f != ORD_MAX && interp.entries(f) == 0){
+            if(final){
+                cross_glues(update) = f;
+            }
+            update++;
+        }
+    });
+    ordinal_t non_null_count = 0;
+    Kokkos::parallel_reduce("count nulls", rem_idx.extent(0), KOKKOS_LAMBDA(const ordinal_t x, ordinal_t& update){
+        ordinal_t i = rem_idx(x);
+        ordinal_t f = c.in(i);
+        if(f == ORD_MAX){
+            f = c.out(i);
+        }
+        if(f != ORD_MAX && interp.entries(f) != 0){
+            update++;
+        }
+    }, non_null_count);
+    vtx_view_t new_rem_idx("new rem idx", non_null_count);
+    Kokkos::parallel_scan("write non-nulls", rem_idx.extent(0), KOKKOS_LAMBDA(const ordinal_t x, ordinal_t &update, const bool final){
+        ordinal_t i = rem_idx(x);
+        ordinal_t f = c.in(i);
+        if(f == ORD_MAX){
+            f = c.out(i);
+        }
+        if(f != ORD_MAX && interp.entries(f) != 0){
+            if(final){
+                new_rem_idx(update) = i;
+            }
+            update++;
+        }
+    });
+    rem_idx = new_rem_idx;
+    Kokkos::parallel_for("coarsen ins", rem_idx.extent(0), KOKKOS_LAMBDA(const ordinal_t x){
+        ordinal_t i = rem_idx(x);
+        ordinal_t f = c.in(i);
+        if(f != ORD_MAX){
+            ordinal_t coarse_f = interp.entries(f) - 1;
+            c.in(i) = coarse_f;
+        }
+    });
+    Kokkos::parallel_for("coarsen ins", rem_idx.extent(0), KOKKOS_LAMBDA(const ordinal_t x){
+        ordinal_t i = rem_idx(x);
+        ordinal_t f = c.out(i);
+        if(f != ORD_MAX){
+            ordinal_t coarse_f = interp.entries(f) - 1;
+            c.out(i) = coarse_f;
+        }
+    });
+    Kokkos::parallel_for("modify interp", null_count, KOKKOS_LAMBDA(const ordinal_t x){
+        ordinal_t i = cross_glues(x);
+        interp.entries(i) = ORD_MAX;
+    });
+    return cross_glues;
+}
+
+vtx_view_t init_sequence(ordinal_t n){
+    vtx_view_t sequence("sequence", n);
+    Kokkos::parallel_for("init sequence", n, KOKKOS_LAMBDA(const ordinal_t i){
+        sequence(i) = i;
+    });
+    return sequence;
+}
+
+std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, crosses c, ExperimentLoggerUtil& experiment){
+    std::list<graph_type> glue_list, cross_list;
     int count = 0;
     Kokkos::Timer timer;
     bool first = true;
     graph_type glue_last;
+    vtx_view_t rem_idx = init_sequence(c.in.extent(0));
     while(cur.extent(0) > 0){
         count++;
         printf("Calculating coarse graph %d\n", count);
@@ -278,14 +367,18 @@ std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, ExperimentLog
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
         timer.reset();
         graph_type glue = transpose_and_sort(interp, cur);
+        vtx_view_t crossing_aggs = coarsen_crosses(c, rem_idx, interp);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose, timer.seconds());
         timer.reset();
         if(first){
-            glue_list.push_back(collect_outputs_first(interp));
+            glue_list.push_back(collect_outputs_first(interp, 0));
+            cross_list.push_back(collect_outputs_first(interp, ORD_MAX));
             glue_last = glue; 
         } else {
-            vtx_view_t nulls = transpose_null(interp);
+            vtx_view_t nulls = transpose_null(interp, 0);
+            vtx_view_t crosses = transpose_null(interp, ORD_MAX);
             glue_list.push_back(compacter.collect_outputs(glue_last, nulls));
+            cross_list.push_back(compacter.collect_outputs(glue_last, crosses));
             glue_last = compacter.collect_unitigs(glue_last, glue);
         }
         first = false;
@@ -296,10 +389,15 @@ std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, ExperimentLog
         timer.reset();
     }
     ordinal_t total_rows = 0;
+    ordinal_t cross_rows = 0;
     for(graph_type g : glue_list){
         total_rows += g.numRows();
     }
+    for(graph_type g : cross_list){
+        cross_rows += g.numRows();
+    }
     printf("Total vtx after glueing: %u\n", total_rows);
+    printf("Total cut vtx after glueing: %u\n", cross_rows);
     return glue_list;
 }
 

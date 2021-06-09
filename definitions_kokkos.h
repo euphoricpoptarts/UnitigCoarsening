@@ -62,6 +62,8 @@ namespace unitig_compact {
 
     using host_policy = Kokkos::RangePolicy<Kokkos::OpenMP>;
 
+    using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
+    using crosses = coarsener_t::crosses;
     using char_view_t = Kokkos::View<char*>;
     using char_mirror_t = typename char_view_t::HostMirror;
     using edge_view_t = Kokkos::View<edge_offset_t*>;

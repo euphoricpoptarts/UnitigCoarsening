@@ -423,7 +423,6 @@ int main(int argc, char **argv) {
         ExperimentLoggerUtil experiment;
         //{
         //    vtx_view_t g = assemble_pruned_graph(kmers, kpmers, vtx_map, k);
-            using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
             coarsener_t coarsener;
         //    //{
         //    //    t3.reset();
@@ -445,7 +444,8 @@ int main(int argc, char **argv) {
         //    t.reset();
         for(int i = 0; i < kmer_b.buckets; i++) {
             vtx_view_t g_s = Kokkos::subview(g, std::make_pair(kmer_b.buckets_row_map[i], kmer_b.buckets_row_map[i+1]));
-            glue_list = coarsener.coarsen_de_bruijn_full_cycle(g_s, experiment);
+            crosses c = cross_list[i];
+            glue_list = coarsener.coarsen_de_bruijn_full_cycle(g_s, c, experiment);
         }
         //}
         //printf("glue list length: %lu\n", glue_list.size());

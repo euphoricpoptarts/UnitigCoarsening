@@ -137,11 +137,6 @@ assembler_data init_assembler(ordinal_t max_n, ordinal_t max_np){
     return d;
 }
 
-struct crosses {
-    vtx_view_t in;
-    vtx_view_t out;
-};
-
 crosses assemble_pruned_graph(assembler_data assembler, char_view_t kmers, char_view_t kpmers, vtx_view_t vtx_map, char_view_t cross, edge_offset_t k, vtx_view_t g, ordinal_t offset){
     ordinal_t n = kmers.extent(0) / k;
     ordinal_t np = kpmers.extent(0) / (k + 1);
@@ -197,7 +192,7 @@ crosses assemble_pruned_graph(assembler_data assembler, char_view_t kmers, char_
     Kokkos::parallel_for("init out cross ids", np_cross, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t u = assembler.out(np + i);
         if(u != ORD_MAX && ((assembler.edge_count(u) & 7) == 1)){
-            out_cross_id(i) = offset + u;
+            out_cross_id(i) = u;// + offset
         } else {
             out_cross_id(i) = ORD_MAX;
         }
@@ -206,7 +201,7 @@ crosses assemble_pruned_graph(assembler_data assembler, char_view_t kmers, char_
     Kokkos::parallel_for("init in cross ids", np_cross, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t v = assembler.in(np + i);
         if(v != ORD_MAX && (assembler.edge_count(v) >> 3 == 1)){
-            in_cross_id(i) = offset + v;
+            in_cross_id(i) = v;// + offset
         } else {
             in_cross_id(i) = ORD_MAX;
         }
