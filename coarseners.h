@@ -396,8 +396,16 @@ std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, crosses c, Ex
     for(graph_type g : cross_list){
         cross_rows += g.numRows();
     }
+#ifdef HUGE
+    printf("Total vtx after glueing: %lu\n", total_rows);
+    printf("Total cut vtx after glueing: %lu\n", cross_rows);
+#elif defined(LARGE)
     printf("Total vtx after glueing: %u\n", total_rows);
     printf("Total cut vtx after glueing: %u\n", cross_rows);
+#else
+    printf("Total vtx after glueing: %u\n", total_rows);
+    printf("Total cut vtx after glueing: %u\n", cross_rows);
+#endif
     return glue_list;
 }
 

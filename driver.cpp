@@ -347,8 +347,16 @@ int main(int argc, char **argv) {
         t.reset();
         ////t2.reset();
         ////t3.reset();
+#ifdef HUGE
         printf("kmer size: %lu, kmers: %lu\n", kmer_b.kmers.extent(0), kmer_b.size);
         printf("(k+1)-mer size: %lu, (k+1)mers: %lu\n", kpmer_b.kmers.extent(0), kpmer_b.size);
+#elif defined(LARGE)
+        printf("kmer size: %lu, kmers: %u\n", kmer_b.kmers.extent(0), kmer_b.size);
+        printf("(k+1)-mer size: %lu, (k+1)mers: %u\n", kpmer_b.kmers.extent(0), kpmer_b.size);
+#else
+        printf("kmer size: %lu, kmers: %u\n", kmer_b.kmers.extent(0), kmer_b.size);
+        printf("(k+1)-mer size: %lu, (k+1)mers: %u\n", kpmer_b.kmers.extent(0), kpmer_b.size);
+#endif
         vtx_view_t g("graph", kmer_b.size);
         Kokkos::parallel_for("init g", kmer_b.size, KOKKOS_LAMBDA(const ordinal_t i){
             g(i) = ORD_MAX;
