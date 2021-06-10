@@ -268,6 +268,33 @@ graph_type collect_outputs_first(interp_t interp, ordinal_t null_id) {
     return output;
 }
 
+ordinal_t relabel_crosses(crosses c, vtx_view_t cross_glues, interp_t interp, ordinal_t offset){
+    vtx_subview_t relabel_count("relabel count");
+    Kokkos::parallel_scan("enumerate crosses", interp.entries.extent(0), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
+        if(interp.entries(i) == ORD_MAX){
+            if(final){
+                interp.entries(i) = update;
+            }
+            update++;
+        }
+        if(final && i + 1 == interp.entries.extent(0)){
+            relabel_count() = update;
+        }
+    });
+    ordinal_t next_offset = 0;
+    Kokkos::deep_copy(next_offset, relabel_count);
+    next_offset += offset;
+    Kokkos::parallel_for("relabel crosses", cross_glues.extent(0), KOKKOS_LAMBDA(const ordinal_t x){
+        ordinal_t i = cross_glues(x);
+        if(c.in(i) != ORD_MAX){
+            c.in(i) = offset + interp.entries(c.in(i));
+        } else if(c.out(i) != ORD_MAX){
+            c.out(i) = offset + interp.entries(c.out(i));
+        }
+    });
+    return next_offset;
+}
+
 vtx_view_t coarsen_crosses(crosses c, vtx_view_t& rem_idx, interp_t interp){
     ordinal_t null_count = 0;
     Kokkos::parallel_reduce("count nulls", rem_idx.extent(0), KOKKOS_LAMBDA(const ordinal_t x, ordinal_t& update){
@@ -289,7 +316,7 @@ vtx_view_t coarsen_crosses(crosses c, vtx_view_t& rem_idx, interp_t interp){
         }
         if(f != ORD_MAX && interp.entries(f) == 0){
             if(final){
-                cross_glues(update) = f;
+                cross_glues(update) = i;
             }
             update++;
         }
@@ -338,7 +365,11 @@ vtx_view_t coarsen_crosses(crosses c, vtx_view_t& rem_idx, interp_t interp){
     });
     Kokkos::parallel_for("modify interp", null_count, KOKKOS_LAMBDA(const ordinal_t x){
         ordinal_t i = cross_glues(x);
-        interp.entries(i) = ORD_MAX;
+        ordinal_t f = c.in(i);
+        if(f == ORD_MAX){
+            f = c.out(i);
+        }
+        interp.entries(f) = ORD_MAX;
     });
     return cross_glues;
 }
@@ -358,6 +389,7 @@ std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, crosses c, Ex
     bool first = true;
     graph_type glue_last;
     vtx_view_t rem_idx = init_sequence(c.in.extent(0));
+    ordinal_t cross_offset = 0;
     while(cur.extent(0) > 0){
         count++;
         printf("Calculating coarse graph %d\n", count);
@@ -381,6 +413,7 @@ std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, crosses c, Ex
             cross_list.push_back(compacter.collect_outputs(glue_last, crosses));
             glue_last = compacter.collect_unitigs(glue_last, glue);
         }
+        cross_offset = relabel_crosses(c, crossing_aggs, interp, cross_offset);
         first = false;
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::CompactGlues, timer.seconds());
         timer.reset();
@@ -399,12 +432,15 @@ std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, crosses c, Ex
 #ifdef HUGE
     printf("Total vtx after glueing: %lu\n", total_rows);
     printf("Total cut vtx after glueing: %lu\n", cross_rows);
+    printf("Total cut vtx after glueing (verify): %lu\n", cross_offset);
 #elif defined(LARGE)
     printf("Total vtx after glueing: %u\n", total_rows);
     printf("Total cut vtx after glueing: %u\n", cross_rows);
+    printf("Total cut vtx after glueing (verify): %u\n", cross_offset);
 #else
     printf("Total vtx after glueing: %u\n", total_rows);
     printf("Total cut vtx after glueing: %u\n", cross_rows);
+    printf("Total cut vtx after glueing (verify): %u\n", cross_offset);
 #endif
     return glue_list;
 }
