@@ -140,27 +140,38 @@ bucket_kmers find_l_minimizer<bucket_kmers>(char_view_t& kmers, edge_offset_t k,
     });
     printf("Found lmins in %.3f seconds\n", t.seconds());
     t.reset();
-    reduce_t r;
-    Kokkos::parallel_reduce("count lmins", size, KOKKOS_LAMBDA(const ordinal_t i, reduce_t& update){
+    vtx_view_t small_bucket_counts("small buckets", lmin_buckets);
+    Kokkos::parallel_for("count lmins", size, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t lmin = lmins(i);
-        lmin = lmin & large_buckets_mask;
-        update.the_array[lmin] += 1;
-    }, Kokkos::Sum<reduce_t>(r));
+        //lmin = lmin & large_buckets_mask;
+        //update.the_array[lmin] += 1;
+        Kokkos::atomic_increment(&small_bucket_counts(lmin));
+    });
     printf("Counted lmins in %.3f seconds\n", t.seconds());
     t.reset();
+    vtx_mirror_t small_bucket_counts_m = Kokkos::create_mirror(small_bucket_counts);
+    Kokkos::deep_copy(small_bucket_counts_m, small_bucket_counts);
     vtx_mirror_t buckets_m("buckets mirror", large_buckets + 1);
+    vtx_mirror_t small_buckets_m("buckets mirror", lmin_buckets + 1);
+    ordinal_t offset = 0;
     for(ordinal_t i = 0; i < large_buckets; i++){
-        //printf("bucket %u contains %u\n", i, r.the_array[i]);
-        buckets_m(i + 1) = buckets_m(i) + r.the_array[i];
+        for(ordinal_t j = i; j < lmin_buckets; j += large_buckets){
+            small_buckets_m(j) = offset;
+            offset += small_bucket_counts_m(j);
+        }
+        buckets_m(i + 1) = offset;
     }
-    vtx_view_t buckets("buckets", large_buckets + 1);
-    vtx_view_t buckets_count("buckets", large_buckets);
+    small_buckets_m(lmin_buckets) = offset;
+    Kokkos::parallel_for("reset small bucket counts", lmin_buckets, KOKKOS_LAMBDA(const ordinal_t i){
+        small_bucket_counts(i) = 0;
+    });
+    vtx_view_t small_buckets("buckets", lmin_buckets + 1);
     vtx_view_t kmer_ids("buckets", size);
-    Kokkos::deep_copy(buckets, buckets_m);
+    Kokkos::deep_copy(small_buckets, small_buckets_m);
     Kokkos::parallel_for("partition by lmins", size, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t lmin = lmins(i);
-        lmin = lmin & large_buckets_mask;
-        ordinal_t insert = buckets(lmin) + Kokkos::atomic_fetch_add(&buckets_count(lmin), 1);
+        //lmin = lmin & large_buckets_mask;
+        ordinal_t insert = small_buckets(lmin) + Kokkos::atomic_fetch_add(&small_bucket_counts(lmin), 1);
         kmer_ids(insert) = i;
     });
     printf("Partitioned kmers in %.3f seconds\n", t.seconds());
@@ -223,13 +234,16 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(char_view_t& kmers, edge_offset_t 
     t.reset();
     reduce_t r;
     vtx_view_t cross_buckets_count("buckets", large_buckets*large_buckets);
+    vtx_view_t small_bucket_counts("small buckets", lmin_buckets);
     Kokkos::parallel_reduce("count lmins", size, KOKKOS_LAMBDA(const ordinal_t i, reduce_t& update){
         ordinal_t lmin_out = out_lmins(i);
         lmin_out = lmin_out & large_buckets_mask;
         ordinal_t lmin_in = in_lmins(i);
         lmin_in = lmin_in & large_buckets_mask;
+        //ensure they are in the same large bucket
         if(lmin_in == lmin_out){
-            update.the_array[lmin_out] += 1;
+            //update.the_array[lmin_out] += 1;
+            Kokkos::atomic_increment(&small_bucket_counts(out_lmins(i)));
         } else {
             Kokkos::atomic_increment(&cross_buckets_count(lmin_out*large_buckets + lmin_in));
             Kokkos::atomic_increment(&cross_buckets_count(lmin_in*large_buckets + lmin_out));
@@ -237,22 +251,33 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(char_view_t& kmers, edge_offset_t 
     }, Kokkos::Sum<reduce_t>(r));
     //printf("Counted lmins in %.3f seconds\n", t.seconds());
     t.reset();
+    vtx_mirror_t small_bucket_counts_m = Kokkos::create_mirror(small_bucket_counts);
+    Kokkos::deep_copy(small_bucket_counts_m, small_bucket_counts);
     vtx_mirror_t buckets_m("buckets mirror", large_buckets + 1);
+    vtx_mirror_t small_buckets_m("buckets mirror", lmin_buckets + 1);
+    ordinal_t offset = 0;
     for(ordinal_t i = 0; i < large_buckets; i++){
-        //printf("bucket %u contains %u\n", i, r.the_array[i]);
-        buckets_m(i + 1) = buckets_m(i) + r.the_array[i];
+        for(ordinal_t j = i; j < lmin_buckets; j += large_buckets){
+            small_buckets_m(j) = offset;
+            offset += small_bucket_counts_m(j);
+        }
+        buckets_m(i + 1) = offset;
     }
-    vtx_view_t buckets("buckets", large_buckets + 1);
-    vtx_view_t buckets_count("buckets", large_buckets);
+    small_buckets_m(lmin_buckets) = offset;
+    Kokkos::parallel_for("reset small bucket counts", lmin_buckets, KOKKOS_LAMBDA(const ordinal_t i){
+        small_bucket_counts(i) = 0;
+    });
+    vtx_view_t small_buckets("buckets", lmin_buckets + 1);
     vtx_view_t kmer_writes("buckets", buckets_m(large_buckets));
-    Kokkos::deep_copy(buckets, buckets_m);
+    Kokkos::deep_copy(small_buckets, small_buckets_m);
     Kokkos::parallel_for("partition by lmins", size, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t lmin_out = out_lmins(i);
         lmin_out = lmin_out & large_buckets_mask;
         ordinal_t lmin_in = in_lmins(i);
         lmin_in = lmin_in & large_buckets_mask;
         if(lmin_in == lmin_out){
-            ordinal_t insert = buckets(lmin_out) + Kokkos::atomic_fetch_add(&buckets_count(lmin_out), 1);
+            lmin_out = out_lmins(i);
+            ordinal_t insert = small_buckets(lmin_out) + Kokkos::atomic_fetch_add(&small_bucket_counts(lmin_out), 1);
             kmer_writes(insert) = i;
         }
     });
