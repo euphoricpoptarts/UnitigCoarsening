@@ -382,7 +382,38 @@ vtx_view_t init_sequence(ordinal_t n){
     return sequence;
 }
 
-std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, crosses c, ExperimentLoggerUtil& experiment){
+struct coarsen_output {
+    graph_type glue, cross;
+};
+
+void append_graph(graph_type g, edge_view_t row_map, vtx_view_t entries, ordinal_t& row_offset, ordinal_t& entry_offset){
+    Kokkos::parallel_for("append row_map", g.numRows() + 1, KOKKOS_LAMBDA(const ordinal_t i){
+        row_map(row_offset + i) = g.row_map(i) + entry_offset;
+    });
+    Kokkos::parallel_for("append entries", g.entries.extent(0), KOKKOS_LAMBDA(const ordinal_t i){
+        entries(entry_offset + i) = g.entries(i);
+    });
+    row_offset += g.numRows();
+    entry_offset += g.entries.extent(0);
+}
+
+graph_type collapse_list(std::list<graph_type> l){
+    ordinal_t total_rows = 0, total_entries = 0;
+    for(graph_type g : l){
+        total_rows += g.numRows();
+        total_entries += g.entries.extent(0);
+    }
+    edge_view_t row_map("row map", total_rows + 1);
+    vtx_view_t entries("entries", total_entries);
+    ordinal_t row_offset = 0, entry_offset = 0;
+    for(graph_type g : l){
+        append_graph(g, row_map, entries, row_offset, entry_offset);
+    }
+    graph_type collapsed(entries, row_map);
+    return collapsed;
+}
+
+coarsen_output coarsen_de_bruijn_full_cycle(vtx_view_t cur, crosses c, ExperimentLoggerUtil& experiment){
     std::list<graph_type> glue_list, cross_list;
     int count = 0;
     Kokkos::Timer timer;
@@ -421,14 +452,12 @@ std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, crosses c, Ex
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Build, timer.seconds());
         timer.reset();
     }
-    ordinal_t total_rows = 0;
-    ordinal_t cross_rows = 0;
-    for(graph_type g : glue_list){
-        total_rows += g.numRows();
-    }
-    for(graph_type g : cross_list){
-        cross_rows += g.numRows();
-    }
+    graph_type glue_collapsed = collapse_list(glue_list);
+    glue_list.clear();
+    graph_type cross_collapsed = collapse_list(cross_list);
+    cross_list.clear();
+    ordinal_t total_rows = glue_collapsed.numRows();
+    ordinal_t cross_rows = cross_collapsed.numRows();
 #ifdef HUGE
     printf("Total vtx after glueing: %lu\n", total_rows);
     printf("Total cut vtx after glueing: %lu\n", cross_rows);
@@ -442,7 +471,10 @@ std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, crosses c, Ex
     printf("Total cut vtx after glueing: %u\n", cross_rows);
     printf("Total cut vtx after glueing (verify): %u\n", cross_offset);
 #endif
-    return glue_list;
+    coarsen_output out;
+    out.glue = glue_collapsed;
+    out.cross = cross_collapsed;
+    return out;
 }
 
 std::list<coarse_level_triple> get_levels() {

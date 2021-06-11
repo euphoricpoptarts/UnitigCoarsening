@@ -453,7 +453,7 @@ int main(int argc, char **argv) {
         for(int i = 0; i < kmer_b.buckets; i++) {
             vtx_view_t g_s = Kokkos::subview(g, std::make_pair(kmer_b.buckets_row_map[i], kmer_b.buckets_row_map[i+1]));
             crosses c = cross_list[i];
-            glue_list = coarsener.coarsen_de_bruijn_full_cycle(g_s, c, experiment);
+            typename coarsener_t::coarsen_output x = coarsener.coarsen_de_bruijn_full_cycle(g_s, c, experiment);
         }
         //}
         //printf("glue list length: %lu\n", glue_list.size());
