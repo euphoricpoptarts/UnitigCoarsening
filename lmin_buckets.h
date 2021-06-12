@@ -117,6 +117,14 @@ struct bucket_kpmers {
     ordinal_t crosscut_size;
 };
 
+bucket_kmers partition_for_output(char_view_t& kmers, edge_offset_t k, ordinal_t buckets, graph_type glues, vtx_view_t partition){
+    vtx_view_t bucket_counts("buckets", buckets);
+    Kokkos::parallel_for("count lmins", glues.numRows(), KOKKOS_LAMBDA(const ordinal_t i){
+        Kokkos::atomic_increment(&bucket_counts(partition(i)));
+    });
+    Kokkos::parallel_for(
+}
+
 template <class T>
 T find_l_minimizer(char_view_t& kmers, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_bucket_map, ordinal_t size);
 

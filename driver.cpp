@@ -398,27 +398,6 @@ int main(int argc, char **argv) {
         }
         //vtx_view_t in_cross_buf("in cross buffer", largest_cross);
         ordinal_t cross_written_count = 0;
-        //for(int i = 0; i < bucket_count; i++){
-        //    for(int j = 0; j < bucket_count; j++){
-        //        if(i != j){
-        //            ordinal_t out_bucket_begin = kpmer_b.crosscut_row_map(bucket_count*i + j) - kpmer_b.crosscut_row_map(bucket_count*i);
-        //            ordinal_t in_bucket_begin = kpmer_b.crosscut_row_map(bucket_count*j + i) - kpmer_b.crosscut_row_map(bucket_count*j);
-        //            ordinal_t bucket_size = kpmer_b.crosscut_row_map(bucket_count*i + j + 1) - kpmer_b.crosscut_row_map(bucket_count*i + j);
-        //            vtx_view_t out_cross = cross_list[i].out;
-        //            vtx_view_t in_cross = cross_list[j].in;
-        //            ordinal_t local_count = 0;
-        //            Kokkos::parallel_reduce("fill crosses", bucket_size, KOKKOS_LAMBDA(const ordinal_t x, ordinal_t& update){
-        //                ordinal_t u = out_cross(out_bucket_begin + x);
-        //                ordinal_t v = in_cross(in_bucket_begin + x);
-        //                if(u != ORD_MAX && v != ORD_MAX){
-        //                    g(u) = ORD_MAX - 1;//v;
-        //                    update++;
-        //                }
-        //            }, local_count);
-        //            cross_written_count += local_count;
-        //        }
-        //    }
-        //}
         printf("Cross edges written: %u\n", cross_written_count);
         printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
         t.reset();
@@ -426,7 +405,6 @@ int main(int argc, char **argv) {
         //printf("kmer hashmap size: %lu\n", vtx_map.extent(0));
         //printf("Time to generate hashmap: %.3f\n", t3.seconds());
         //t3.reset();
-        std::list<graph_type> glue_list;
         //char_mirror_t kmer_copy;
         ExperimentLoggerUtil experiment;
         //{
@@ -450,12 +428,54 @@ int main(int argc, char **argv) {
         //    //}
         //    printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
         //    t.reset();
+        using c_output = typename coarsener_t::coarsen_output;
+        std::vector<c_output> c_outputs;
+        ordinal_t cross_offset = 0;
         for(int i = 0; i < kmer_b.buckets; i++) {
             vtx_view_t g_s = Kokkos::subview(g, std::make_pair(kmer_b.buckets_row_map[i], kmer_b.buckets_row_map[i+1]));
             crosses c = cross_list[i];
-            typename coarsener_t::coarsen_output x = coarsener.coarsen_de_bruijn_full_cycle(g_s, c, experiment);
+            c_output x = coarsener.coarsen_de_bruijn_full_cycle(g_s, c, cross_offset, experiment);
+            c_outputs.push_back(x);
         }
-        //}
+        vtx_view_t small_g("small g", cross_offset);
+        Kokkos::parallel_for("init g", cross_offset, KOKKOS_LAMBDA(const ordinal_t i){
+            small_g(i) = ORD_MAX;
+        });
+        for(int i = 0; i < bucket_count; i++){
+            for(int j = 0; j < bucket_count; j++){
+                if(i != j){
+                    ordinal_t out_bucket_begin = kpmer_b.crosscut_row_map(bucket_count*i + j) - kpmer_b.crosscut_row_map(bucket_count*i);
+                    ordinal_t in_bucket_begin = kpmer_b.crosscut_row_map(bucket_count*j + i) - kpmer_b.crosscut_row_map(bucket_count*j);
+                    ordinal_t bucket_size = kpmer_b.crosscut_row_map(bucket_count*i + j + 1) - kpmer_b.crosscut_row_map(bucket_count*i + j);
+                    vtx_view_t out_cross = cross_list[i].out;
+                    vtx_view_t in_cross = cross_list[j].in;
+                    ordinal_t local_count = 0;
+                    Kokkos::parallel_reduce("fill crosses", bucket_size, KOKKOS_LAMBDA(const ordinal_t x, ordinal_t& update){
+                        ordinal_t u = out_cross(out_bucket_begin + x);
+                        ordinal_t v = in_cross(in_bucket_begin + x);
+                        if(u != ORD_MAX && v != ORD_MAX){
+                            small_g(u) = v;
+                            update++;
+                        }
+                    }, local_count);
+                    cross_written_count += local_count;
+                }
+            }
+        }
+        graph_type small_g_result = coarsener.coarsen_de_bruijn_full_cycle_final(small_g, experiment);
+        vtx_view_t repartition_map("repartition", cross_offset);
+        ordinal_t part_size = small_g_result.numRows() / 4;
+        Kokkos::parallel_for("init g", policy(small_g_result.numRows(), Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
+            ordinal_t i = thread.league_rank();
+            Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, small_g_result.row_map(i), small_g_result.row_map(i + 1)), [=] (const ordinal_t j){
+                repartition_map(small_g_result.entries(j)) = i / part_size;
+            });
+        });
+        for(int i = 0; i < kmer_b.buckets; i++) {
+            char_view_t kmer_s = Kokkos::subview(kmer_b.kmers, std::make_pair(kmer_b.buckets_row_map[i]*k, kmer_b.buckets_row_map[i+1]*k));
+            c_output c = c_outputs[i];
+            write_unitigs2(kmer_s, k, c.glue, out_fname)
+        }
         //printf("glue list length: %lu\n", glue_list.size());
         printf("Time to generate glue list: %.3fs\n", t.seconds());
         printf("Aggregation time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::Map));

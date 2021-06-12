@@ -413,14 +413,62 @@ graph_type collapse_list(std::list<graph_type> l){
     return collapsed;
 }
 
-coarsen_output coarsen_de_bruijn_full_cycle(vtx_view_t cur, crosses c, ExperimentLoggerUtil& experiment){
+graph_type coarsen_de_bruijn_full_cycle_final(vtx_view_t cur, ExperimentLoggerUtil& experiment){
+    std::list<graph_type> glue_list;
+    int count = 0;
+    Kokkos::Timer timer;
+    bool first = true;
+    graph_type glue_last;
+    while(cur.extent(0) > 0){
+        count++;
+        printf("Calculating coarse graph %d\n", count);
+        printf("input vertices: %lu\n", cur.extent(0));
+        timer.reset();
+        interp_t interp = mapper.coarsen_HEC(cur, experiment);
+        experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
+        timer.reset();
+        graph_type glue = transpose_and_sort(interp, cur);
+        experiment.addMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose, timer.seconds());
+        timer.reset();
+        if(first){
+            glue_list.push_back(collect_outputs_first(interp, 0));
+            glue_last = glue;
+        } else {
+            vtx_view_t nulls = transpose_null(interp, 0);
+            glue_list.push_back(compacter.collect_outputs(glue_last, nulls));
+            glue_last = compacter.collect_unitigs(glue_last, glue);
+        }
+        first = false;
+        experiment.addMeasurement(ExperimentLoggerUtil::Measurement::CompactGlues, timer.seconds());
+        timer.reset();
+        cur = coarsen_de_bruijn_graph(cur, interp);
+        experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Build, timer.seconds());
+        timer.reset();
+    }
+    graph_type glue_collapsed = collapse_list(glue_list);
+    glue_list.clear();
+    ordinal_t total_rows = glue_collapsed.numRows();
+    ordinal_t total_entries = glue_collapsed.entries.extent(0);
+#ifdef HUGE
+    printf("Total vtx after glueing: %lu\n", total_rows);
+    printf("Total entries after glueing: %lu\n", total_entries);
+#elif defined(LARGE)
+    printf("Total vtx after glueing: %u\n", total_rows);
+    printf("Total entries after glueing: %u\n", total_entries);
+#else
+    printf("Total vtx after glueing: %u\n", total_rows);
+    printf("Total entries after glueing: %u\n", total_entries);
+#endif
+    return glue_collapsed;
+}
+
+coarsen_output coarsen_de_bruijn_full_cycle(vtx_view_t cur, crosses c, ordinal_t& cross_offset, ExperimentLoggerUtil& experiment){
     std::list<graph_type> glue_list, cross_list;
     int count = 0;
     Kokkos::Timer timer;
     bool first = true;
     graph_type glue_last;
     vtx_view_t rem_idx = init_sequence(c.in.extent(0));
-    ordinal_t cross_offset = 0;
     while(cur.extent(0) > 0){
         count++;
         printf("Calculating coarse graph %d\n", count);
