@@ -117,12 +117,70 @@ struct bucket_kpmers {
     ordinal_t crosscut_size;
 };
 
-bucket_kmers partition_for_output(char_view_t& kmers, edge_offset_t k, ordinal_t buckets, graph_type glues, vtx_view_t partition){
+struct bucket_glues {
+    graph_type glues;
+    vtx_mirror_t buckets_row_map;
+    vtx_mirror_t buckets_entries_row_map;
+    ordinal_t buckets;
+    vtx_view_t output_map;
+}
+
+void this_is_getting_ridiculous(bucket_glues glues, char_view_t kmers, edge_offset_t k){
+
+}
+
+bucket_glues partition_for_output(ordinal_t buckets, graph_type glues, vtx_view_t partition, vtx_view_t output_mapping){
     vtx_view_t bucket_counts("buckets", buckets);
-    Kokkos::parallel_for("count lmins", glues.numRows(), KOKKOS_LAMBDA(const ordinal_t i){
+    Kokkos::parallel_for("count partitions", glues.numRows(), KOKKOS_LAMBDA(const ordinal_t i){
         Kokkos::atomic_increment(&bucket_counts(partition(i)));
     });
-    Kokkos::parallel_for(
+    vtx_mirror_t bucket_counts_m = Kokkos::create_mirror(bucket_counts);
+    vtx_view_t bucket_offsets("bucket offsets", buckets + 1);
+    vtx_mirror_t bucket_offsets_m = Kokkos::create_mirror(bucket_offsets);
+    for(ordinal_t i = 0; i < buckets; i++){
+        bucket_offsets_m(i + 1) = bucket_offsets_m(i) + bucket_counts_m(i);
+    }
+    Kokkos::deep_copy(bucket_offsets, bucket_offsets_m);
+    vtx_view_t bucketed_rows("bucketed rows", glues.numRows());
+    vtx_view_t bucketed_output_map("bucketed output map", glues.numRows());
+    Kokkos::parallel_for("move to partitions", glues.numRows(), KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t insert = Kokkos::atomic_fetch_add(&bucket_counts(partitions(i)), 1) + bucket_offsets(i);
+        bucketed_rows(insert) = i;
+        bucketed_output_map(insert) = output_mapping(i);
+    });
+    edge_view_t reordered_glue_row_map("reordered glue row map", glues.numRows() + 1);
+    Kokkos::parallel_scan("reorder scan", glues.numRows(), KOKKOS_LAMBDA(const ordinal_t i, edge_offset_t& update, const bool final){
+        ordinal_t u = bucketed_rows(i);
+        update += glues.row_map(u + 1) - glues.row_map(u);
+        if(final) {
+            reordered_glue_row_map(i + 1) = update;
+        }
+    });
+    vtx_view_t reordered_glue_entries("reordered glue entries", glues.entries.extent(0));
+    Kokkos::parallel_for("reorder entries", policy(glues.numRows(), Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
+        ordinal_t i = thread.league_rank();
+        ordinal_t u = bucketed_rows(i);
+        edge_offset_t write_offset = reordered_glue_row_map(i);
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, glues.row_map(u), glues.row_map(u + 1)), [=] (const ordinal_t j){
+            ordinal_t local_write_offset = write_offset + (j - glues.row_map(u));
+            reordered_glue_entries(local_write_offset) = glues.entries(j);
+        });
+    });
+    vtx_view_t buckets_entries_row_map("buckets entries row map", buckets + 1);
+    Kokkos::parallel_for("name", buckets, KOKKOS_LAMBDA(const ordinal_t i){
+        edge_offset_t x = bucket_offsets(i + 1);
+        buckets_entries_row_map(i + 1) = reordered_glue_row_map(x);
+    });
+    vtx_mirror_t buckets_entries_row_map_m = Kokkos::create_mirror(buckets_entries_row_map);
+    Kokkos::deep_copy(buckets_entries_row_map_m, buckets_entries_row_map);
+    bucket_glues out;
+    graph_type reordered_glues(reordered_glue_entries, reordered_glue_row_map);
+    out.glues = reordered_glues;
+    out.buckets_row_map = bucket_offsets_m;
+    out.buckets = buckets;
+    out.output_map = bucketed_output_map;
+    out.buckets_entries_row_map = buckets_entries_row_map_m;
+    return out;
 }
 
 template <class T>

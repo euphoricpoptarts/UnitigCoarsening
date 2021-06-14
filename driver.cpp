@@ -57,6 +57,22 @@ size_t getFileLength(const char *fname){
     return fs::file_size(fname);
 }
 
+bucket_glues collect_buckets(std::vector<bucket_glues> buckets){
+    bucket_glues out;
+    ordinal_t bucket_count = buckets[0].buckets;
+    vtx_mirror_t bucket_size("bucket size", bucket_count);
+    vtx_mirror_t bucket_row_map("bucket size", bucket_count + 1);
+    for(int i = 0; i < buckets.size(); i++){
+        bucket_kmers b = buckets[i];
+        for(int j = 0; j < bucket_count; j++){
+            bucket_size(j) += b.buckets_row_map[j+1] - b.buckets_row_map[j];
+        }
+    }
+    for(int i = 0; i < bucket_count; i++){
+        bucket_row_map(i + 1) = bucket_row_map(i) + bucket_size(i);
+    }
+}
+
 bucket_kmers collect_buckets(std::vector<bucket_kmers> buckets, edge_offset_t k){
     bucket_kmers out;
     ordinal_t bucket_count = buckets[0].buckets;
@@ -464,17 +480,20 @@ int main(int argc, char **argv) {
         }
         graph_type small_g_result = coarsener.coarsen_de_bruijn_full_cycle_final(small_g, experiment);
         vtx_view_t repartition_map("repartition", cross_offset);
+        vtx_view_t output_mapping("output mapping", cross_offset);
         ordinal_t part_size = small_g_result.numRows() / 4;
-        Kokkos::parallel_for("init g", policy(small_g_result.numRows(), Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
+        Kokkos::parallel_for("compute partitions", policy(small_g_result.numRows(), Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
             ordinal_t i = thread.league_rank();
             Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, small_g_result.row_map(i), small_g_result.row_map(i + 1)), [=] (const ordinal_t j){
                 repartition_map(small_g_result.entries(j)) = i / part_size;
+                output_mapping(small_g_result.entries(j)) = i;
             });
         });
         for(int i = 0; i < kmer_b.buckets; i++) {
             char_view_t kmer_s = Kokkos::subview(kmer_b.kmers, std::make_pair(kmer_b.buckets_row_map[i]*k, kmer_b.buckets_row_map[i+1]*k));
             c_output c = c_outputs[i];
-            write_unitigs2(kmer_s, k, c.glue, out_fname)
+            write_unitigs2(kmer_s, k, c.glue, out_fname);
+            bucket_glues glue_b = partition_for_output(bucket_count, c.cross, repartition_map, output_mapping);
         }
         //printf("glue list length: %lu\n", glue_list.size());
         printf("Time to generate glue list: %.3fs\n", t.seconds());
