@@ -132,9 +132,8 @@ bucket_glues partition_kmers_for_glueing(bucket_glues glues, char_view_t kmers, 
     Kokkos::parallel_for("shuffle kmers for glueing", g_g.entries.extent(0), KOKKOS_LAMBDA(const ordinal_t i){
         edge_offset_t write_idx = i*k;
         edge_offset_t read_idx = g_g.entries(i)*k;
-        g_g.entries(i) = i;
         for(edge_offset_t j = read_idx; j < read_idx + k; j++){
-            kmer_glues(write_idx) = kmers(read_idx);
+            kmer_glues(write_idx) = kmers(j);
             write_idx++;
         }
     });
@@ -148,6 +147,7 @@ bucket_glues partition_for_output(ordinal_t buckets, graph_type glues, vtx_view_
         Kokkos::atomic_increment(&bucket_counts(partition(i)));
     });
     vtx_mirror_t bucket_counts_m = Kokkos::create_mirror(bucket_counts);
+    Kokkos::deep_copy(bucket_counts_m, bucket_counts);
     vtx_view_t bucket_offsets("bucket offsets", buckets + 1);
     vtx_mirror_t bucket_offsets_m = Kokkos::create_mirror(bucket_offsets);
     for(ordinal_t i = 0; i < buckets; i++){

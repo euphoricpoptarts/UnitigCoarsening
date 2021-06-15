@@ -81,7 +81,7 @@ final_partition collect_buckets(std::vector<bucket_glues> buckets, edge_offset_t
     for(int i = 0; i < bucket_count; i++){
         edge_view_t row_map("row map", bucket_size(i) + 1);
         vtx_view_t out_map("out map", bucket_size(i));
-        ordinal_t offset = 0;
+        edge_offset_t offset = 0;
         edge_offset_t write_sum = 0;
         for(int j = 0; j < bucket_count; j++){
             bucket_glues b = buckets[j];
@@ -100,18 +100,18 @@ final_partition collect_buckets(std::vector<bucket_glues> buckets, edge_offset_t
         }
         vtx_view_t entries("entries", entries_bucket_size(i));
         Kokkos::parallel_for("move entries", r_policy(0, entries_bucket_size(i)), KOKKOS_LAMBDA(const ordinal_t x){
-            entries(i) = i;
+            entries(x) = x;
         });
         char_view_t kmers("kmers", entries_bucket_size(i)*k);
         offset = 0;
         for(int j = 0; j < bucket_count; j++){
             bucket_glues b = buckets[j];
-            ordinal_t end = b.buckets_entries_row_map[i+1]*k;
-            ordinal_t start = b.buckets_entries_row_map[i]*k;
+            edge_offset_t end = b.buckets_entries_row_map[i+1]*k;
+            edge_offset_t start = b.buckets_entries_row_map[i]*k;
             char_view_t dest = Kokkos::subview(kmers, std::make_pair(offset, offset + end - start));
             char_view_t source = Kokkos::subview(b.kmers, std::make_pair(start, end));
             Kokkos::deep_copy(dest, source);
-            offset += b.buckets_entries_row_map[i+1] - b.buckets_entries_row_map[i];
+            offset += end - start;
         }
         graph_type new_glue(entries, row_map);
         glues.push_back(new_glue);
@@ -535,7 +535,7 @@ int main(int argc, char **argv) {
         graph_type small_g_result = coarsener.coarsen_de_bruijn_full_cycle_final(small_g, experiment);
         vtx_view_t repartition_map("repartition", cross_offset);
         vtx_view_t output_mapping("output mapping", cross_offset);
-        ordinal_t part_size = small_g_result.numRows() / bucket_count;
+        ordinal_t part_size = (small_g_result.numRows() + bucket_count) / bucket_count;
         Kokkos::parallel_for("compute partitions", policy(small_g_result.numRows(), Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
             ordinal_t i = thread.league_rank();
             Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, small_g_result.row_map(i), small_g_result.row_map(i + 1)), [=] (const ordinal_t j){
@@ -560,6 +560,7 @@ int main(int argc, char **argv) {
         }
         c_outputs.clear();
         Kokkos::resize(kmer_b.kmers, 0);
+        printf("Coarsened vertices reordered: %u\n", glue_offset);
         printf("Time to repartition kmers: %.3fs\n", t3.seconds());
         t3.reset();
         final_partition f_p = collect_buckets(output_glues, k);
@@ -567,8 +568,8 @@ int main(int argc, char **argv) {
         for(int i = 0; i < bucket_count; i++){
             glue_start = glue_end;
             glue_end = glue_start + part_size;
-            if(glue_offset > small_g_result.numRows()){
-                glue_offset = small_g_result.numRows();
+            if(glue_end > small_g_result.numRows()){
+                glue_end = small_g_result.numRows();
             }
             vtx_view_t output_s = f_p.out_maps[i];
             Kokkos::parallel_for("modify result entries", output_s.extent(0), KOKKOS_LAMBDA(const ordinal_t i){
@@ -580,6 +581,7 @@ int main(int argc, char **argv) {
             Kokkos::deep_copy(result_start, result_start_s);
             Kokkos::deep_copy(result_end, result_end_s);
             edge_view_t row_map("row map", 1 + glue_end - glue_start);
+            printf("result size: %u; graph size: %u\n", result_end - result_start, f_p.glues[i].numRows());
             Kokkos::parallel_for("write row map", glue_end - glue_start, KOKKOS_LAMBDA(const ordinal_t i){
                 row_map(i + 1) = small_g_result.row_map(glue_start + i + 1) - small_g_result.row_map(glue_start);
             });
