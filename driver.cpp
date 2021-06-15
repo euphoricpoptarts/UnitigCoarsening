@@ -446,10 +446,6 @@ int main(int argc, char **argv) {
         printf("kmer size: %u, kmers: %u\n", kmer_b.size*k, kmer_b.size);
         printf("(k+1)-mer size: %u, (k+1)mers: %u\n", kpmer_b.size*(k+1), kpmer_b.size);
 #endif
-        vtx_view_t g("graph", kmer_b.size);
-        Kokkos::parallel_for("init g", kmer_b.size, KOKKOS_LAMBDA(const ordinal_t i){
-            g(i) = ORD_MAX;
-        });
         ordinal_t largest_n = 0, largest_np = 0, largest_cross = 0;
         ordinal_t bucket_count = kmer_b.kmers.size();
         for(int i = 0; i < bucket_count; i++){
@@ -470,8 +466,12 @@ int main(int argc, char **argv) {
         printf("largest_np: %u\n", largest_np);
         vtx_view_t hashmap = init_hashmap(largest_n);
         assembler_data assembler = init_assembler(largest_n, largest_np);
+        ExperimentLoggerUtil experiment;
+        coarsener_t coarsener;
+        using c_output = typename coarsener_t::coarsen_output;
         std::vector<crosses> cross_list;
-        ordinal_t g_offset = 0;
+        std::vector<c_output> c_outputs;
+        ordinal_t cross_offset = 0;
         for(int i = 0; i < bucket_count; i++){
             Kokkos::Timer t2;
             ordinal_t kmer_count = kmer_b.part_sizes(i);
@@ -480,11 +480,18 @@ int main(int argc, char **argv) {
             char_view_t kpmer_s = kpmer_b.kmers[i];
             char_view_t cross_s = Kokkos::subview(kpmer_b.crosscut, std::make_pair(kpmer_b.crosscut_row_map(bucket_count*i)*(k+1), kpmer_b.crosscut_row_map(bucket_count*(i+1))*(k+1)));
             generate_hashmap(hashmap, kmer_s, k, kmer_count);
-            crosses c = assemble_pruned_graph(assembler, kmer_s, kpmer_s, hashmap, cross_s, k, g, g_offset);
-            g_offset += kmer_count;
+            vtx_view_t g_s("graph portion", kmer_count);
+            Kokkos::parallel_for("init g", kmer_count, KOKKOS_LAMBDA(const ordinal_t i){
+                g_s(i) = ORD_MAX;
+            });
+            crosses c = assemble_pruned_graph(assembler, kmer_s, kpmer_s, hashmap, cross_s, k, g_s);
             cross_list.push_back(c);
             printf("Time to assemble bucket %i: %.4f\n", i, t2.seconds());
             //printf("Bucket %i has %u kmers and %u k+1-mers\n", i, kmer_count, kpmer_count);
+            t2.reset();
+            c_output x = coarsener.coarsen_de_bruijn_full_cycle(g_s, c, cross_offset, experiment);
+            c_outputs.push_back(x);
+            printf("Time to coarsen bucket %i: %.4f\n", i, t2.seconds());
             t2.reset();
         }
         kpmer_b.kmers.clear();
@@ -494,25 +501,6 @@ int main(int argc, char **argv) {
         printf("Cross edges written: %u\n", cross_written_count);
         printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
         t.reset();
-        //vtx_view_t vtx_map = generate_hashmap(kmers, k, kmers.extent(0)/k);
-        //printf("kmer hashmap size: %lu\n", vtx_map.extent(0));
-        //printf("Time to generate hashmap: %.3f\n", t3.seconds());
-        //t3.reset();
-        //char_mirror_t kmer_copy;
-        ExperimentLoggerUtil experiment;
-        coarsener_t coarsener;
-        using c_output = typename coarsener_t::coarsen_output;
-        std::vector<c_output> c_outputs;
-        ordinal_t cross_offset = 0;
-        g_offset = 0;
-        for(int i = 0; i < bucket_count; i++) {
-            ordinal_t kmer_count = kmer_b.part_sizes(i);
-            vtx_view_t g_s = Kokkos::subview(g, std::make_pair(g_offset, g_offset + kmer_count));
-            g_offset += kmer_count;
-            crosses c = cross_list[i];
-            c_output x = coarsener.coarsen_de_bruijn_full_cycle(g_s, c, cross_offset, experiment);
-            c_outputs.push_back(x);
-        }
         vtx_view_t small_g("small g", cross_offset);
         Kokkos::parallel_for("init g", cross_offset, KOKKOS_LAMBDA(const ordinal_t i){
             small_g(i) = ORD_MAX;
