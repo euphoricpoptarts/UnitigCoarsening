@@ -148,11 +148,11 @@ kmer_partitions collect_buckets(std::vector<bucket_kmers> buckets, edge_offset_t
     std::vector<char_view_t> all_kmers;
     for(int j = 0; j < bucket_count; j++){
         char_view_t kmer_bucket("kmer bucket", bucket_size(j)*k);
-        ordinal_t transfer_loc = 0;
+        edge_offset_t transfer_loc = 0;
         for(int i = 0; i < buckets.size(); i++){
             edge_offset_t transfer_start = buckets[i].buckets_row_map[j]*k;
             edge_offset_t transfer_end = buckets[i].buckets_row_map[j + 1]*k;
-            ordinal_t transfer_size = transfer_end - transfer_start;
+            edge_offset_t transfer_size = transfer_end - transfer_start;
             if(transfer_size > 0){
                 char_view_t dest = Kokkos::subview(kmer_bucket, std::make_pair(transfer_loc, transfer_loc + transfer_size));
                 char_view_t source = Kokkos::subview(buckets[i].kmers, std::make_pair(transfer_start, transfer_end));
@@ -199,11 +199,11 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers> buckets, edge_offset
     std::vector<char_view_t> all_kmers;
     for(int j = 0; j < bucket_count; j++){
         char_view_t kmer_bucket("kmer bucket", bucket_size(j)*k);
-        ordinal_t transfer_loc = 0;
+        edge_offset_t transfer_loc = 0;
         for(int i = 0; i < buckets.size(); i++){
             edge_offset_t transfer_start = buckets[i].buckets_row_map[j]*k;
             edge_offset_t transfer_end = buckets[i].buckets_row_map[j + 1]*k;
-            ordinal_t transfer_size = transfer_end - transfer_start;
+            edge_offset_t transfer_size = transfer_end - transfer_start;
             if(transfer_size > 0){
                 char_view_t dest = Kokkos::subview(kmer_bucket, std::make_pair(transfer_loc, transfer_loc + transfer_size));
                 char_view_t source = Kokkos::subview(buckets[i].kmers, std::make_pair(transfer_start, transfer_end));
