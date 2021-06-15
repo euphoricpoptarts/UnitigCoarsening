@@ -535,14 +535,30 @@ int main(int argc, char **argv) {
         graph_type small_g_result = coarsener.coarsen_de_bruijn_full_cycle_final(small_g, experiment);
         vtx_view_t repartition_map("repartition", cross_offset);
         vtx_view_t output_mapping("output mapping", cross_offset);
-        ordinal_t part_size = (small_g_result.numRows() + bucket_count) / bucket_count;
+        ordinal_t part_size = (small_g_result.entries.extent(0) + bucket_count) / bucket_count;
+        vtx_view_t part_offsets_dev("part offsets", bucket_count + 1);
+        vtx_mirror_t part_offsets = Kokkos::create_mirror(part_offsets_dev);
         Kokkos::parallel_for("compute partitions", policy(small_g_result.numRows(), Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
             ordinal_t i = thread.league_rank();
+            ordinal_t start = small_g_result.row_map(i);
+            ordinal_t end = small_g_result.row_map(i + 1);
+            ordinal_t midpoint = (start + end) / 2;
+            if(start / part_size != end / part_size){
+                //write first row that is in the partition of end
+                //it is either the current row or the next row
+                if(midpoint / part_size == end / part_size){
+                    part_offsets_dev(end / part_size) = i;
+                } else {
+                    part_offsets_dev(end / part_size) = i + 1;
+                }
+            }
             Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, small_g_result.row_map(i), small_g_result.row_map(i + 1)), [=] (const ordinal_t j){
-                repartition_map(small_g_result.entries(j)) = i / part_size;
+                repartition_map(small_g_result.entries(j)) = midpoint / part_size;
                 output_mapping(small_g_result.entries(j)) = j;
             });
         });
+        Kokkos::deep_copy(part_offsets, part_offsets_dev);
+        part_offsets(bucket_count) = small_g_result.numRows();
         std::vector<bucket_glues> output_glues;
         ordinal_t glue_offset = 0;
         Kokkos::Timer t3;
@@ -566,11 +582,8 @@ int main(int argc, char **argv) {
         final_partition f_p = collect_buckets(output_glues, k);
         ordinal_t glue_start = 0, glue_end = 0;
         for(int i = 0; i < bucket_count; i++){
-            glue_start = glue_end;
-            glue_end = glue_start + part_size;
-            if(glue_end > small_g_result.numRows()){
-                glue_end = small_g_result.numRows();
-            }
+            glue_start = part_offsets(i);
+            glue_end = part_offsets(i + 1);
             vtx_view_t output_s = f_p.out_maps[i];
             Kokkos::parallel_for("modify result entries", output_s.extent(0), KOKKOS_LAMBDA(const ordinal_t i){
                 small_g_result.entries(output_s(i)) = i;
