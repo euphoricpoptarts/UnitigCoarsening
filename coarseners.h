@@ -30,6 +30,7 @@ public:
     using c_edge_subview_t = Kokkos::View<const edge_offset_t, Device>;
     using vtx_subview_t = Kokkos::View<ordinal_t, Device>;
     using graph_type = typename matrix_t::staticcrsgraph_type;
+    using graph_m = typename graph_type::HostMirror;
     using policy_t = Kokkos::RangePolicy<exec_space>;
     using team_policy_t = Kokkos::TeamPolicy<exec_space>;
     using member = typename team_policy_t::member_type;
@@ -383,7 +384,7 @@ vtx_view_t init_sequence(ordinal_t n){
 }
 
 struct coarsen_output {
-    graph_type glue, cross;
+    graph_m glue, cross;
 };
 
 void append_graph(graph_type g, edge_view_t row_map, vtx_view_t entries, ordinal_t& row_offset, ordinal_t& entry_offset){
@@ -520,8 +521,8 @@ coarsen_output coarsen_de_bruijn_full_cycle(vtx_view_t cur, crosses c, ordinal_t
     printf("Total cut vtx after glueing (verify): %u\n", cross_offset);
 #endif
     coarsen_output out;
-    out.glue = glue_collapsed;
-    out.cross = cross_collapsed;
+    out.glue = Kokkos::create_mirror(glue_collapsed);
+    out.cross = Kokkos::create_mirror(cross_collapsed);
     return out;
 }
 

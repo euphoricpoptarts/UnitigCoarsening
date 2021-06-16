@@ -32,7 +32,7 @@ struct array_type {
     }
 };
 
-const int large_buckets = 4;
+const int large_buckets = 16;
 using reduce_t = array_type<unitig_compact::ordinal_t, large_buckets>;
 namespace Kokkos { //reduction identity must be defined in Kokkos namespace
    template<>
@@ -100,14 +100,14 @@ ordinal_t get_lmin(const char_view_t chars, const vtx_view_t lmin_map, const vtx
 
 
 struct bucket_kmers {
-    char_view_t kmers;
+    char_mirror_t kmers;
     vtx_mirror_t buckets_row_map;
     ordinal_t buckets;
     ordinal_t size;
 };
 
 struct bucket_kpmers {
-    char_view_t kmers;
+    char_mirror_t kmers;
     vtx_mirror_t buckets_row_map;
     ordinal_t buckets;
     ordinal_t size;
@@ -118,16 +118,24 @@ struct bucket_kpmers {
 };
 
 struct bucket_glues {
-    char_view_t kmers;
-    graph_type glues;
+    char_mirror_t kmers;
+    graph_m glues;
     vtx_mirror_t buckets_row_map;
     vtx_mirror_t buckets_entries_row_map;
     ordinal_t buckets;
     vtx_view_t output_map;
 };
 
+graph_type move_to_device(graph_m x){
+    edge_view_t row_map("row map", x.row_map.extent(0));
+    Kokkos::deep_copy(row_map, x.row_map);
+    vtx_view_t entries("entries", x.entries.extent(0));
+    Kokkos::deep_copy(entries, x.entries);
+    return graph_type(entries, row_map);
+}
+
 bucket_glues partition_kmers_for_glueing(bucket_glues glues, char_view_t kmers, edge_offset_t k){
-    graph_type g_g = glues.glues;
+    graph_type g_g = move_to_device(glues.glues);
     char_view_t kmer_glues("kmers glue", g_g.entries.extent(0)*k);
     Kokkos::parallel_for("shuffle kmers for glueing", g_g.entries.extent(0), KOKKOS_LAMBDA(const ordinal_t i){
         edge_offset_t write_idx = i*k;
@@ -137,7 +145,8 @@ bucket_glues partition_kmers_for_glueing(bucket_glues glues, char_view_t kmers, 
             write_idx++;
         }
     });
-    glues.kmers = kmer_glues;
+    glues.kmers = Kokkos::create_mirror_view(kmer_glues);
+    Kokkos::deep_copy(glues.kmers, kmer_glues);
     return glues;
 }
 
@@ -190,7 +199,7 @@ bucket_glues partition_for_output(ordinal_t buckets, graph_type glues, vtx_view_
     Kokkos::deep_copy(buckets_entries_row_map_m, buckets_entries_row_map);
     bucket_glues out;
     graph_type reordered_glues(reordered_glue_entries, reordered_glue_row_map);
-    out.glues = reordered_glues;
+    out.glues = Kokkos::create_mirror(reordered_glues);
     out.buckets_row_map = bucket_offsets_m;
     out.buckets = buckets;
     out.output_map = bucketed_output_map;
@@ -284,7 +293,8 @@ bucket_kmers find_l_minimizer<bucket_kmers>(char_view_t& kmers, edge_offset_t k,
     //printf("Wrote partitioned kmers in %.3f seconds\n", t.seconds());
     t.reset();
     bucket_kmers output;
-    output.kmers = kmers_partitioned;
+    output.kmers = Kokkos::create_mirror_view(kmers_partitioned);
+    Kokkos::deep_copy(output.kmers, kmers_partitioned);
     output.buckets_row_map = buckets_m;
     output.buckets = large_buckets;
     output.size = buckets_m(large_buckets);
@@ -441,7 +451,8 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(char_view_t& kmers, edge_offset_t 
     printf("Wrote partitioned kmers in %.3f seconds\n", t.seconds());
     t.reset();
     bucket_kpmers output;
-    output.kmers = kmers_partitioned;
+    output.kmers = Kokkos::create_mirror_view(kmers_partitioned);
+    Kokkos::deep_copy(output.kmers, kmers_partitioned);
     output.buckets_row_map = buckets_m;
     output.buckets = large_buckets;
     output.size = buckets_m(large_buckets);

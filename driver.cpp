@@ -57,10 +57,18 @@ size_t getFileLength(const char *fname){
     return fs::file_size(fname);
 }
 
+//graph_type move_to_device(graph_m x){
+//    edge_view_t row_map("row map", x.row_map.extent(0));
+//    Kokkos::deep_copy(row_map, x.row_map);
+//    vtx_view_t entries("entries", x.entries.extent(0));
+//    Kokkos::deep_copy(entries, x.entries);
+//    return graph_type(entries, row_map);
+//}
+
 struct final_partition {
-    std::vector<graph_type> glues;
+    std::vector<graph_m> glues;
     std::vector<vtx_view_t> out_maps;
-    std::vector<char_view_t> kmer_glues;
+    std::vector<char_mirror_t> kmer_glues;
 };
 
 final_partition collect_buckets(std::vector<bucket_glues> buckets, edge_offset_t k){
@@ -75,9 +83,9 @@ final_partition collect_buckets(std::vector<bucket_glues> buckets, edge_offset_t
             entries_bucket_size(j) += b.buckets_entries_row_map[j+1] - b.buckets_entries_row_map[j];
         }
     }
-    std::vector<graph_type> glues;
+    std::vector<graph_m> glues;
     std::vector<vtx_view_t> out_maps;
-    std::vector<char_view_t> kmer_glues;
+    std::vector<char_mirror_t> kmer_glues;
     for(int i = 0; i < bucket_count; i++){
         edge_view_t row_map("row map", bucket_size(i) + 1);
         vtx_view_t out_map("out map", bucket_size(i));
@@ -87,7 +95,7 @@ final_partition collect_buckets(std::vector<bucket_glues> buckets, edge_offset_t
             bucket_glues b = buckets[j];
             ordinal_t end = b.buckets_row_map[i+1];
             ordinal_t start = b.buckets_row_map[i];
-            graph_type glue = b.glues;
+            graph_type glue = move_to_device(b.glues);
             vtx_view_t out_map_in = b.output_map;
             Kokkos::parallel_for("move row map", r_policy(start, end), KOKKOS_LAMBDA(const ordinal_t x){
                 ordinal_t insert = offset + x - start;
@@ -102,19 +110,19 @@ final_partition collect_buckets(std::vector<bucket_glues> buckets, edge_offset_t
         Kokkos::parallel_for("move entries", r_policy(0, entries_bucket_size(i)), KOKKOS_LAMBDA(const ordinal_t x){
             entries(x) = x;
         });
-        char_view_t kmers("kmers", entries_bucket_size(i)*k);
+        char_mirror_t kmers("kmers", entries_bucket_size(i)*k);
         offset = 0;
         for(int j = 0; j < bucket_count; j++){
             bucket_glues b = buckets[j];
             edge_offset_t end = b.buckets_entries_row_map[i+1]*k;
             edge_offset_t start = b.buckets_entries_row_map[i]*k;
-            char_view_t dest = Kokkos::subview(kmers, std::make_pair(offset, offset + end - start));
-            char_view_t source = Kokkos::subview(b.kmers, std::make_pair(start, end));
+            char_mirror_t dest = Kokkos::subview(kmers, std::make_pair(offset, offset + end - start));
+            char_mirror_t source = Kokkos::subview(b.kmers, std::make_pair(start, end));
             Kokkos::deep_copy(dest, source);
             offset += end - start;
         }
         graph_type new_glue(entries, row_map);
-        glues.push_back(new_glue);
+        glues.push_back(Kokkos::create_mirror(new_glue));
         out_maps.push_back(out_map);
         kmer_glues.push_back(kmers);
     }
@@ -126,7 +134,7 @@ final_partition collect_buckets(std::vector<bucket_glues> buckets, edge_offset_t
 }
 
 struct kmer_partitions {
-    std::vector<char_view_t> kmers;
+    std::vector<char_mirror_t> kmers;
     vtx_mirror_t part_sizes;
     ordinal_t size;
 };
@@ -145,17 +153,17 @@ kmer_partitions collect_buckets(std::vector<bucket_kmers> buckets, edge_offset_t
     for(int i = 0; i < bucket_count; i++){
         total_kmers += bucket_size(i);
     }
-    std::vector<char_view_t> all_kmers;
+    std::vector<char_mirror_t> all_kmers;
     for(int j = 0; j < bucket_count; j++){
-        char_view_t kmer_bucket("kmer bucket", bucket_size(j)*k);
+        char_mirror_t kmer_bucket("kmer bucket", bucket_size(j)*k);
         edge_offset_t transfer_loc = 0;
         for(int i = 0; i < buckets.size(); i++){
             edge_offset_t transfer_start = buckets[i].buckets_row_map[j]*k;
             edge_offset_t transfer_end = buckets[i].buckets_row_map[j + 1]*k;
             edge_offset_t transfer_size = transfer_end - transfer_start;
             if(transfer_size > 0){
-                char_view_t dest = Kokkos::subview(kmer_bucket, std::make_pair(transfer_loc, transfer_loc + transfer_size));
-                char_view_t source = Kokkos::subview(buckets[i].kmers, std::make_pair(transfer_start, transfer_end));
+                char_mirror_t dest = Kokkos::subview(kmer_bucket, std::make_pair(transfer_loc, transfer_loc + transfer_size));
+                char_mirror_t source = Kokkos::subview(buckets[i].kmers, std::make_pair(transfer_start, transfer_end));
                 Kokkos::deep_copy(dest, source);
                 transfer_loc += transfer_size;
             }
@@ -169,10 +177,10 @@ kmer_partitions collect_buckets(std::vector<bucket_kmers> buckets, edge_offset_t
 }
 
 struct kpmer_partitions {
-    std::vector<char_view_t> kmers;
+    std::vector<char_mirror_t> kmers;
     vtx_mirror_t part_sizes;
     ordinal_t size;
-    char_view_t crosscut;
+    char_mirror_t crosscut;
     vtx_mirror_t crosscut_row_map;
     ordinal_t crosscut_buckets;
     ordinal_t crosscut_size;
@@ -196,17 +204,17 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers> buckets, edge_offset
         bucket_row_map(i + 1) = bucket_row_map(i) + bucket_size(i);
     }
     ordinal_t total_size = bucket_row_map(bucket_count);
-    std::vector<char_view_t> all_kmers;
+    std::vector<char_mirror_t> all_kmers;
     for(int j = 0; j < bucket_count; j++){
-        char_view_t kmer_bucket("kmer bucket", bucket_size(j)*k);
+        char_mirror_t kmer_bucket("kmer bucket", bucket_size(j)*k);
         edge_offset_t transfer_loc = 0;
         for(int i = 0; i < buckets.size(); i++){
             edge_offset_t transfer_start = buckets[i].buckets_row_map[j]*k;
             edge_offset_t transfer_end = buckets[i].buckets_row_map[j + 1]*k;
             edge_offset_t transfer_size = transfer_end - transfer_start;
             if(transfer_size > 0){
-                char_view_t dest = Kokkos::subview(kmer_bucket, std::make_pair(transfer_loc, transfer_loc + transfer_size));
-                char_view_t source = Kokkos::subview(buckets[i].kmers, std::make_pair(transfer_start, transfer_end));
+                char_mirror_t dest = Kokkos::subview(kmer_bucket, std::make_pair(transfer_loc, transfer_loc + transfer_size));
+                char_mirror_t source = Kokkos::subview(buckets[i].kmers, std::make_pair(transfer_start, transfer_end));
                 Kokkos::deep_copy(dest, source);
                 transfer_loc += transfer_size;
             }
@@ -223,13 +231,13 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers> buckets, edge_offset
         cross_bucket_row_map(i + 1) = cross_bucket_row_map(i) + cross_bucket_size(i);
     }
     ordinal_t cross_size = cross_bucket_row_map(cross_bucket_count);
-    char_view_t cross_kmers("all kmers", cross_size * k);
+    char_mirror_t cross_kmers("all kmers", cross_size * k);
     for(int j = 0; j < cross_bucket_count; j++){
         ordinal_t transfer_loc = cross_bucket_row_map(j);
         for(int i = 0; i < buckets.size(); i++){
             ordinal_t transfer_size = buckets[i].crosscut_row_map[j+1] - buckets[i].crosscut_row_map[j];
             if(transfer_size > 0){
-                char_view_t transfer_to = Kokkos::subview(cross_kmers, std::make_pair(k*transfer_loc, k*(transfer_loc + transfer_size)));
+                char_mirror_t transfer_to = Kokkos::subview(cross_kmers, std::make_pair(k*transfer_loc, k*(transfer_loc + transfer_size)));
                 char_view_t transfer_from = Kokkos::subview(buckets[i].crosscut, std::make_pair(buckets[i].crosscut_row_map[j] * k, k * buckets[i].crosscut_row_map[j + 1]));
                 Kokkos::deep_copy(transfer_to, transfer_from);
                 transfer_loc += transfer_size;
@@ -404,6 +412,7 @@ char_view_t move_to_device(char_mirror_t x){
     return y;
 }
 
+
 int main(int argc, char **argv) {
 
     if (argc < 5) {
@@ -476,9 +485,13 @@ int main(int argc, char **argv) {
             Kokkos::Timer t2;
             ordinal_t kmer_count = kmer_b.part_sizes(i);
             ordinal_t kpmer_count = kpmer_b.part_sizes(i);
-            char_view_t kmer_s = kmer_b.kmers[i];
-            char_view_t kpmer_s = kpmer_b.kmers[i];
-            char_view_t cross_s = Kokkos::subview(kpmer_b.crosscut, std::make_pair(kpmer_b.crosscut_row_map(bucket_count*i)*(k+1), kpmer_b.crosscut_row_map(bucket_count*(i+1))*(k+1)));
+            char_view_t kmer_s("kmer part", kmer_b.kmers[i].extent(0));
+            Kokkos::deep_copy(kmer_s, kmer_b.kmers[i]);
+            char_view_t kpmer_s("kpmer part", kpmer_b.kmers[i].extent(0));
+            Kokkos::deep_copy(kpmer_s, kpmer_b.kmers[i]);
+            char_mirror_t cross_s_m = Kokkos::subview(kpmer_b.crosscut, std::make_pair(kpmer_b.crosscut_row_map(bucket_count*i)*(k+1), kpmer_b.crosscut_row_map(bucket_count*(i+1))*(k+1)));
+            char_view_t cross_s("cross s", cross_s_m.extent(0));
+            Kokkos::deep_copy(cross_s, cross_s_m);
             generate_hashmap(hashmap, kmer_s, k, kmer_count);
             vtx_view_t g_s("graph portion", kmer_count);
             Kokkos::parallel_for("init g", kmer_count, KOKKOS_LAMBDA(const ordinal_t i){
@@ -556,16 +569,29 @@ int main(int argc, char **argv) {
         std::vector<bucket_glues> output_glues;
         ordinal_t glue_offset = 0;
         Kokkos::Timer t3;
+        //repartition kmers according to output unitig
         for(int i = 0; i < bucket_count; i++) {
-            char_view_t kmer_s = kmer_b.kmers[i];
+            Kokkos::Timer t4;
+            char_view_t kmer_s("kmer part", kmer_b.kmers[i].extent(0));
+            Kokkos::deep_copy(kmer_s, kmer_b.kmers[i]);
             c_output c = c_outputs[i];
             ordinal_t glue_size = c.cross.numRows();
             vtx_view_t repart_s = Kokkos::subview(repartition_map, std::make_pair(glue_offset, glue_offset + glue_size));
             vtx_view_t output_s = Kokkos::subview(output_mapping, std::make_pair(glue_offset, glue_offset + glue_size));
             glue_offset += glue_size;
-            write_unitigs2(kmer_s, k, c.glue, out_fname);
-            bucket_glues glue_b = partition_for_output(bucket_count, c.cross, repart_s, output_s);
+            graph_type non_cross_glue = move_to_device(c.glue);
+            graph_type cross_glue = move_to_device(c.cross);
+            printf("Time to move bucket %i's stuff to device: %.3fs\n", i, t4.seconds());
+            t4.reset();
+            write_unitigs2(kmer_s, k, non_cross_glue, out_fname);
+            printf("Time to write bucket %i's non-crossing output: %.3fs\n", i, t4.seconds());
+            t4.reset();
+            bucket_glues glue_b = partition_for_output(bucket_count, cross_glue, repart_s, output_s);
+            printf("Time to calculate bucket %i's crossing output partitions: %.3fs\n", i, t4.seconds());
+            t4.reset();
             glue_b = partition_kmers_for_glueing(glue_b, kmer_s, k);
+            printf("Time to repartition bucket %i's kmers: %.3fs\n", i, t4.seconds());
+            t4.reset();
             output_glues.push_back(glue_b);
         }
         c_outputs.clear();
@@ -594,8 +620,8 @@ int main(int argc, char **argv) {
             });
             vtx_view_t entries = Kokkos::subview(small_g_result.entries, std::make_pair(result_start, result_end));
             graph_type out_g(entries, row_map);
-            graph_type blah = coarsener.compacter.collect_unitigs(f_p.glues[i], out_g);
-            write_unitigs2(f_p.kmer_glues[i], k, blah, out_fname);
+            graph_type blah = coarsener.compacter.collect_unitigs(move_to_device(f_p.glues[i]), out_g);
+            write_unitigs2(move_to_device(f_p.kmer_glues[i]), k, blah, out_fname);
         }
         //printf("glue list length: %lu\n", glue_list.size());
         printf("Time to generate glue list: %.3fs\n", t.seconds());

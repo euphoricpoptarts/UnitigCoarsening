@@ -58,6 +58,7 @@ namespace unitig_compact {
     using matrix_type = typename KokkosSparse::CrsMatrix<value_t, ordinal_t, Device, void, edge_offset_t>;
     using host_matrix_t = typename KokkosSparse::CrsMatrix<value_t, ordinal_t, Kokkos::OpenMP, void, edge_offset_t>;
     using graph_type = typename matrix_type::staticcrsgraph_type;
+    using graph_m = typename graph_type::HostMirror;
     using host_graph_t = typename host_matrix_t::staticcrsgraph_type;
 
     using host_policy = Kokkos::RangePolicy<Kokkos::OpenMP>;
