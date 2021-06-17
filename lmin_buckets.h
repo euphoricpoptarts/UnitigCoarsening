@@ -119,6 +119,7 @@ struct bucket_kpmers {
 
 struct bucket_glues {
     char_mirror_t kmers;
+    edge_mirror_t kmer_rows;
     graph_m glues;
     vtx_mirror_t buckets_row_map;
     vtx_mirror_t buckets_entries_row_map;
@@ -136,17 +137,40 @@ graph_type move_to_device(graph_m x){
 
 bucket_glues partition_kmers_for_glueing(bucket_glues glues, char_view_t kmers, edge_offset_t k){
     graph_type g_g = move_to_device(glues.glues);
-    char_view_t kmer_glues("kmers glue", g_g.entries.extent(0)*k);
+    ordinal_t n = g_g.entries.extent(0);
+    edge_view_t kmer_rows("kmer rows", n + 1);
+    Kokkos::parallel_scan("name", g_g.numRows(), KOKKOS_LAMBDA(const ordinal_t i, edge_offset_t& update, const bool final){
+        if(final){
+            ordinal_t u = g_g.row_map(i);
+            kmer_rows(u) = update;
+            edge_offset_t write_val = update + k;
+            u++;
+            for(; u < g_g.row_map(i + 1); u++){
+                kmer_rows(u) = write_val;
+                write_val++;
+            }
+            if(i + 1 == g_g.numRows()){
+                kmer_rows(u) = write_val;
+            } 
+        }
+        update += k - 1 + (g_g.row_map(i + 1) - g_g.row_map(i));
+    });
+    edge_subview_t kmer_glue_size_s = Kokkos::subview(kmer_rows, n);
+    edge_offset_t kmer_glue_size = 0;
+    Kokkos::deep_copy(kmer_glue_size, kmer_glue_size_s);
+    char_view_t kmer_glues("kmers glue", kmer_glue_size);
     Kokkos::parallel_for("shuffle kmers for glueing", g_g.entries.extent(0), KOKKOS_LAMBDA(const ordinal_t i){
-        edge_offset_t write_idx = i*k;
-        edge_offset_t read_idx = g_g.entries(i)*k;
-        for(edge_offset_t j = read_idx; j < read_idx + k; j++){
-            kmer_glues(write_idx) = kmers(j);
-            write_idx++;
+        edge_offset_t read_idx = ((g_g.entries(i) + 1)*k) - 1;
+        //j + 1 >= kmer_rows(i) + 1 because kmer_rows(i) can be zero and its datatype is unsigned
+        for(edge_offset_t j = kmer_rows(i + 1) - 1; j + 1 >= kmer_rows(i) + 1; j--){
+            kmer_glues(j) = kmers(read_idx);
+            read_idx--;
         }
     });
     glues.kmers = Kokkos::create_mirror_view(kmer_glues);
     Kokkos::deep_copy(glues.kmers, kmer_glues);
+    glues.kmer_rows = Kokkos::create_mirror_view(kmer_rows);
+    Kokkos::deep_copy(glues.kmer_rows, kmer_rows);
     return glues;
 }
 

@@ -69,25 +69,30 @@ struct final_partition {
     std::vector<graph_m> glues;
     std::vector<vtx_view_t> out_maps;
     std::vector<char_mirror_t> kmer_glues;
+    std::vector<edge_mirror_t> kmer_rows;
 };
 
 final_partition collect_buckets(std::vector<bucket_glues> buckets, edge_offset_t k){
     ordinal_t bucket_count = buckets[0].buckets;
     vtx_mirror_t bucket_size("bucket size", bucket_count);
     vtx_mirror_t entries_bucket_size("bucket size", bucket_count);
-    vtx_mirror_t bucket_row_map("bucket size", bucket_count + 1);
+    vtx_mirror_t kmers_bucket_size("bucket size", bucket_count);
     for(int i = 0; i < buckets.size(); i++){
         bucket_glues b = buckets[i];
         for(int j = 0; j < bucket_count; j++){
             bucket_size(j) += b.buckets_row_map[j+1] - b.buckets_row_map[j];
-            entries_bucket_size(j) += b.buckets_entries_row_map[j+1] - b.buckets_entries_row_map[j];
+            edge_offset_t end = b.buckets_entries_row_map[j+1];
+            edge_offset_t start = b.buckets_entries_row_map[j];
+            entries_bucket_size(j) += end - start;
+            kmers_bucket_size(j) += b.kmer_rows(end) - b.kmer_rows(start);
         }
     }
     std::vector<graph_m> glues;
     std::vector<vtx_view_t> out_maps;
     std::vector<char_mirror_t> kmer_glues;
+    std::vector<edge_mirror_t> kmer_rows;
     for(int i = 0; i < bucket_count; i++){
-        edge_view_t row_map("row map", bucket_size(i) + 1);
+        edge_mirror_t row_map("row map", bucket_size(i) + 1);
         vtx_view_t out_map("out map", bucket_size(i));
         edge_offset_t offset = 0;
         edge_offset_t write_sum = 0;
@@ -95,41 +100,55 @@ final_partition collect_buckets(std::vector<bucket_glues> buckets, edge_offset_t
             bucket_glues b = buckets[j];
             ordinal_t end = b.buckets_row_map[i+1];
             ordinal_t start = b.buckets_row_map[i];
-            graph_type glue = move_to_device(b.glues);
+            graph_m glue = b.glues;
             vtx_view_t out_map_in = b.output_map;
-            Kokkos::parallel_for("move row map", r_policy(start, end), KOKKOS_LAMBDA(const ordinal_t x){
+            Kokkos::parallel_for("move row map", host_policy(start, end), KOKKOS_LAMBDA(const ordinal_t x){
                 ordinal_t insert = offset + x - start;
                 ordinal_t write_val = write_sum + glue.row_map(x + 1) - glue.row_map(start);
                 row_map(insert + 1) = write_val;
+            });
+            Kokkos::parallel_for("move out map", r_policy(start, end), KOKKOS_LAMBDA(const ordinal_t x){
+                ordinal_t insert = offset + x - start;
                 out_map(insert) = out_map_in(x);
             });
             offset += end - start;
             write_sum += b.buckets_entries_row_map[i+1] - b.buckets_entries_row_map[i];
         }
-        vtx_view_t entries("entries", entries_bucket_size(i));
-        Kokkos::parallel_for("move entries", r_policy(0, entries_bucket_size(i)), KOKKOS_LAMBDA(const ordinal_t x){
+        vtx_mirror_t entries("entries", entries_bucket_size(i));
+        Kokkos::parallel_for("move entries", host_policy(0, entries_bucket_size(i)), KOKKOS_LAMBDA(const ordinal_t x){
             entries(x) = x;
         });
-        char_mirror_t kmers("kmers", entries_bucket_size(i)*k);
-        offset = 0;
+        char_mirror_t kmers("kmers", kmers_bucket_size(i));
+        edge_mirror_t kmer_row("kmer row", entries_bucket_size(i) + 1);
+        offset = 0, write_sum = 0;
         for(int j = 0; j < bucket_count; j++){
             bucket_glues b = buckets[j];
-            edge_offset_t end = b.buckets_entries_row_map[i+1]*k;
-            edge_offset_t start = b.buckets_entries_row_map[i]*k;
-            char_mirror_t dest = Kokkos::subview(kmers, std::make_pair(offset, offset + end - start));
-            char_mirror_t source = Kokkos::subview(b.kmers, std::make_pair(start, end));
+            edge_offset_t end = b.buckets_entries_row_map[i+1];
+            edge_offset_t start = b.buckets_entries_row_map[i];
+            Kokkos::parallel_for("move kmer map", host_policy(start, end), KOKKOS_LAMBDA(const ordinal_t x){
+                ordinal_t insert = offset + x - start;
+                ordinal_t write_val = write_sum + b.kmer_rows(x + 1) - b.kmer_rows(start);
+                kmer_row(insert + 1) = write_val;
+            });
+            edge_offset_t kmer_start = b.kmer_rows(start);
+            edge_offset_t kmer_end = b.kmer_rows(end);
+            char_mirror_t dest = Kokkos::subview(kmers, std::make_pair(write_sum, write_sum + kmer_end - kmer_start));
+            char_mirror_t source = Kokkos::subview(b.kmers, std::make_pair(kmer_start, kmer_end));
             Kokkos::deep_copy(dest, source);
             offset += end - start;
+            write_sum += kmer_end - kmer_start;
         }
-        graph_type new_glue(entries, row_map);
-        glues.push_back(Kokkos::create_mirror(new_glue));
+        graph_m new_glue(entries, row_map);
+        glues.push_back(new_glue);
         out_maps.push_back(out_map);
         kmer_glues.push_back(kmers);
+        kmer_rows.push_back(kmer_row);
     }
     final_partition out;
     out.glues = glues;
     out.out_maps = out_maps;
     out.kmer_glues = kmer_glues;
+    out.kmer_rows = kmer_rows;
     return out;
 }
 
@@ -412,6 +431,11 @@ char_view_t move_to_device(char_mirror_t x){
     return y;
 }
 
+edge_view_t move_to_device(edge_mirror_t x){
+    edge_view_t y("device", x.extent(0));
+    Kokkos::deep_copy(y, x);
+    return y;
+}
 
 int main(int argc, char **argv) {
 
@@ -621,7 +645,7 @@ int main(int argc, char **argv) {
             vtx_view_t entries = Kokkos::subview(small_g_result.entries, std::make_pair(result_start, result_end));
             graph_type out_g(entries, row_map);
             graph_type blah = coarsener.compacter.collect_unitigs(move_to_device(f_p.glues[i]), out_g);
-            write_unitigs2(move_to_device(f_p.kmer_glues[i]), k, blah, out_fname);
+            write_unitigs3(move_to_device(f_p.kmer_glues[i]), move_to_device(f_p.kmer_rows[i]), k, blah, out_fname);
         }
         //printf("glue list length: %lu\n", glue_list.size());
         printf("Time to generate glue list: %.3fs\n", t.seconds());
