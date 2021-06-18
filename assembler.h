@@ -64,14 +64,50 @@ ordinal_t find_vtx(const char_view_t chars, const vtx_view_t vtx_map, edge_offse
 
 //check if vtx found in edge_chars at offset exists in vtx_chars using a hashmap
 KOKKOS_INLINE_FUNCTION
-ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_map, const char_view_t edge_chars, edge_offset_t offset, edge_offset_t k){
-    uint32_t hash = fnv(edge_chars, offset, k);
+ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_map, const char_view_t vtx_chars2, edge_offset_t offset, edge_offset_t k, ordinal_t size){
+    uint32_t hash = fnv(vtx_chars2, offset, k - 1);
     uint32_t hash_cast = vtx_map.extent(0) - 1;
     hash = hash & hash_cast;
     while(vtx_map(hash) != ORD_MAX){
-        edge_offset_t hash_offset = vtx_map(hash)*k;
-        if(cmp(edge_chars, vtx_chars, offset, hash_offset, k)){
-            return vtx_map(hash);
+        ordinal_t addr = vtx_map(hash);
+        bool nullified = false;
+        if(addr >= size){
+            addr -= size;
+            nullified = true;
+        }
+        edge_offset_t hash_offset = addr*k;
+        if(cmp(vtx_chars2, vtx_chars, offset, hash_offset, k - 1)){
+            if(!nullified){
+                return addr;
+            } else {
+                return addr + size;
+            }
+        }
+        hash = (hash + 1) & hash_cast;
+    }
+    return ORD_MAX;
+}
+
+//check if vtx found in edge_chars at offset exists in vtx_chars using a hashmap
+KOKKOS_INLINE_FUNCTION
+ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_map, edge_offset_t offset, edge_offset_t k, ordinal_t size){
+    uint32_t hash = fnv(vtx_chars, offset, k - 1);
+    uint32_t hash_cast = vtx_map.extent(0) - 1;
+    hash = hash & hash_cast;
+    while(vtx_map(hash) != ORD_MAX){
+        ordinal_t addr = vtx_map(hash);
+        bool nullified = false;
+        if(addr >= size){
+            addr -= size;
+            nullified = true;
+        }
+        edge_offset_t hash_offset = addr*k;
+        if(cmp(vtx_chars, vtx_chars, offset, hash_offset, k - 1)){
+            if(!nullified){
+                return addr;
+            } else {
+                return addr + size;
+            }
         }
         hash = (hash + 1) & hash_cast;
     }
@@ -92,16 +128,31 @@ void generate_hashmap(vtx_view_t hashmap, char_view_t kmers, edge_offset_t k, or
     });
     size_t hash_cast = hashmap_size - 1;
     Kokkos::parallel_for("fill hashmap", size, KOKKOS_LAMBDA(const ordinal_t i){
-        uint32_t hash = fnv(kmers, k*i, k) & hash_cast;
+        uint32_t hash = fnv(kmers, k*i, k - 1) & hash_cast;
         bool success = Kokkos::atomic_compare_exchange_strong(&hashmap(hash), ORD_MAX, i);
         //linear probing
-        //all values are unique so no need to check
         while(!success){
+            ordinal_t written = hashmap(hash);
+            if(written >= size){
+                written = written - size;
+                if(cmp(kmers, kmers, k*i, k*written, k - 1)){
+                    //hash value matches k-1 mer
+                    //but has been nullified
+                    //do nothing
+                    break;
+                }
+            } else if(cmp(kmers, kmers, k*i, k*written, k - 1)){
+                //hash value matches k-1 mer
+                //nullify it
+                Kokkos::atomic_compare_exchange_strong(&hashmap(hash), written, i + size);
+                break;
+            }
             hash = (hash + 1) & hash_cast;
             success = Kokkos::atomic_compare_exchange_strong(&hashmap(hash), ORD_MAX, i);
         }
     });
 }
+
 
 struct prefix_sum1
 {
@@ -137,159 +188,57 @@ assembler_data init_assembler(ordinal_t max_n, ordinal_t max_np){
     return d;
 }
 
-crosses assemble_pruned_graph(assembler_data assembler, char_view_t kmers, char_view_t kpmers, vtx_view_t vtx_map, char_view_t cross, edge_offset_t k, vtx_view_t g){
+crosses assemble_pruned_graph(assembler_data assembler, char_view_t kmers, vtx_view_t vtx_map, char_view_t cross, vtx_view_t cross_ids, edge_offset_t k, vtx_view_t g){
     ordinal_t n = kmers.extent(0) / k;
-    ordinal_t np = kpmers.extent(0) / (k + 1);
-    ordinal_t np_cross = cross.extent(0) / (k + 1);
-    //printf("edges: %u, crosses: %u; sum: %u\n", np, np_cross, np + np_cross);
-    //both the in and out edge counts for each vertex are packed into one char
+    ordinal_t n_cross = cross.extent(0) / k;
     Kokkos::parallel_for("reset edge count", n, KOKKOS_LAMBDA(const ordinal_t i){
         assembler.edge_count(i) = 0;
     });
-    Kokkos::parallel_for("translate edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1), k);
-        assembler.out(i) = u;
-    });
-    Kokkos::parallel_for("translate edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t v = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1) + 1, k);
+    //both the in and out edge counts for each vertex are packed into one char
+    Kokkos::parallel_for("translate edges", n, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t v = find_vtx_from_edge(kmers, vtx_map, i*k + 1, k, n);
         assembler.in(i) = v;
     });
-    Kokkos::parallel_for("translate cross edges", np_cross, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = find_vtx_from_edge(kmers, vtx_map, cross, i*(k+1), k);
-        assembler.out(np + i) = u;
+    Kokkos::parallel_for("translate cross edges", n_cross, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t v = find_vtx_from_edge(kmers, vtx_map, cross, i*k + 1, k, n);
+        assembler.in(n + i) = v;
     });
-    Kokkos::parallel_for("translate cross edges", np_cross, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t v = find_vtx_from_edge(kmers, vtx_map, cross, i*(k+1) + 1, k);
-        assembler.in(np + i) = v;
-    });
-    Kokkos::parallel_for("count edges", np + np_cross, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = assembler.out(i);
-        //u can have at most 4 out edges
-        if(u != ORD_MAX){
-            Kokkos::atomic_add(&assembler.edge_count(u), (char)1);
-        }
-    });
-    Kokkos::parallel_for("count edges", np + np_cross, KOKKOS_LAMBDA(const ordinal_t i){
+    Kokkos::parallel_for("count edges", n + n_cross, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t v = assembler.in(i);
-        //v can have at most 4 in edges
-        //so we count the in edges as multiples of 8 (first power of 2 greater than 4, easy to do bitwise ops)
         if(v != ORD_MAX){
-            Kokkos::atomic_add(&assembler.edge_count(v), (char)8);
+            if(v > n){
+                v = v - n;
+            }
+            Kokkos::atomic_add(&assembler.edge_count(v), (char)1);
         }
     });
-    ordinal_t count;
-    Kokkos::parallel_reduce("write edges", np, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update){
-        ordinal_t u = assembler.out(i);
+    Kokkos::parallel_for("write edges", n, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t u = i;
         ordinal_t v = assembler.in(i);
-        //u has one out edge
-        //and v has one in edge
-        if(u != ORD_MAX && v != ORD_MAX && (assembler.edge_count(u) & 7) == 1 && (assembler.edge_count(v) >> 3) == 1){
+        //u has one out edge (if v < n)
+        //and v has one in edge (if edge_count(v) == 1)
+        if(v < n && assembler.edge_count(v) == 1){
             g(u) = v;
-            update++;
-        }
-    }, count);
-    vtx_view_t out_cross_id("out cross ids", np_cross);
-    Kokkos::parallel_for("init out cross ids", np_cross, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = assembler.out(np + i);
-        if(u != ORD_MAX && ((assembler.edge_count(u) & 7) == 1)){
-            out_cross_id(i) = u;
-        } else {
-            out_cross_id(i) = ORD_MAX;
         }
     });
-    vtx_view_t in_cross_id("in cross ids", np_cross);
-    Kokkos::parallel_for("init in cross ids", np_cross, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t v = assembler.in(np + i);
-        if(v != ORD_MAX && (assembler.edge_count(v) >> 3 == 1)){
+    vtx_view_t out_cross_id("out cross ids", n_cross);
+    Kokkos::parallel_for("init out cross ids", n_cross, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t u = cross_ids(i);
+        out_cross_id(i) = u;
+    });
+    vtx_view_t in_cross_id("in cross ids", n_cross);
+    Kokkos::parallel_for("init in cross ids", n_cross, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t v = assembler.in(n + i);
+        if(v < n && (assembler.edge_count(v) == 1)){
             in_cross_id(i) = v;
         } else {
             in_cross_id(i) = ORD_MAX;
         }
     });
-    //printf("Edges written: %u\n", count);
     crosses c;
     c.in = in_cross_id;
     c.out = out_cross_id;
     return c;
-}
-
-vtx_view_t assemble_pruned_graph(char_view_t kmers, char_view_t kpmers, vtx_view_t vtx_map, edge_offset_t k){
-    ordinal_t n = kmers.extent(0) / k;
-    ordinal_t np = kpmers.extent(0) / (k + 1);
-    //both the in and out edge counts for each vertex are packed into one char
-    char_view_t edge_count("edge count", n);
-    vtx_view_t in("in vertex", np);
-    vtx_view_t out("out vertex", np);
-    Kokkos::parallel_for("translate edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1), k);
-        out(i) = u;
-    });
-    Kokkos::parallel_for("translate edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t v = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1) + 1, k);
-        in(i) = v;
-    });
-    Kokkos::parallel_for("count edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = out(i);
-        //u can have at most 4 out edges
-        Kokkos::atomic_add(&edge_count(u), (char)1);
-    });
-    Kokkos::parallel_for("count edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t v = in(i);
-        //v can have at most 4 in edges
-        //so we count the in edges as multiples of 8 (first power of 2 greater than 4, easy to do bitwise ops)
-        Kokkos::atomic_add(&edge_count(v), (char)8);
-    });
-    vtx_view_t g("pruned out entries", n);
-    Kokkos::parallel_for("init g", n, KOKKOS_LAMBDA(const ordinal_t i){
-        g(i) = ORD_MAX;
-    });
-    Kokkos::parallel_for("write edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = out(i);
-        ordinal_t v = in(i);
-        //u has one out edge
-        //and v has one in edge
-        if((edge_count(u) & 7) == 1 && (edge_count(v) >> 3) == 1){
-            g(u) = v;
-        }
-    });
-    return g;
-}
-
-graph_type assemble_graph(char_view_t kmers, char_view_t kpmers, vtx_view_t vtx_map, edge_offset_t k){
-    ordinal_t n = kmers.extent(0) / k;
-    ordinal_t np = kpmers.extent(0) / (k + 1);
-    edge_view_t row_map("row map", n+1);
-    vtx_view_t in("in vertex", np);
-    vtx_view_t out("out vertex", np);
-    Kokkos::parallel_for("translate edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1), k);
-        out(i) = u;
-    });
-    Kokkos::parallel_for("translate edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t v = find_vtx_from_edge(kmers, vtx_map, kpmers, i*(k+1) + 1, k);
-        in(i) = v;
-    });
-    vtx_view_t edge_count("edge count", n);
-    Kokkos::parallel_for("count edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = out(i);
-        Kokkos::atomic_increment(&edge_count(u));
-    });
-    Kokkos::parallel_scan("calc source offsets", n, prefix_sum1(edge_count, row_map));
-    edge_subview_t rm_subview = Kokkos::subview(row_map, n);
-    edge_offset_t total_e = 0;
-    Kokkos::deep_copy(total_e, rm_subview);
-    Kokkos::parallel_for("reset edge count", n, KOKKOS_LAMBDA(const ordinal_t i){
-        edge_count(i) = 0;
-    });
-    vtx_view_t entries("pruned out entries", total_e);
-    Kokkos::parallel_for("write edges", np, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = out(i);
-        ordinal_t v = in(i);
-        edge_offset_t insert = row_map(u) + Kokkos::atomic_fetch_add(&edge_count(u), 1);
-        entries(insert) = v;
-    });
-    graph_type g(entries, row_map);
-    return g;
 }
 
 }

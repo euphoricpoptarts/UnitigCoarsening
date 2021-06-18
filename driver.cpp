@@ -201,6 +201,7 @@ struct kpmer_partitions {
     ordinal_t size;
     char_mirror_t crosscut;
     vtx_mirror_t crosscut_row_map;
+    vtx_mirror_t cross_ids;
     ordinal_t crosscut_buckets;
     ordinal_t crosscut_size;
 };
@@ -227,10 +228,19 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers> buckets, edge_offset
     for(int j = 0; j < bucket_count; j++){
         char_mirror_t kmer_bucket("kmer bucket", bucket_size(j)*k);
         edge_offset_t transfer_loc = 0;
+        ordinal_t bucket_kmer_count = 0;
         for(int i = 0; i < buckets.size(); i++){
+            bucket_kpmers b = buckets[i];
             edge_offset_t transfer_start = buckets[i].buckets_row_map[j]*k;
             edge_offset_t transfer_end = buckets[i].buckets_row_map[j + 1]*k;
             edge_offset_t transfer_size = transfer_end - transfer_start;
+            edge_offset_t local_bucket_size = buckets[i].buckets_row_map[j+1] - buckets[i].buckets_row_map[j];
+            Kokkos::parallel_for("update cross ids", host_policy(b.crosscut_row_map[j*bucket_count], b.crosscut_row_map[(j+1)*bucket_count]), KOKKOS_LAMBDA(const ordinal_t i){
+                if(b.cross_ids(i) != ORD_MAX){
+                    b.cross_ids(i) += bucket_kmer_count;
+                }
+            });
+            bucket_kmer_count += buckets[i].buckets_row_map[j+1] - buckets[i].buckets_row_map[j];
             if(transfer_size > 0){
                 char_mirror_t dest = Kokkos::subview(kmer_bucket, std::make_pair(transfer_loc, transfer_loc + transfer_size));
                 char_mirror_t source = Kokkos::subview(buckets[i].kmers, std::make_pair(transfer_start, transfer_end));
@@ -251,6 +261,7 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers> buckets, edge_offset
     }
     ordinal_t cross_size = cross_bucket_row_map(cross_bucket_count);
     char_mirror_t cross_kmers("all kmers", cross_size * k);
+    vtx_mirror_t cross_ids("cross ids", cross_size);
     for(int j = 0; j < cross_bucket_count; j++){
         ordinal_t transfer_loc = cross_bucket_row_map(j);
         for(int i = 0; i < buckets.size(); i++){
@@ -258,7 +269,10 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers> buckets, edge_offset
             if(transfer_size > 0){
                 char_mirror_t transfer_to = Kokkos::subview(cross_kmers, std::make_pair(k*transfer_loc, k*(transfer_loc + transfer_size)));
                 char_view_t transfer_from = Kokkos::subview(buckets[i].crosscut, std::make_pair(buckets[i].crosscut_row_map[j] * k, k * buckets[i].crosscut_row_map[j + 1]));
+                vtx_mirror_t dest = Kokkos::subview(cross_ids, std::make_pair(transfer_loc, transfer_loc + transfer_size));
+                vtx_mirror_t source = Kokkos::subview(buckets[i].cross_ids, std::make_pair(buckets[i].crosscut_row_map[j], buckets[i].crosscut_row_map[j+1]));
                 Kokkos::deep_copy(transfer_to, transfer_from);
+                Kokkos::deep_copy(dest, source);
                 transfer_loc += transfer_size;
             }
         }
@@ -270,6 +284,7 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers> buckets, edge_offset
     out.crosscut_row_map = cross_bucket_row_map;
     out.crosscut_size = cross_size;
     out.crosscut_buckets = cross_bucket_count;
+    out.cross_ids = cross_ids;
     return out;
 }
 
@@ -439,16 +454,15 @@ edge_view_t move_to_device(edge_mirror_t x){
 
 int main(int argc, char **argv) {
 
-    if (argc < 5) {
+    if (argc != 5) {
         printf("You input %d args\n", argc);
-        fprintf(stderr, "Usage: %s <k-mer file> <(k+1)-mer file> k l <output file>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <k-mer file> k l <output file>\n", argv[0]);
         return EXIT_FAILURE;
     }
     char *kmer_fname = argv[1];
-    char *kpmer_fname = argv[2];
-    edge_offset_t k = atoi(argv[3]);
-    edge_offset_t l = atoi(argv[4]);
-    std::string out_fname(argv[5]);
+    edge_offset_t k = atoi(argv[2]);
+    edge_offset_t l = atoi(argv[3]);
+    std::string out_fname(argv[4]);
     Kokkos::initialize();
     {
         Kokkos::Timer t, t2;//, t3;
@@ -456,8 +470,7 @@ int main(int argc, char **argv) {
         ordinal_t lmin_buckets = 1;
         lmin_buckets <<= 2*l;
         vtx_view_t lmin_bucket_map = generate_permutation(lmin_buckets, rand_pool);
-        kmer_partitions kmer_b = load_kmers<bucket_kmers, kmer_partitions>(kmer_fname, k, l, lmin_bucket_map);
-        kpmer_partitions kpmer_b = load_kmers<bucket_kpmers, kpmer_partitions>(kpmer_fname, k+1, l, lmin_bucket_map);
+        kpmer_partitions kmer_b = load_kmers<bucket_kpmers, kpmer_partitions>(kmer_fname, k, l, lmin_bucket_map);
         printf("Read input data in %.3fs\n", t.seconds());
         //t.reset();
         //t2.reset();
@@ -471,21 +484,17 @@ int main(int argc, char **argv) {
         ////t3.reset();
 #ifdef HUGE
         printf("kmer size: %lu, kmers: %lu\n", kmer_b.size*k, kmer_b.size);
-        printf("(k+1)-mer size: %lu, (k+1)mers: %lu\n", kpmer_b.size*(k+1), kpmer_b.size);
 #elif defined(LARGE)
         printf("kmer size: %lu, kmers: %u\n", kmer_b.size*k, kmer_b.size);
-        printf("(k+1)-mer size: %lu, (k+1)mers: %u\n", kpmer_b.size*(k+1), kpmer_b.size);
 #else
         printf("kmer size: %u, kmers: %u\n", kmer_b.size*k, kmer_b.size);
-        printf("(k+1)-mer size: %u, (k+1)mers: %u\n", kpmer_b.size*(k+1), kpmer_b.size);
 #endif
         ordinal_t largest_n = 0, largest_np = 0, largest_cross = 0;
         ordinal_t bucket_count = kmer_b.kmers.size();
         for(int i = 0; i < bucket_count; i++){
             ordinal_t kmer_count = kmer_b.part_sizes(i);
-            ordinal_t kpmer_count = kpmer_b.part_sizes(i);
-            ordinal_t cross_count = kpmer_b.crosscut_row_map(bucket_count*(i + 1)) - kpmer_b.crosscut_row_map(bucket_count*i);
-            kpmer_count += cross_count;
+            ordinal_t cross_count = kmer_b.crosscut_row_map(bucket_count*(i + 1)) - kmer_b.crosscut_row_map(bucket_count*i);
+            ordinal_t kpmer_count = kmer_count + cross_count;
             if(kmer_count > largest_n){
                 largest_n = kmer_count;
             }
@@ -508,20 +517,20 @@ int main(int argc, char **argv) {
         for(int i = 0; i < bucket_count; i++){
             Kokkos::Timer t2;
             ordinal_t kmer_count = kmer_b.part_sizes(i);
-            ordinal_t kpmer_count = kpmer_b.part_sizes(i);
             char_view_t kmer_s("kmer part", kmer_b.kmers[i].extent(0));
             Kokkos::deep_copy(kmer_s, kmer_b.kmers[i]);
-            char_view_t kpmer_s("kpmer part", kpmer_b.kmers[i].extent(0));
-            Kokkos::deep_copy(kpmer_s, kpmer_b.kmers[i]);
-            char_mirror_t cross_s_m = Kokkos::subview(kpmer_b.crosscut, std::make_pair(kpmer_b.crosscut_row_map(bucket_count*i)*(k+1), kpmer_b.crosscut_row_map(bucket_count*(i+1))*(k+1)));
+            char_mirror_t cross_s_m = Kokkos::subview(kmer_b.crosscut, std::make_pair(kmer_b.crosscut_row_map(bucket_count*i)*k, kmer_b.crosscut_row_map(bucket_count*(i+1))*k));
+            vtx_mirror_t cross_ids_m = Kokkos::subview(kmer_b.cross_ids, std::make_pair(kmer_b.crosscut_row_map(bucket_count*i), kmer_b.crosscut_row_map(bucket_count*(i+1))));
             char_view_t cross_s("cross s", cross_s_m.extent(0));
+            vtx_view_t cross_ids("cross ids", cross_ids_m.extent(0));
+            Kokkos::deep_copy(cross_ids, cross_ids_m);
             Kokkos::deep_copy(cross_s, cross_s_m);
             generate_hashmap(hashmap, kmer_s, k, kmer_count);
             vtx_view_t g_s("graph portion", kmer_count);
             Kokkos::parallel_for("init g", kmer_count, KOKKOS_LAMBDA(const ordinal_t i){
                 g_s(i) = ORD_MAX;
             });
-            crosses c = assemble_pruned_graph(assembler, kmer_s, kpmer_s, hashmap, cross_s, k, g_s);
+            crosses c = assemble_pruned_graph(assembler, kmer_s, hashmap, cross_s, cross_ids, k, g_s);
             cross_list.push_back(c);
             printf("Time to assemble bucket %i: %.4f\n", i, t2.seconds());
             //printf("Bucket %i has %u kmers and %u k+1-mers\n", i, kmer_count, kpmer_count);
@@ -531,8 +540,7 @@ int main(int argc, char **argv) {
             printf("Time to coarsen bucket %i: %.4f\n", i, t2.seconds());
             t2.reset();
         }
-        kpmer_b.kmers.clear();
-        Kokkos::resize(kpmer_b.crosscut, 0);
+        Kokkos::resize(kmer_b.crosscut, 0);
         //vtx_view_t in_cross_buf("in cross buffer", largest_cross);
         ordinal_t cross_written_count = 0;
         printf("Cross edges written: %u\n", cross_written_count);
@@ -545,9 +553,9 @@ int main(int argc, char **argv) {
         for(int i = 0; i < bucket_count; i++){
             for(int j = 0; j < bucket_count; j++){
                 if(i != j){
-                    ordinal_t out_bucket_begin = kpmer_b.crosscut_row_map(bucket_count*i + j) - kpmer_b.crosscut_row_map(bucket_count*i);
-                    ordinal_t in_bucket_begin = kpmer_b.crosscut_row_map(bucket_count*j + i) - kpmer_b.crosscut_row_map(bucket_count*j);
-                    ordinal_t bucket_size = kpmer_b.crosscut_row_map(bucket_count*i + j + 1) - kpmer_b.crosscut_row_map(bucket_count*i + j);
+                    ordinal_t out_bucket_begin = kmer_b.crosscut_row_map(bucket_count*i + j) - kmer_b.crosscut_row_map(bucket_count*i);
+                    ordinal_t in_bucket_begin = kmer_b.crosscut_row_map(bucket_count*j + i) - kmer_b.crosscut_row_map(bucket_count*j);
+                    ordinal_t bucket_size = kmer_b.crosscut_row_map(bucket_count*i + j + 1) - kmer_b.crosscut_row_map(bucket_count*i + j);
                     vtx_view_t out_cross = cross_list[i].out;
                     vtx_view_t in_cross = cross_list[j].in;
                     ordinal_t local_count = 0;
