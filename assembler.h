@@ -81,8 +81,8 @@ ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_m
 //check if vtx found in edge_chars at offset exists in vtx_chars using a hashmap
 KOKKOS_INLINE_FUNCTION
 ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_map, edge_offset_t offset, edge_offset_t k, ordinal_t size){
-    uint32_t hash = fnv(vtx_chars, offset, k - 1);
-    uint32_t hash_cast = vtx_map.extent(0) - 1;
+    size_t hash = fnv(vtx_chars, offset, k - 1);
+    size_t hash_cast = vtx_map.extent(0) - 1;
     hash = hash & hash_cast;
     while(vtx_map(hash) != ORD_MAX){
         ordinal_t addr = vtx_map(hash);
@@ -106,14 +106,16 @@ ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_m
 
 vtx_view_t generate_hashmap(char_view_t kmers, edge_offset_t k, ordinal_t size){
     size_t hashmap_size = 1;
-    while(hashmap_size < 2*size) hashmap_size <<= 1;
+    size_t preferred_size = ((size_t)2)*size;
+    while(hashmap_size < preferred_size) hashmap_size <<= 1;
     vtx_view_t out("hashmap", hashmap_size);
     Kokkos::parallel_for("init hashmap", hashmap_size, KOKKOS_LAMBDA(const ordinal_t i){
         out(i) = ORD_MAX;
     });
     size_t hash_cast = hashmap_size - 1;
     Kokkos::parallel_for("fill hashmap", size, KOKKOS_LAMBDA(const ordinal_t i){
-        uint32_t hash = fnv(kmers, k*i, k - 1) & hash_cast;
+        size_t hash = fnv(kmers, k*i, k - 1);
+        hash = hash & hash_cast;
         bool success = Kokkos::atomic_compare_exchange_strong(&out(hash), ORD_MAX, i);
         //linear probing
         while(!success){
