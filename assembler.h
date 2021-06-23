@@ -26,42 +26,6 @@ bool cmp(const char_view_t s1_chars, const char_view_t s2_chars, const edge_offs
     return true;
 }
 
-//check if edge formed by appending extension to kmer at offset exists in edges using a hashmap
-KOKKOS_INLINE_FUNCTION
-bool find_edge(const char_view_t chars, const char_view_t edges, const vtx_view_t edge_map, edge_offset_t offset, edge_offset_t k, char extension){
-    uint32_t hash = fnv(chars, offset, k);
-    hash = hash ^ (extension); // xor next byte into the bottom of the hash
-    hash = hash * 16777619; // Multiply by prime number found to work well
-    uint32_t hash_cast = edge_map.extent(0) - 1;
-    hash = hash & hash_cast;
-    while(edge_map(hash) != ORD_MAX){
-        edge_offset_t hash_offset = edge_map(hash)*(k + 1);
-        if(cmp(chars, edges, offset, hash_offset, k) && extension == edges(hash_offset + k)){
-            return true;
-        }
-        hash = (hash + 1) & hash_cast;
-    }
-    return false;
-}
-
-//check if vtx formed by appending extension to (k-1)mer at offset exists in vtxs using a hashmap
-KOKKOS_INLINE_FUNCTION
-ordinal_t find_vtx(const char_view_t chars, const vtx_view_t vtx_map, edge_offset_t offset, edge_offset_t k, char extension){
-    uint32_t hash = fnv(chars, offset, k - 1);
-    hash = hash ^ (extension); // xor next byte into the bottom of the hash
-    hash = hash * 16777619; // Multiply by prime number found to work well
-    uint32_t hash_cast = vtx_map.extent(0) - 1;
-    hash = hash & hash_cast;
-    while(vtx_map(hash) != ORD_MAX){
-        edge_offset_t hash_offset = vtx_map(hash)*k;
-        if(cmp(chars, chars, offset, hash_offset, k - 1) && (extension == chars(hash_offset + (k - 1))) ){
-            return vtx_map(hash);
-        }
-        hash = (hash + 1) & hash_cast;
-    }
-    return ORD_MAX;
-}
-
 //check if vtx found in edge_chars at offset exists in vtx_chars using a hashmap
 KOKKOS_INLINE_FUNCTION
 ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_map, const char_view_t vtx_chars2, edge_offset_t offset, edge_offset_t k, ordinal_t size){
@@ -152,27 +116,6 @@ void generate_hashmap(vtx_view_t hashmap, char_view_t kmers, edge_offset_t k, or
         }
     });
 }
-
-
-struct prefix_sum1
-{
-    vtx_view_t input;
-    edge_view_t output;
-
-    prefix_sum1(vtx_view_t input,
-        edge_view_t output)
-        : input(input)
-        , output(output) {}
-
-    KOKKOS_INLINE_FUNCTION
-        void operator() (const ordinal_t i, edge_offset_t& update, const bool final) const {
-        const edge_offset_t val_i = input(i);
-        update += val_i;
-        if (final) {
-            output(i + 1) = update;
-        }
-    }
-};
 
 struct assembler_data {
     vtx_view_t in;
