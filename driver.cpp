@@ -99,7 +99,7 @@ int load_kmers(char_view_t& out, char *fname, edge_offset_t k) {
 #else
             sscanf(f, "%u", &n);
 #endif
-            out = char_view_t("chars", n*k);
+            out = char_view_t(Kokkos::ViewAllocateWithoutInitializing("chars"), n*k);
             char_mirror = Kokkos::create_mirror_view(out);
             read_to = char_mirror.data();
         }
@@ -172,7 +172,7 @@ int main(int argc, char **argv) {
         t2.reset();
         t3.reset();
         printf("kmer size: %lu, kmers: %lu\n", kmers.extent(0), kmers.extent(0)/k);
-        vtx_view_t vtx_map = generate_hashmap(kmers, k, kmers.extent(0)/k);
+        edge_view_t vtx_map = generate_hashmap(kmers, k, kmers.extent(0)/k);
         printf("kmer hashmap size: %lu\n", vtx_map.extent(0));
         printf("Time to generate hashmap: %.3f\n", t3.seconds());
         t3.reset();
@@ -193,7 +193,7 @@ int main(int argc, char **argv) {
             //    //this is likely the peak memory usage point of the program
             //    //don't need these anymore, delete them
             //    //Kokkos::resize(edge_map, 0);
-            //    Kokkos::resize(vtx_map, 0);
+                Kokkos::resize(vtx_map, 0);
             //    Kokkos::resize(kpmers, 0);
             //    //will need this later but we made a copy
             //    //Kokkos::resize(kmers, 0);
