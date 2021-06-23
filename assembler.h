@@ -133,7 +133,7 @@ vtx_view_t assemble_pruned_graph(char_view_t kmers, edge_view_t vtx_map, edge_of
     });
     Kokkos::parallel_for("write edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t u = i;
-        ordinal_t v = in(i);
+        edge_offset_t v = in(i);
         //u has one out edge (if v < n)
         //and v has one in edge (if edge_count(v) == 1)
         if(v < n && edge_count(v) == 1){
