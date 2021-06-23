@@ -206,7 +206,7 @@ struct kpmer_partitions {
     ordinal_t crosscut_size;
 };
 
-kpmer_partitions collect_buckets(std::vector<bucket_kpmers> buckets, edge_offset_t k){
+kpmer_partitions collect_buckets(std::vector<bucket_kpmers>& buckets, edge_offset_t k){
     kpmer_partitions out;
     ordinal_t bucket_count = buckets[0].buckets;
     ordinal_t cross_bucket_count = buckets[0].crosscut_buckets;
@@ -216,8 +216,10 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers> buckets, edge_offset
     vtx_mirror_t cross_bucket_row_map("bucket size", cross_bucket_count + 1);
     for(int i = 0; i < buckets.size(); i++){
         bucket_kpmers b = buckets[i];
+        auto b_kmers = b.kmers.begin();
         for(int j = 0; j < bucket_count; j++){
-            bucket_size(j) += b.buckets_row_map[j+1] - b.buckets_row_map[j];
+            bucket_size(j) += b_kmers->extent(0)/k;
+            b_kmers++;
         }
     }
     for(int i = 0; i < bucket_count; i++){
@@ -230,25 +232,24 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers> buckets, edge_offset
         edge_offset_t transfer_loc = 0;
         ordinal_t bucket_kmer_count = 0;
         for(int i = 0; i < buckets.size(); i++){
-            bucket_kpmers b = buckets[i];
-            edge_offset_t transfer_start = buckets[i].buckets_row_map[j]*k;
-            edge_offset_t transfer_end = buckets[i].buckets_row_map[j + 1]*k;
-            edge_offset_t transfer_size = transfer_end - transfer_start;
-            edge_offset_t local_bucket_size = buckets[i].buckets_row_map[j+1] - buckets[i].buckets_row_map[j];
+            bucket_kpmers& b = buckets[i];
+            char_mirror_t source = b.kmers.front();
+            b.kmers.pop_front();
+            edge_offset_t transfer_size = source.extent(0);
             Kokkos::parallel_for("update cross ids", host_policy(b.crosscut_row_map[j*bucket_count], b.crosscut_row_map[(j+1)*bucket_count]), KOKKOS_LAMBDA(const ordinal_t i){
                 if(b.cross_ids(i) != ORD_MAX){
                     b.cross_ids(i) += bucket_kmer_count;
                 }
             });
-            bucket_kmer_count += buckets[i].buckets_row_map[j+1] - buckets[i].buckets_row_map[j];
+            bucket_kmer_count += transfer_size / k;
             if(transfer_size > 0){
                 char_mirror_t dest = Kokkos::subview(kmer_bucket, std::make_pair(transfer_loc, transfer_loc + transfer_size));
-                char_mirror_t source = Kokkos::subview(buckets[i].kmers, std::make_pair(transfer_start, transfer_end));
                 Kokkos::deep_copy(dest, source);
                 transfer_loc += transfer_size;
             }
         }
         all_kmers.push_back(kmer_bucket);
+        printf("Formed bucket %i\n", j);
     }
     for(int i = 0; i < buckets.size(); i++){
         bucket_kpmers b = buckets[i];
@@ -306,7 +307,7 @@ out_t load_kmers(char *fname, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_
 
     size_t sz = getFileLength(fname);
 
-    size_t chunk_size = sz / 16;
+    size_t chunk_size = sz / 32;
     size_t offset = 0;
     // Create a buffer for file
     char* s = new char[chunk_size];

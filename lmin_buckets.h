@@ -32,7 +32,7 @@ struct array_type {
     }
 };
 
-const int large_buckets = 16;
+const int large_buckets = 32;
 using reduce_t = array_type<unitig_compact::ordinal_t, large_buckets>;
 namespace Kokkos { //reduction identity must be defined in Kokkos namespace
    template<>
@@ -107,8 +107,7 @@ struct bucket_kmers {
 };
 
 struct bucket_kpmers {
-    char_mirror_t kmers;
-    vtx_mirror_t buckets_row_map;
+    std::list<char_mirror_t> kmers;
     ordinal_t buckets;
     ordinal_t size;
     char_view_t crosscut;
@@ -470,19 +469,25 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(char_view_t& kmers, edge_offset_t 
     }
     printf("Wrote partitioned kmers in %.3f seconds\n", t.seconds());
     t.reset();
-    bucket_kpmers output;
-    output.kmers = Kokkos::create_mirror_view(kmers_partitioned);
-    Kokkos::deep_copy(output.kmers, kmers_partitioned);
-    output.buckets_row_map = buckets_m;
-    output.buckets = large_buckets;
-    output.size = buckets_m(large_buckets);
-    output.crosscut = crosscut_partitioned;
-    output.cross_ids = Kokkos::create_mirror_view(cross_ids);
-    Kokkos::deep_copy(output.cross_ids, cross_ids);
-    output.crosscut_row_map = crosscut_buckets_m;
-    output.crosscut_buckets = large_buckets*large_buckets;
-    output.crosscut_size = crosscut_buckets_m(large_buckets*large_buckets);
-    return output;
+    {
+        //prevent lambdas from trying to capture output.kmers (a std::vector)
+        bucket_kpmers output;
+        for(int i = 0; i < large_buckets; i++){
+            char_mirror_t kmer_bucket("kmer bucket", k*(buckets_m(i + 1) - buckets_m(i)));
+            char_view_t kmer_bucket_dev = Kokkos::subview(kmers_partitioned, std::make_pair(k*buckets_m(i), k*buckets_m(i+1)));
+            Kokkos::deep_copy(kmer_bucket, kmer_bucket_dev);
+            output.kmers.push_back(kmer_bucket);
+        }
+        output.buckets = large_buckets;
+        output.size = buckets_m(large_buckets);
+        output.crosscut = crosscut_partitioned;
+        output.cross_ids = Kokkos::create_mirror_view(cross_ids);
+        Kokkos::deep_copy(output.cross_ids, cross_ids);
+        output.crosscut_row_map = crosscut_buckets_m;
+        output.crosscut_buckets = large_buckets*large_buckets;
+        output.crosscut_size = crosscut_buckets_m(large_buckets*large_buckets);
+        return output;
+    }
 }
 
 }
