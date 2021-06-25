@@ -206,6 +206,25 @@ struct kpmer_partitions {
     ordinal_t crosscut_size;
 };
 
+char_view_t uncompress_kmers(char_view_t comped, edge_offset_t k){
+    edge_offset_t k_pad = ((k + 3) / 4) * 4;
+    edge_offset_t comp_size = k_pad / 4;
+    ordinal_t kmers_in_bucket = comped.extent(0) / comp_size;
+    printf("kmers in bucket: %u\n", kmers_in_bucket);
+    char_view_t kmers("kmers", kmers_in_bucket * k);
+    Kokkos::parallel_for("uncompress kmers", kmers_in_bucket * k_pad, KOKKOS_LAMBDA(const edge_offset_t x){
+        const char char_map[4] = { 'A', 'C', 'G', 'T' };
+        if(x % k_pad < k){
+            char byte = comped(x / 4);
+            byte = (byte >> (6 - 2*(x & 3))) & 3;
+            edge_offset_t i = (x / k_pad) * k;
+            i += (x % k_pad);
+            kmers(i) = char_map[byte];
+        }
+    });
+    return kmers;
+}
+
 kpmer_partitions collect_buckets(std::vector<bucket_kpmers>& buckets, edge_offset_t k){
     kpmer_partitions out;
     ordinal_t bucket_count = buckets[0].buckets;
@@ -214,11 +233,13 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers>& buckets, edge_offse
     vtx_mirror_t cross_bucket_size("bucket size", cross_bucket_count);
     vtx_mirror_t bucket_row_map("bucket size", bucket_count + 1);
     vtx_mirror_t cross_bucket_row_map("bucket size", cross_bucket_count + 1);
+    edge_offset_t k_pad = ((k + 3) / 4) * 4;
+    edge_offset_t comp_size = k_pad / 4;
     for(int i = 0; i < buckets.size(); i++){
         bucket_kpmers b = buckets[i];
         auto b_kmers = b.kmers.begin();
         for(int j = 0; j < bucket_count; j++){
-            bucket_size(j) += b_kmers->extent(0)/k;
+            bucket_size(j) += b_kmers->extent(0)/comp_size;
             b_kmers++;
         }
     }
@@ -228,7 +249,7 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers>& buckets, edge_offse
     ordinal_t total_size = bucket_row_map(bucket_count);
     std::vector<char_mirror_t> all_kmers;
     for(int j = 0; j < bucket_count; j++){
-        char_mirror_t kmer_bucket("kmer bucket", bucket_size(j)*k);
+        char_mirror_t kmer_bucket("kmer bucket", bucket_size(j)*comp_size);
         edge_offset_t transfer_loc = 0;
         ordinal_t bucket_kmer_count = 0;
         for(int i = 0; i < buckets.size(); i++){
@@ -241,7 +262,7 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers>& buckets, edge_offse
                     b.cross_ids(i) += bucket_kmer_count;
                 }
             });
-            bucket_kmer_count += transfer_size / k;
+            bucket_kmer_count += transfer_size / comp_size;
             if(transfer_size > 0){
                 char_mirror_t dest = Kokkos::subview(kmer_bucket, std::make_pair(transfer_loc, transfer_loc + transfer_size));
                 Kokkos::deep_copy(dest, source);
@@ -307,7 +328,7 @@ out_t load_kmers(char *fname, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_
 
     size_t sz = getFileLength(fname);
 
-    size_t chunk_size = sz / 32;
+    size_t chunk_size = sz / 16;
     size_t offset = 0;
     // Create a buffer for file
     char* s = new char[chunk_size];
@@ -522,6 +543,7 @@ int main(int argc, char **argv) {
             ordinal_t kmer_count = kmer_b.part_sizes(i);
             char_view_t kmer_s("kmer part", kmer_b.kmers[i].extent(0));
             Kokkos::deep_copy(kmer_s, kmer_b.kmers[i]);
+            kmer_s = uncompress_kmers(kmer_s, k);
             char_mirror_t cross_s_m = Kokkos::subview(kmer_b.crosscut, std::make_pair(kmer_b.crosscut_row_map(bucket_count*i)*k, kmer_b.crosscut_row_map(bucket_count*(i+1))*k));
             vtx_mirror_t cross_ids_m = Kokkos::subview(kmer_b.cross_ids, std::make_pair(kmer_b.crosscut_row_map(bucket_count*i), kmer_b.crosscut_row_map(bucket_count*(i+1))));
             char_view_t cross_s("cross s", cross_s_m.extent(0));
@@ -628,6 +650,7 @@ int main(int argc, char **argv) {
             //move data to device
             char_view_t kmer_s("kmer part", kmer_b.kmers[i].extent(0));
             Kokkos::deep_copy(kmer_s, kmer_b.kmers[i]);
+            kmer_s = uncompress_kmers(kmer_s, k);
             c_output c = c_outputs[i];
             ordinal_t glue_size = c.cross.numRows();
             vtx_view_t repart_s = Kokkos::subview(repartition_map, std::make_pair(glue_offset, glue_offset + glue_size));
