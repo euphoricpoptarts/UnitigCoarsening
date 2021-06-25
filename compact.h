@@ -5,7 +5,7 @@
 namespace unitig_compact{
 
 void write_to_f(char_view_t unitigs, std::string fname){
-    char_mirror_t chars("chars", unitigs.extent(0));
+    char_mirror_t chars = Kokkos::create_mirror_view(unitigs);
     Kokkos::deep_copy(chars, unitigs);
     std::ofstream of(fname, std::ofstream::out | std::ofstream::app);
     //FILE *of = fopen(fname.c_str(), "a");
