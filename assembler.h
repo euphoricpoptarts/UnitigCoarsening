@@ -5,7 +5,7 @@ namespace unitig_compact {
 //fnv hash algorithm
 //we going deep
 KOKKOS_INLINE_FUNCTION
-uint32_t fnv(const char_view_t chars, edge_offset_t offset, edge_offset_t k){
+uint32_t fnv(const char_view_t& chars, const edge_offset_t offset, const edge_offset_t k){
     uint32_t hash = 2166136261U;
     for(edge_offset_t i = offset; i < offset + k; i++)
     {
@@ -17,7 +17,7 @@ uint32_t fnv(const char_view_t chars, edge_offset_t offset, edge_offset_t k){
 
 //gotta do everything myself
 KOKKOS_INLINE_FUNCTION
-bool cmp(const char_view_t s1_chars, const char_view_t s2_chars, const edge_offset_t s1_offset, const edge_offset_t s2_offset, const edge_offset_t k){
+bool cmp(const char_view_t& s1_chars, const char_view_t& s2_chars, const edge_offset_t s1_offset, const edge_offset_t s2_offset, const edge_offset_t k){
     for(edge_offset_t i = 0; i < k; i++){
         if(s1_chars(s1_offset + i) != s2_chars(s2_offset + i)){
             return false;
@@ -28,7 +28,7 @@ bool cmp(const char_view_t s1_chars, const char_view_t s2_chars, const edge_offs
 
 //check if vtx found in edge_chars at offset exists in vtx_chars using a hashmap
 KOKKOS_INLINE_FUNCTION
-ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_map, const char_view_t vtx_chars2, edge_offset_t offset, edge_offset_t k, ordinal_t size){
+ordinal_t find_vtx_from_edge(const char_view_t& vtx_chars, const vtx_view_t& vtx_map, const char_view_t& vtx_chars2, const edge_offset_t offset, const edge_offset_t k, const ordinal_t size){
     uint32_t hash = fnv(vtx_chars2, offset, k - 1);
     uint32_t hash_cast = vtx_map.extent(0) - 1;
     hash = hash & hash_cast;
@@ -54,7 +54,7 @@ ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_m
 
 //check if vtx found in edge_chars at offset exists in vtx_chars using a hashmap
 KOKKOS_INLINE_FUNCTION
-ordinal_t find_vtx_from_edge(const char_view_t vtx_chars, const vtx_view_t vtx_map, edge_offset_t offset, edge_offset_t k, ordinal_t size){
+ordinal_t find_vtx_from_edge(const char_view_t& vtx_chars, const vtx_view_t& vtx_map, const edge_offset_t offset, const edge_offset_t k, const ordinal_t size){
     uint32_t hash = fnv(vtx_chars, offset, k - 1);
     uint32_t hash_cast = vtx_map.extent(0) - 1;
     hash = hash & hash_cast;

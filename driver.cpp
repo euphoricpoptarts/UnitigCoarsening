@@ -526,7 +526,12 @@ int main(int argc, char **argv) {
             vtx_view_t cross_ids("cross ids", cross_ids_m.extent(0));
             Kokkos::deep_copy(cross_ids, cross_ids_m);
             Kokkos::deep_copy(cross_s, cross_s_m);
+            printf("Time to move bucket to device: %.3fs\n", t2.seconds());
+            t2.reset();
+            Kokkos::Timer t5;
             generate_hashmap(hashmap, kmer_s, k, kmer_count);
+            printf("Time to generate hashmap: %.3fs\n", t5.seconds());
+            t5.reset();
             vtx_view_t g_s("graph portion", kmer_count);
             Kokkos::parallel_for("init g", kmer_count, KOKKOS_LAMBDA(const ordinal_t i){
                 g_s(i) = ORD_MAX;
