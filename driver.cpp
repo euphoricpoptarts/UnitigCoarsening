@@ -470,16 +470,11 @@ int main(int argc, char **argv) {
         pool_t rand_pool(std::time(nullptr));
         ordinal_t lmin_buckets = 1;
         lmin_buckets <<= 2*l;
+        //generate a random priority table for the lmers
         vtx_view_t lmin_bucket_map = generate_permutation(lmin_buckets, rand_pool);
+        //load and partition kmers into buckets
         kpmer_partitions kmer_b = load_kmers<bucket_kpmers, kpmer_partitions>(kmer_fname, k, l, lmin_bucket_map);
-        printf("Read input data in %.3fs\n", t.seconds());
-        //t.reset();
-        //t2.reset();
-        //bucket_kmers kmer_b = find_l_minimizer(kmers, k, l, lmin_bucket_map);
-        //Kokkos::resize(kmers, 0);
-        //bucket_kpmers kpmer_b = find_l_minimizer_edge(kpmers, k + 1, l, lmin_bucket_map);
-        //Kokkos::resize(kpmers, 0);
-        //printf("Computed l-minimizers in %.3f\n", t.seconds());
+        printf("Read input data and bucketed by l-minimizers in %.3fs\n", t.seconds());
         t.reset();
         ////t2.reset();
         ////t3.reset();
@@ -492,6 +487,7 @@ int main(int argc, char **argv) {
 #endif
         ordinal_t largest_n = 0, largest_np = 0, largest_cross = 0;
         ordinal_t bucket_count = kmer_b.kmers.size();
+        //calculate the largest bucket
         for(int i = 0; i < bucket_count; i++){
             ordinal_t kmer_count = kmer_b.part_sizes(i);
             ordinal_t cross_count = kmer_b.crosscut_row_map(bucket_count*(i + 1)) - kmer_b.crosscut_row_map(bucket_count*i);
@@ -507,16 +503,22 @@ int main(int argc, char **argv) {
             }
         }
         printf("largest_np: %u\n", largest_np);
+        //init hashmap and related datastructures
         vtx_view_t hashmap = init_hashmap(largest_n);
         assembler_data assembler = init_assembler(largest_n, largest_np);
         ExperimentLoggerUtil experiment;
         coarsener_t coarsener;
         using c_output = typename coarsener_t::coarsen_output;
+        //contains the inter-bucket edges
         std::vector<crosses> cross_list;
+        //contains the output of the coarsenings
         std::vector<c_output> c_outputs;
         ordinal_t cross_offset = 0;
+        //for each bucket, assemble the local graph, and coarsen it
+        //track vertices of inter-bucket edges in each bucket, and translate them to coarse vtx ids
         for(int i = 0; i < bucket_count; i++){
             Kokkos::Timer t2;
+            //move data to device
             ordinal_t kmer_count = kmer_b.part_sizes(i);
             char_view_t kmer_s("kmer part", kmer_b.kmers[i].extent(0));
             Kokkos::deep_copy(kmer_s, kmer_b.kmers[i]);
@@ -529,6 +531,7 @@ int main(int argc, char **argv) {
             printf("Time to move bucket to device: %.3fs\n", t2.seconds());
             t2.reset();
             Kokkos::Timer t5;
+            //insert k-1 prefixes into hashmap
             generate_hashmap(hashmap, kmer_s, k, kmer_count);
             printf("Time to generate hashmap: %.3fs\n", t5.seconds());
             t5.reset();
@@ -536,11 +539,13 @@ int main(int argc, char **argv) {
             Kokkos::parallel_for("init g", kmer_count, KOKKOS_LAMBDA(const ordinal_t i){
                 g_s(i) = ORD_MAX;
             });
+            //assemble local graph by looking up k-1 suffixes inside hashmap
             crosses c = assemble_pruned_graph(assembler, kmer_s, hashmap, cross_s, cross_ids, k, g_s);
             cross_list.push_back(c);
             printf("Time to assemble bucket %i: %.4f\n", i, t2.seconds());
             //printf("Bucket %i has %u kmers and %u k+1-mers\n", i, kmer_count, kpmer_count);
             t2.reset();
+            //coarsen local graph and relabel vertices of inter-bucket edges
             c_output x = coarsener.coarsen_de_bruijn_full_cycle(g_s, c, cross_offset, experiment);
             c_outputs.push_back(x);
             printf("Time to coarsen bucket %i: %.4f\n", i, t2.seconds());
@@ -556,18 +561,24 @@ int main(int argc, char **argv) {
         Kokkos::parallel_for("init g", cross_offset, KOKKOS_LAMBDA(const ordinal_t i){
             small_g(i) = ORD_MAX;
         });
+        //assemble the graph induced by the inter-bucket edges, maximally coarsened within each bucket
         for(int i = 0; i < bucket_count; i++){
             for(int j = 0; j < bucket_count; j++){
+                //handle edges from bucket i to bucket j
                 if(i != j){
                     ordinal_t out_bucket_begin = kmer_b.crosscut_row_map(bucket_count*i + j) - kmer_b.crosscut_row_map(bucket_count*i);
                     ordinal_t in_bucket_begin = kmer_b.crosscut_row_map(bucket_count*j + i) - kmer_b.crosscut_row_map(bucket_count*j);
                     ordinal_t bucket_size = kmer_b.crosscut_row_map(bucket_count*i + j + 1) - kmer_b.crosscut_row_map(bucket_count*i + j);
+                    //source vertices in bucket i
                     vtx_view_t out_cross = cross_list[i].out;
+                    //destination vertices in bucket j
                     vtx_view_t in_cross = cross_list[j].in;
                     ordinal_t local_count = 0;
                     Kokkos::parallel_reduce("fill crosses", bucket_size, KOKKOS_LAMBDA(const ordinal_t x, ordinal_t& update){
                         ordinal_t u = out_cross(out_bucket_begin + x);
                         ordinal_t v = in_cross(in_bucket_begin + x);
+                        //both vertices must be known in order to assign an edge
+                        //one may be known but not the other if one vertex had multiple edges 
                         if(u != ORD_MAX && v != ORD_MAX){
                             small_g(u) = v;
                             update++;
@@ -577,12 +588,16 @@ int main(int argc, char **argv) {
                 }
             }
         }
+        //coarsen the final graph
+        //for k = 31, this will have about 6-7% as many vertices as kmers in the original input
+        //for k = 63, this is about 3-4%
         graph_type small_g_result = coarsener.coarsen_de_bruijn_full_cycle_final(small_g, experiment);
         vtx_view_t repartition_map("repartition", cross_offset);
         vtx_view_t output_mapping("output mapping", cross_offset);
         ordinal_t part_size = (small_g_result.entries.extent(0) + bucket_count) / bucket_count;
         vtx_view_t part_offsets_dev("part offsets", bucket_count + 1);
         vtx_mirror_t part_offsets = Kokkos::create_mirror(part_offsets_dev);
+        //assign each vertex in small_g to an output partition according to its fully coarsened id
         Kokkos::parallel_for("compute partitions", policy(small_g_result.numRows(), Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
             ordinal_t i = thread.league_rank();
             ordinal_t start = small_g_result.row_map(i);
@@ -610,6 +625,7 @@ int main(int argc, char **argv) {
         //repartition kmers according to output unitig
         for(int i = 0; i < bucket_count; i++) {
             Kokkos::Timer t4;
+            //move data to device
             char_view_t kmer_s("kmer part", kmer_b.kmers[i].extent(0));
             Kokkos::deep_copy(kmer_s, kmer_b.kmers[i]);
             c_output c = c_outputs[i];
@@ -621,12 +637,15 @@ int main(int argc, char **argv) {
             graph_type cross_glue = move_to_device(c.cross);
             printf("Time to move bucket %i's stuff to device: %.3fs\n", i, t4.seconds());
             t4.reset();
+            //write output of this bucket that does not require knowledge of other buckets
             write_unitigs2(kmer_s, k, non_cross_glue, out_fname);
             printf("Time to write bucket %i's non-crossing output: %.3fs\n", i, t4.seconds());
             t4.reset();
+            //determine output partition of each kmer that is part of an inter-bucket unitig
             bucket_glues glue_b = partition_for_output(bucket_count, cross_glue, repart_s, output_s);
             printf("Time to calculate bucket %i's crossing output partitions: %.3fs\n", i, t4.seconds());
             t4.reset();
+            //move kmers to output partitions
             glue_b = partition_kmers_for_glueing(glue_b, kmer_s, k);
             printf("Time to repartition bucket %i's kmers: %.3fs\n", i, t4.seconds());
             t4.reset();
@@ -637,12 +656,15 @@ int main(int argc, char **argv) {
         printf("Coarsened vertices reordered: %u\n", glue_offset);
         printf("Time to repartition kmers: %.3fs\n", t3.seconds());
         t3.reset();
+        //form output partitions by collecting partitions from each bucket
         final_partition f_p = collect_buckets(output_glues, k);
         ordinal_t glue_start = 0, glue_end = 0;
+        //for each output partition, form each maximal unitig and write to output
         for(int i = 0; i < bucket_count; i++){
             glue_start = part_offsets(i);
             glue_end = part_offsets(i + 1);
             vtx_view_t output_s = f_p.out_maps[i];
+            //move data to device
             Kokkos::parallel_for("modify result entries", output_s.extent(0), KOKKOS_LAMBDA(const ordinal_t i){
                 small_g_result.entries(output_s(i)) = i;
             });
@@ -658,7 +680,9 @@ int main(int argc, char **argv) {
             });
             vtx_view_t entries = Kokkos::subview(small_g_result.entries, std::make_pair(result_start, result_end));
             graph_type out_g(entries, row_map);
+            //form each maximal unitig
             graph_type blah = coarsener.compacter.collect_unitigs(move_to_device(f_p.glues[i]), out_g);
+            //write to file
             write_unitigs3(move_to_device(f_p.kmer_glues[i]), move_to_device(f_p.kmer_rows[i]), k, blah, out_fname);
         }
         //printf("glue list length: %lu\n", glue_list.size());
