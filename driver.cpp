@@ -206,20 +206,25 @@ struct kpmer_partitions {
     ordinal_t crosscut_size;
 };
 
-char_view_t uncompress_kmers(char_view_t comped, edge_offset_t k){
+char_view_t decompress_kmers(char_view_t comped, edge_offset_t k){
     edge_offset_t k_pad = ((k + 3) / 4) * 4;
     edge_offset_t comp_size = k_pad / 4;
     ordinal_t kmers_in_bucket = comped.extent(0) / comp_size;
     printf("kmers in bucket: %u\n", kmers_in_bucket);
     char_view_t kmers("kmers", kmers_in_bucket * k);
-    Kokkos::parallel_for("uncompress kmers", kmers_in_bucket * k_pad, KOKKOS_LAMBDA(const edge_offset_t x){
-        const char char_map[4] = { 'A', 'C', 'G', 'T' };
-        if(x % k_pad < k){
-            char byte = comped(x / 4);
-            byte = (byte >> (6 - 2*(x & 3))) & 3;
-            edge_offset_t i = (x / k_pad) * k;
-            i += (x % k_pad);
-            kmers(i) = char_map[byte];
+    char_mirror_t char_map_mirror("char map mirror", 4);
+    char_map_mirror(0) = 'A';
+    char_map_mirror(1) = 'C';
+    char_map_mirror(2) = 'G';
+    char_map_mirror(3) = 'T';
+    char_view_t char_map("char map", 4);
+    Kokkos::deep_copy(char_map, char_map_mirror);
+    Kokkos::parallel_for("decompress kmers", kmers_in_bucket, KOKKOS_LAMBDA(const ordinal_t x){
+        char byte = 0;
+        for(edge_offset_t i = 0; i < k; i++){
+            if((i & 3) == 0) byte = comped(x*comp_size + (i/4));
+            char shift_byte = (byte >> (2*(3 - (i & 3)))) & 3;
+            kmers(x*k + i) = char_map(shift_byte);
         }
     });
     return kmers;
@@ -290,7 +295,7 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers>& buckets, edge_offse
             ordinal_t transfer_size = buckets[i].crosscut_row_map[j+1] - buckets[i].crosscut_row_map[j];
             if(transfer_size > 0){
                 char_mirror_t transfer_to = Kokkos::subview(cross_kmers, std::make_pair(k*transfer_loc, k*(transfer_loc + transfer_size)));
-                char_view_t transfer_from = Kokkos::subview(buckets[i].crosscut, std::make_pair(buckets[i].crosscut_row_map[j] * k, k * buckets[i].crosscut_row_map[j + 1]));
+                char_mirror_t transfer_from = Kokkos::subview(buckets[i].crosscut, std::make_pair(buckets[i].crosscut_row_map[j] * k, k * buckets[i].crosscut_row_map[j + 1]));
                 vtx_mirror_t dest = Kokkos::subview(cross_ids, std::make_pair(transfer_loc, transfer_loc + transfer_size));
                 vtx_mirror_t source = Kokkos::subview(buckets[i].cross_ids, std::make_pair(buckets[i].crosscut_row_map[j], buckets[i].crosscut_row_map[j+1]));
                 Kokkos::deep_copy(transfer_to, transfer_from);
@@ -337,7 +342,7 @@ out_t load_kmers(char *fname, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_
     char* read_to = 0;
     printf("Time to init buffer: %.3f\n", t.seconds());
     t.reset();
-    char_view_t out = char_view_t("chars", chunk_size);
+    char_view_t out("chars", chunk_size);
     char_mirror = Kokkos::create_mirror_view(out);
     double bucket_time = 0;
     std::vector<bucket_t> bucketed_kmers;
@@ -543,14 +548,18 @@ int main(int argc, char **argv) {
             ordinal_t kmer_count = kmer_b.part_sizes(i);
             char_view_t kmer_s("kmer part", kmer_b.kmers[i].extent(0));
             Kokkos::deep_copy(kmer_s, kmer_b.kmers[i]);
-            kmer_s = uncompress_kmers(kmer_s, k);
+            printf("Time to move buckets to device: %.3fs\n", t2.seconds());
+            t2.reset();
+            kmer_s = decompress_kmers(kmer_s, k);
+            printf("Time to decompress kmers: %.3fs\n", t2.seconds());
+            t2.reset();
             char_mirror_t cross_s_m = Kokkos::subview(kmer_b.crosscut, std::make_pair(kmer_b.crosscut_row_map(bucket_count*i)*k, kmer_b.crosscut_row_map(bucket_count*(i+1))*k));
             vtx_mirror_t cross_ids_m = Kokkos::subview(kmer_b.cross_ids, std::make_pair(kmer_b.crosscut_row_map(bucket_count*i), kmer_b.crosscut_row_map(bucket_count*(i+1))));
             char_view_t cross_s("cross s", cross_s_m.extent(0));
             vtx_view_t cross_ids("cross ids", cross_ids_m.extent(0));
             Kokkos::deep_copy(cross_ids, cross_ids_m);
             Kokkos::deep_copy(cross_s, cross_s_m);
-            printf("Time to move bucket to device: %.3fs\n", t2.seconds());
+            printf("Time to move crossers to device: %.3fs\n", t2.seconds());
             t2.reset();
             Kokkos::Timer t5;
             //insert k-1 prefixes into hashmap
@@ -650,7 +659,7 @@ int main(int argc, char **argv) {
             //move data to device
             char_view_t kmer_s("kmer part", kmer_b.kmers[i].extent(0));
             Kokkos::deep_copy(kmer_s, kmer_b.kmers[i]);
-            kmer_s = uncompress_kmers(kmer_s, k);
+            kmer_s = decompress_kmers(kmer_s, k);
             c_output c = c_outputs[i];
             ordinal_t glue_size = c.cross.numRows();
             vtx_view_t repart_s = Kokkos::subview(repartition_map, std::make_pair(glue_offset, glue_offset + glue_size));

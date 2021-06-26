@@ -110,7 +110,7 @@ struct bucket_kpmers {
     std::list<char_mirror_t> kmers;
     ordinal_t buckets;
     ordinal_t size;
-    char_view_t crosscut;
+    char_mirror_t crosscut;
     vtx_mirror_t cross_ids;
     vtx_mirror_t crosscut_row_map;
     ordinal_t crosscut_buckets;
@@ -493,7 +493,8 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(char_view_t& kmers, edge_offset_t 
         }
         output.buckets = large_buckets;
         output.size = buckets_m(large_buckets);
-        output.crosscut = crosscut_partitioned;
+        output.crosscut = Kokkos::create_mirror_view(crosscut_partitioned);
+        Kokkos::deep_copy(output.crosscut, crosscut_partitioned);
         output.cross_ids = Kokkos::create_mirror_view(cross_ids);
         Kokkos::deep_copy(output.cross_ids, cross_ids);
         output.crosscut_row_map = crosscut_buckets_m;
