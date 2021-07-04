@@ -109,6 +109,56 @@ struct prefix_sum1
     }
 };
 
+void dump_graph(graph_type g){
+    long n = g.numRows();
+    long t_e = g.entries.extent(0);
+    edge_mirror_t row_map_x("row map", n + 1);
+    Kokkos::deep_copy(row_map_x, g.row_map);
+    vtx_mirror_t entries_x("entries", t_e);
+    Kokkos::deep_copy(entries_x, g.entries);
+    Kokkos::View<int*>::HostMirror row_map("row map", n + 1);
+    Kokkos::parallel_for("row map to int", host_policy(0, n + 1), KOKKOS_LAMBDA(const ordinal_t i){
+        row_map(i) = row_map_x(i);
+    });
+    Kokkos::View<int*>::HostMirror entries("entries", t_e);
+    Kokkos::parallel_for("entries to int", host_policy(0, t_e), KOKKOS_LAMBDA(const ordinal_t i){
+        entries(i) = entries_x(i);
+    });
+    FILE* f = fopen("debruijn.csr", "wb");
+    fwrite(&n, sizeof(long), 1, f);
+    fwrite(&t_e, sizeof(long), 1, f);
+    fwrite(row_map.data(), sizeof(int), n + 1, f);
+    fwrite(entries.data(), sizeof(int), t_e, f);
+    fclose(f);
+}
+
+graph_type convert_to_graph(vtx_view_t g){
+    ordinal_t n = g.extent(0);
+    vtx_view_t edge_count("edge count", n);
+    Kokkos::parallel_for("count edges", n, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t v = g(i);
+        if(v != ORD_MAX){
+            Kokkos::atomic_add(&edge_count(v), 1u);
+            Kokkos::atomic_add(&edge_count(i), 1u);
+        }
+    });
+    edge_view_t row_map("row map", n + 1);
+    prefix_sum1 f(edge_count, row_map);
+    Kokkos::parallel_scan("exclusive prefix sum", n, f);
+    edge_subview_t total_edges_s = Kokkos::subview(row_map, n);
+    edge_offset_t total_edges = 0;
+    Kokkos::deep_copy(total_edges, total_edges_s);
+    vtx_view_t entries("entries", total_edges);
+    Kokkos::parallel_for("write edges", n, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t v = g(i);
+        if(v != ORD_MAX){
+            entries(row_map(v + 1) - 1) = i;
+            entries(row_map(i)) = v;
+        }
+    });
+    return graph_type(entries, row_map);
+}
+
 vtx_view_t assemble_pruned_graph(char_view_t kmers, edge_view_t vtx_map, edge_offset_t k){
     ordinal_t n = kmers.extent(0) / k;
     //both the in and out edge counts for each vertex are packed into one char
