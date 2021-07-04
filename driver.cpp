@@ -333,7 +333,7 @@ out_t load_kmers(char *fname, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_
 
     size_t sz = getFileLength(fname);
 
-    size_t chunk_size = sz / 16;
+    size_t chunk_size = sz / 64;
     size_t offset = 0;
     // Create a buffer for file
     char* s = new char[chunk_size];
@@ -390,13 +390,16 @@ out_t load_kmers(char *fname, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_
             f += k;
         }
         offset += last_read;
+        printf("packed chunk in %.3f seconds\n", t.seconds());
+        t.reset();
         char_view_t out_sub = Kokkos::subview(out, std::make_pair((edge_offset_t)0, (edge_offset_t)k*kmers_read));
         char_mirror_t out_m_sub = Kokkos::subview(char_mirror, std::make_pair((edge_offset_t)0, (edge_offset_t)k*kmers_read));
         Kokkos::deep_copy(out_sub, out_m_sub);
-        printf("packed chunk in %.3f seconds\n", t.seconds());
+        printf("transferred chunk to device in %.3f seconds\n", t.seconds());
         t.reset();
-        bucket_t kmer_b = find_l_minimizer<bucket_t>(out, k, l, lmin_bucket_map, kmers_read);
+        bucket_t kmer_b = find_l_minimizer<bucket_t>(out_sub, k, l, lmin_bucket_map, kmers_read);
         bucketed_kmers.push_back(kmer_b);
+        printf("organized chunk by lmins in %.3f seconds\n", t.seconds());
         bucket_time += t.seconds();
         t.reset();
         if(total_read == n){
@@ -544,9 +547,10 @@ int main(int argc, char **argv) {
         //track vertices of inter-bucket edges in each bucket, and translate them to coarse vtx ids
         for(int i = 0; i < bucket_count; i++){
             Kokkos::Timer t2;
+            t2.reset();
             //move data to device
             ordinal_t kmer_count = kmer_b.part_sizes(i);
-            char_view_t kmer_s("kmer part", kmer_b.kmers[i].extent(0));
+            char_view_t kmer_s(Kokkos::ViewAllocateWithoutInitializing("kmer part"), kmer_b.kmers[i].extent(0));
             Kokkos::deep_copy(kmer_s, kmer_b.kmers[i]);
             printf("Time to move buckets to device: %.3fs\n", t2.seconds());
             t2.reset();

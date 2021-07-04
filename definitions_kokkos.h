@@ -78,6 +78,7 @@ namespace unitig_compact {
     using wgt_mirror_t = typename wgt_view_t::HostMirror;
     using policy = Kokkos::TeamPolicy<>;
     using r_policy = Kokkos::RangePolicy<>;
+    using r_policy_edge = Kokkos::RangePolicy<Kokkos::IndexType<edge_offset_t>, typename Device::execution_space>;
     using rand_view_t = typename Kokkos::View<uint64_t*, Device>;
     using member = typename policy::member_type;
     using pool_t = Kokkos::Random_XorShift64_Pool<>;

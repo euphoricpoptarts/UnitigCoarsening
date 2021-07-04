@@ -32,7 +32,7 @@ struct array_type {
     }
 };
 
-const int large_buckets = 16;
+const int large_buckets = 64;
 using reduce_t = array_type<unitig_compact::ordinal_t, large_buckets>;
 namespace Kokkos { //reduction identity must be defined in Kokkos namespace
    template<>
@@ -467,7 +467,7 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(char_view_t& kmers, edge_offset_t 
             }
         });
     }
-    printf("Wrote partitioned kmers in %.3f seconds\n", t.seconds());
+    //printf("Wrote partitioned kmers in %.3f seconds\n", t.seconds());
     t.reset();
     edge_offset_t k_pad = ((k + 3) / 4) * 4;
     edge_offset_t comp_size = k_pad / 4;
