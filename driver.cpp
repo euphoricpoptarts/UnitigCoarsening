@@ -159,7 +159,7 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
     char *kmer_fname = argv[1];
-    char *kpmer_fname = argv[2];
+    //char *kpmer_fname = argv[2];
     edge_offset_t k = atoi(argv[3]);
     std::string out_fname(argv[4]);
     Kokkos::initialize();
@@ -181,6 +181,8 @@ int main(int argc, char **argv) {
         ExperimentLoggerUtil experiment;
         {
             vtx_view_t g = assemble_pruned_graph(kmers, vtx_map, k);
+            //graph_type gx = convert_to_graph(g);
+            //dump_graph(gx);
             using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
             coarsener_t coarsener;
             //{

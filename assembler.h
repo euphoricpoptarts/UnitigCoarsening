@@ -116,19 +116,19 @@ void dump_graph(graph_type g){
     Kokkos::deep_copy(row_map_x, g.row_map);
     vtx_mirror_t entries_x("entries", t_e);
     Kokkos::deep_copy(entries_x, g.entries);
-    Kokkos::View<int*>::HostMirror row_map("row map", n + 1);
+    Kokkos::View<unsigned int*>::HostMirror row_map("row map", n + 1);
     Kokkos::parallel_for("row map to int", host_policy(0, n + 1), KOKKOS_LAMBDA(const ordinal_t i){
         row_map(i) = row_map_x(i);
     });
-    Kokkos::View<int*>::HostMirror entries("entries", t_e);
+    Kokkos::View<unsigned int*>::HostMirror entries("entries", t_e);
     Kokkos::parallel_for("entries to int", host_policy(0, t_e), KOKKOS_LAMBDA(const ordinal_t i){
         entries(i) = entries_x(i);
     });
     FILE* f = fopen("debruijn.csr", "wb");
     fwrite(&n, sizeof(long), 1, f);
     fwrite(&t_e, sizeof(long), 1, f);
-    fwrite(row_map.data(), sizeof(int), n + 1, f);
-    fwrite(entries.data(), sizeof(int), t_e, f);
+    fwrite(row_map.data(), sizeof(unsigned int), n + 1, f);
+    fwrite(entries.data(), sizeof(unsigned int), t_e, f);
     fclose(f);
 }
 
