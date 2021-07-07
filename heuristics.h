@@ -113,113 +113,96 @@ public:
     //hn is a list of vertices such that vertex i wants to aggregate with vertex hn(i)
     ordinal_t parallel_map_construct(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t hn, ExperimentLoggerUtil& experiment) {
 
-        ordinal_t perm_length = n;
         Kokkos::View<ordinal_t, Device> nvertices_coarse("nvertices");
         //coarse vertex 0 is used to map vertices with no edges
-        //coarse vertex 1 is used to map vertices with edges outside it's partition
         ordinal_t nvc = 1;
         Kokkos::deep_copy(nvertices_coarse, nvc);
 
-        int swap = 1;
-        //find vertices that must be aggregated
-        vtx_view_t rem_vtx;
-        int count = 0;
         //construct mapping using heaviest edges
-        while (perm_length > 0) {
-            Kokkos::Timer timer;
-            Kokkos::parallel_for("compute mappings", policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i) {
-                ordinal_t u;
-                //on first pass we don't have a set of remaining vertices
-                if(count == 0){
-                    u = i;
-                } else {
-                    u = rem_vtx(i);
+        Kokkos::parallel_for("compute mappings", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u) {
+            ordinal_t v = hn(u);
+            if (v != ORD_MAX) {
+                bool success = false;
+                //break cycles (usually of length 2)
+                //cycles can be longer in the case of erroneous kmers
+                if(u > v){
+                    success = true;
                 }
-                //v can be ORD_MAX on the first pass, but shouldn't be on following passes
-                ordinal_t v = hn(u);
-                int condition = u < v;
-                //need to enforce an ordering condition to allow hard-stall conditions to be broken
-                //but these hard-stall conditions are rare; so we wait to break them until a few iterations have occurred
-                if (v != ORD_MAX && (condition ^ swap)) {
+                while(!success){
                     if (Kokkos::atomic_compare_exchange_strong(&vcmap(u), ORD_MAX, ORD_MAX - 1)) {
-                        if (u == v || Kokkos::atomic_compare_exchange_strong(&vcmap(v), ORD_MAX, ORD_MAX - 2)) {
-                            //do nothing here
+                        if (Kokkos::atomic_compare_exchange_strong(&vcmap(v), ORD_MAX, ORD_MAX - 1)) {
+                            ordinal_t c = u + 1;
+                            //printf("%u\n", c);
+                            vcmap(u) = c;
+                            vcmap(v) = c;
+                            success = true;
                         }
                         else {
                             //u can join v's aggregate if it already has one
-                            if (vcmap(v) < n) {
+                            if (vcmap(v) <= n) {
                                 vcmap(u) = vcmap(v);
+                                success = true;
                             }
                             else {
                                 vcmap(u) = ORD_MAX;
                             }
                         }
+                    } else {
+                        success = true;
                     }
                 }
-            });
-            Kokkos::fence();
-            experiment.addMeasurement(ExperimentLoggerUtil::Measurement::CoarsenCAS, timer.seconds());
-            timer.reset();
-            Kokkos::View<ordinal_t, Device> old_nvc("nvertices old");
-            Kokkos::deep_copy(old_nvc, nvertices_coarse);
-            Kokkos::parallel_scan("assign aggregates", policy_t(0, perm_length), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
-                ordinal_t u;
-                if(count == 0){
-                    u = i;
-                } else {
-                    u = rem_vtx(i);
-                }
-                if(vcmap(u) == (ORD_MAX - 1)){
-                    if(final){
-                        ordinal_t cv = update + old_nvc();
-                        vcmap(u) = cv;
-                        vcmap(hn(u)) = cv;
+            }
+        });
+        //handle the ones we didn't do above
+        Kokkos::parallel_for("compute skipped mappings", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u) {
+            ordinal_t v = hn(u);
+            if (v != ORD_MAX && vcmap(u) == ORD_MAX) {
+                bool success = false;
+                while(!success){
+                    if (Kokkos::atomic_compare_exchange_strong(&vcmap(u), ORD_MAX, ORD_MAX - 1)) {
+                        if (Kokkos::atomic_compare_exchange_strong(&vcmap(v), ORD_MAX, ORD_MAX - 1)) {
+                            ordinal_t c = u + 1;
+                            //printf("%u\n", c);
+                            vcmap(u) = c;
+                            vcmap(v) = c;
+                            success = true;
+                        }
+                        else {
+                            //u can join v's aggregate if it already has one
+                            if (vcmap(v) <= n) {
+                                vcmap(u) = vcmap(v);
+                                success = true;
+                            }
+                            else {
+                                vcmap(u) = ORD_MAX;
+                            }
+                        }
+                    } else {
+                        success = true;
                     }
-                    update++;
                 }
-                if(final && (i + 1) == perm_length){
-                    nvertices_coarse() = nvertices_coarse() + update;
+            }
+        });
+        Kokkos::parallel_scan("assign aggregates", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t u, ordinal_t& update, const bool final){
+            if(vcmap(u) - 1 == u){
+                if(final){
+                    ordinal_t cv = update + 1;
+                    vcmap(u) = cv;
                 }
-            });
-            Kokkos::fence();
-            experiment.addMeasurement(ExperimentLoggerUtil::Measurement::CoarsenLabel, timer.seconds());
-            timer.reset();
-            //add the ones that failed to be reprocessed next round
-            ordinal_t next_length = 0;
-            Kokkos::parallel_reduce("count vtx not already mapped", policy_t(0, perm_length), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update) {
-                ordinal_t u;
-                if(count == 0){
-                    u = i;
-                } else {
-                    u = rem_vtx(i);
-                }
-                if (vcmap(u) >= ORD_MAX - 2) {
-                    update++;
-                }
-            }, next_length);
-            vtx_view_t next_perm("next perm", next_length);
-            Kokkos::parallel_scan("write vtx not already mapped", policy_t(0, perm_length), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final) {
-                ordinal_t u;
-                if(count == 0){
-                    u = i;
-                } else {
-                    u = rem_vtx(i);
-                }
-                if (vcmap(u) >= ORD_MAX - 2) {
-                    if(final){
-                        next_perm(update) = u;
-                    }
-                    update++;
-                }
-            });
-            Kokkos::fence();
-            swap = swap ^ 1;
-            perm_length = next_length;
-            rem_vtx = next_perm;
-            experiment.addMeasurement(ExperimentLoggerUtil::Measurement::CoarsenRepeat, timer.seconds());
-            timer.reset();
-            count++;
-        }
+                update++;
+            } else if(vcmap(u) > 0 && final){
+                vcmap(u) = vcmap(u) - 1 + n;
+            }
+            if(final && (u + 1) == n){
+                nvertices_coarse() = nvertices_coarse() + update;
+            }
+        });
+        Kokkos::parallel_for("propagate aggregates", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u) {
+            if(vcmap(u) >= n) {
+                ordinal_t c_id = vcmap(u) - n;
+                vcmap(u) = vcmap(c_id);
+            }
+        });
         ordinal_t nc = 0;
         Kokkos::deep_copy(nc, nvertices_coarse);
         return nc;
