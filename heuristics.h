@@ -123,11 +123,7 @@ public:
             ordinal_t v = hn(u);
             if (v != ORD_MAX) {
                 bool success = false;
-                //break cycles (usually of length 2)
-                //cycles can be longer in the case of erroneous kmers
-                if(u > v){
-                    success = true;
-                }
+                int count = 0;
                 while(!success){
                     if (Kokkos::atomic_compare_exchange_strong(&vcmap(u), ORD_MAX, ORD_MAX - 1)) {
                         if (Kokkos::atomic_compare_exchange_strong(&vcmap(v), ORD_MAX, ORD_MAX - 1)) {
@@ -148,6 +144,12 @@ public:
                             }
                         }
                     } else {
+                        success = true;
+                    }
+                    count++;
+                    //break cycles (usually of length 2) when deadlock is detected
+                    //cycles can be longer in the case of erroneous kmers
+                    if(count > 10 && u > v){
                         success = true;
                     }
                 }
