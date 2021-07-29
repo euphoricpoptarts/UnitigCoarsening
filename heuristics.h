@@ -40,75 +40,11 @@ public:
             entries(_entries), nc(_nc), n(_n) {}
     };
 
-
-    template <class in, class out>
-    Kokkos::View<out*, Device> sort_order(Kokkos::View<in*, Device> array, in max, in min) {
-        typedef Kokkos::BinOp1D< Kokkos::View<in*, Device> > BinOp;
-        BinOp bin_op(array.extent(0), min, max);
-        //VERY important that final parameter is true
-        Kokkos::BinSort< Kokkos::View<in*, Device>, BinOp, exec_space, out >
-            sorter(array, bin_op, true);
-        sorter.create_permute_vector();
-        return sorter.get_permute_vector();
-    }
-
-    vtx_view_t generate_permutation(ordinal_t n, pool_t rand_pool) {
-        rand_view_t randoms("randoms", n);
-
-        Kokkos::Timer t;
-        Kokkos::parallel_for("create random entries", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i){
-            gen_t generator = rand_pool.get_state();
-            randoms(i) = generator.urand64();
-            rand_pool.free_state(generator);
-        });
-        //printf("random time: %.4f\n", t.seconds());
-        t.reset();
-
-        int t_buckets = 2*n;
-        vtx_view_t buckets("buckets", t_buckets);
-        Kokkos::parallel_for("init buckets", policy_t(0, t_buckets), KOKKOS_LAMBDA(ordinal_t i){
-            buckets(i) = ORD_MAX;
-        });
-
-        uint64_t max = std::numeric_limits<uint64_t>::max();
-        uint64_t bucket_size = max / t_buckets;
-        Kokkos::parallel_for("insert buckets", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i){
-            ordinal_t bucket = randoms(i) / bucket_size;
-            //jesus take the wheel
-            for(;; bucket++){
-                if(bucket >= t_buckets) bucket -= t_buckets;
-                if(buckets(bucket) == ORD_MAX){
-                    //attempt to insert into bucket
-                    if(Kokkos::atomic_compare_exchange_strong(&buckets(bucket), ORD_MAX, i)){
-                        break;
-                    }
-                }
-            }
-        });
-        
-        vtx_view_t permute("permutation", n);
-        Kokkos::parallel_scan("extract permutation", policy_t(0, t_buckets), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
-            if(buckets(i) != ORD_MAX){
-                if(final){
-                    permute(update) = buckets(i);
-                }
-                update++;
-            }
-        });
-
-        /*
-        uint64_t max = std::numeric_limits<uint64_t>::max();
-        typedef Kokkos::BinOp1D< rand_view_t > BinOp;
-        BinOp bin_op(n, 0, max);
-        //VERY important that final parameter is true
-        Kokkos::BinSort< rand_view_t, BinOp, exec_space, ordinal_t >
-            sorter(randoms, bin_op, true);
-        sorter.create_permute_vector();
-        */
-        //printf("sort time: %.4f\n", t.seconds());
-        t.reset();
-        return permute;//sorter.get_permute_vector();
-    }
+    struct canon_graph {
+        vtx_view_t right_edges;
+        vtx_view_t left_edges;
+        ordinal_t size;
+    };
 
     //hn is a list of vertices such that vertex i wants to aggregate with vertex hn(i)
     ordinal_t parallel_map_construct(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t hn, ExperimentLoggerUtil& experiment) {
@@ -123,14 +59,43 @@ public:
             ordinal_t v = hn(u);
             if (v != ORD_MAX) {
                 bool success = false;
-                if(hn(v) == u){
-                    //let the thread with no outgoing edge handle it
-                    if(vcmap(u) == ORD_MAX - 3){
-                        vcmap(u) = ORD_MAX;
+                int count = 0;
+                while(!success){
+                    if (Kokkos::atomic_compare_exchange_strong(&vcmap(u), ORD_MAX, ORD_MAX - 1)) {
+                        if (Kokkos::atomic_compare_exchange_strong(&vcmap(v), ORD_MAX, ORD_MAX - 1)) {
+                            ordinal_t c = u + 1;
+                            //printf("%u\n", c);
+                            vcmap(u) = c;
+                            vcmap(v) = c;
+                            success = true;
+                        }
+                        else {
+                            //u can join v's aggregate if it already has one
+                            if (vcmap(v) <= n) {
+                                vcmap(u) = vcmap(v);
+                                success = true;
+                            }
+                            else {
+                                vcmap(u) = ORD_MAX;
+                            }
+                        }
                     } else {
                         success = true;
                     }
+                    count++;
+                    //break cycles (usually of length 2) when deadlock is detected
+                    //cycles can be longer in the case of erroneous kmers
+                    if(count > 10 && u > v){
+                        success = true;
+                    }
                 }
+            }
+        });
+        //handle the ones we didn't do above
+        Kokkos::parallel_for("compute skipped mappings", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u) {
+            ordinal_t v = hn(u);
+            if (v != ORD_MAX && vcmap(u) == ORD_MAX) {
+                bool success = false;
                 while(!success){
                     if (Kokkos::atomic_compare_exchange_strong(&vcmap(u), ORD_MAX, ORD_MAX - 1)) {
                         if (Kokkos::atomic_compare_exchange_strong(&vcmap(v), ORD_MAX, ORD_MAX - 1)) {
@@ -181,38 +146,10 @@ public:
         return nc;
     }
 
-    matrix_t coarsen_mis_2(const matrix_t& g,
+    interp_t coarsen_HEC(const canon_graph g,
         ExperimentLoggerUtil& experiment) {
 
-        ordinal_t n = g.numRows();
-
-        typename matrix_t::staticcrsgraph_type::entries_type::non_const_value_type nc = 0;
-        vtx_view_t vcmap = KokkosGraph::Experimental::graph_mis2_coarsen<Device, typename matrix_t::staticcrsgraph_type::row_map_type, typename matrix_t::staticcrsgraph_type::entries_type, vtx_view_t>(g.graph.row_map, g.graph.entries, nc);
-
-        edge_view_t row_map("interpolate row map", n + 1);
-
-        Kokkos::parallel_for(policy_t(0, n + 1), KOKKOS_LAMBDA(ordinal_t u){
-            row_map(u) = u;
-        });
-
-        vtx_view_t entries("interpolate entries", n);
-        wgt_view_t values("interpolate values", n);
-        //compute the interpolation weights
-        Kokkos::parallel_for(policy_t(0, n), KOKKOS_LAMBDA(ordinal_t u){
-            entries(u) = vcmap(u);
-            values(u) = 1.0;
-        });
-
-        graph_type graph(entries, row_map);
-        matrix_t interp("interpolate", nc, values, graph);
-
-        return interp;
-    }
-
-    interp_t coarsen_HEC(const vtx_view_t g,
-        ExperimentLoggerUtil& experiment) {
-
-        ordinal_t n = g.extent(0);
+        ordinal_t n = g.size;
 
         vtx_view_t hn("heavies", n);
 
@@ -229,26 +166,18 @@ public:
         timer.reset();
 
         Kokkos::parallel_for("edge choose", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i) {
-            //i has an out edge
-            if(g(i) != ORD_MAX){
-                //only one edge is possible
-                //write its heaviest neighbor as me
-                ordinal_t v = g(i);
-                hn(v) = i;
+            if(g.right_edges(i) != ORD_MAX){
+                ordinal_t v = g.right_edges(i);
+                hn(i) = v;
+            } else if(g.left_edges(i) != ORD_MAX){
+                ordinal_t v = g.left_edges(i);
+                hn(i) = v;
             }
         });
-        Kokkos::parallel_for("edge choose", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i) {
-            //i has no in edge
+        Kokkos::parallel_for("mark singletons", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i) {
             if(hn(i) == ORD_MAX){
-                //i has an out edge
-                if(g(i) != ORD_MAX){
-                    ordinal_t v = g(i);
-                    hn(i) = v;
-                    vcmap(i) = ORD_MAX - 3;
-                } else {
-                    //no edges, assign to output vertex
-                    vcmap(i) = 0;
-                }
+                //no edges, assign to output vertex
+                vcmap(i) = 0;
             }
         });
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Heavy, timer.seconds());

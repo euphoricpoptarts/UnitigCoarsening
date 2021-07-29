@@ -172,7 +172,8 @@ int main(int argc, char **argv) {
         t2.reset();
         t3.reset();
         printf("kmer size: %lu, kmers: %lu\n", kmers.extent(0), kmers.extent(0)/k);
-        edge_view_t vtx_map = generate_hashmap(kmers, k, kmers.extent(0)/k);
+        char_view_t rcomps = generate_rcomps(kmers, k, kmers.extent(0)/k);
+        edge_view_t vtx_map = generate_hashmap(kmers, rcomps, k, kmers.extent(0)/k);
         printf("kmer hashmap size: %lu\n", vtx_map.extent(0));
         printf("Time to generate hashmap: %.3f\n", t3.seconds());
         t3.reset();
@@ -180,10 +181,9 @@ int main(int argc, char **argv) {
         char_mirror_t kmer_copy;
         ExperimentLoggerUtil experiment;
         {
-            vtx_view_t g = assemble_pruned_graph(kmers, vtx_map, k);
+            canon_graph g = assemble_pruned_graph(kmers, rcomps, vtx_map, k);
             //graph_type gx = convert_to_graph(g);
             //dump_graph(gx);
-            using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
             coarsener_t coarsener;
             //{
             //    t3.reset();

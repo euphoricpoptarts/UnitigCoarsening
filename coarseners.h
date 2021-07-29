@@ -57,6 +57,7 @@ public:
     coarsen_heuristics<ordinal_t, edge_offset_t, scalar_t, Device> mapper;
     compact_graph<ordinal_t, edge_offset_t, scalar_t, Device> compacter;
     using interp_t = typename coarsen_heuristics<ordinal_t, edge_offset_t, scalar_t, Device>::interp_t;
+    using canon_graph = typename coarsen_heuristics<ordinal_t, edge_offset_t, scalar_t, Device>::canon_graph;
     //when the results are fetched, this list is implicitly copied
     std::list<coarse_level_triple> results;
     ordinal_t coarse_vtx_cutoff = 50;
@@ -83,60 +84,37 @@ struct prefix_sum
     }
 };
 
-vtx_view_t coarsen_de_bruijn_graph(vtx_view_t g, interp_t interp){
-    ordinal_t n = g.extent(0);
-    ordinal_t nc = interp.nc - 1;
-    vtx_view_t entries("entries", nc);
+canon_graph coarsen_de_bruijn_graph(canon_graph g, interp_t interp, graph_type glue){
+    ordinal_t nc = glue.numRows();
+    vtx_view_t g1("right entries", nc);
+    vtx_view_t g2("left entries", nc);
     Kokkos::parallel_for("init entries", nc, KOKKOS_LAMBDA(const ordinal_t i){
-        entries(i) = ORD_MAX;
+        g1(i) = ORD_MAX;
+        g2(i) = ORD_MAX;
     });
-    Kokkos::parallel_for("write edges", n, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = interp.entries(i);
-        if(u > 0){
-            //u is not the null aggregate
-            ordinal_t f = g(i);
-            if(f != ORD_MAX){
-                //f is a real edge
-                //v can't be the null aggregate if an edge points to it
-                ordinal_t v = interp.entries(f);
-                if(u != v){
-                    entries(u - 1) = v - 1;
-                }
-            }
+    Kokkos::parallel_for("write edges", nc, KOKKOS_LAMBDA(const ordinal_t i){
+        edge_offset_t end = glue.row_map(i + 1) - 1;
+        ordinal_t u = glue.entries(end);
+        if(g.right_edges(u) != ORD_MAX && interp.entries(g.right_edges(u)) != i + 1){
+           g1(i) = interp.entries(g.right_edges(u)) - 1;
+        } else if(g.left_edges(u) != ORD_MAX && interp.entries(g.left_edges(u)) != i + 1){
+           g1(i) = interp.entries(g.left_edges(u)) - 1;
         }
     });
-    return entries;
-}
-
-//remove all out-edges for any vertex with more than 1 out-edge
-//remove all in-edges for any vertex with more than 1 in-edge
-//output graph contains only out-edges
-//index is out vertex, value is in vertex
-vtx_view_t prune_edges(graph_type g){
-    ordinal_t n = g.numRows();
-    vtx_view_t edge_count("in edge count", n);
-    Kokkos::parallel_for("count path edges", n, KOKKOS_LAMBDA(const ordinal_t i){
-        for(edge_offset_t j = g.row_map(i); j < g.row_map(i + 1); j++){
-            ordinal_t v = g.entries(j);
-            //count in edge for v
-            Kokkos::atomic_increment(&edge_count(v));
+    Kokkos::parallel_for("write edges", nc, KOKKOS_LAMBDA(const ordinal_t i){
+        edge_offset_t start = glue.row_map(i);
+        ordinal_t u = glue.entries(start);
+        if(g.right_edges(u) != ORD_MAX && interp.entries(g.right_edges(u)) != i + 1){
+           g2(i) = interp.entries(g.right_edges(u)) - 1;
+        } else if(g.left_edges(u) != ORD_MAX && interp.entries(g.left_edges(u)) != i + 1){
+           g2(i) = interp.entries(g.left_edges(u)) - 1;
         }
     });
-    vtx_view_t entries("pruned out entries", n);
-    Kokkos::parallel_for("init entries", n, KOKKOS_LAMBDA(const ordinal_t i){
-        entries(i) = ORD_MAX;
-    });
-    Kokkos::parallel_for("write path edges", n, KOKKOS_LAMBDA(const ordinal_t i){
-        //i must have 1 out edge
-        if(g.row_map(i + 1) - g.row_map(i) == 1){
-            ordinal_t v = g.entries(g.row_map(i));
-            //vertex v has exactly 1 in edge
-            if(edge_count(v) == 1){
-                entries(i) = v;
-            }
-        }
-    });
-    return entries;
+    canon_graph gn;
+    gn.right_edges = g1;
+    gn.left_edges = g2;
+    gn.size = nc;
+    return gn;
 }
 
 vtx_view_t transpose_null(interp_t g){
@@ -196,54 +174,65 @@ graph_type transpose_non_null(interp_t g){
     return transposed;
 }
 
-graph_type transpose_and_sort(interp_t interp, vtx_view_t g){
+graph_type transpose_and_sort(interp_t interp, canon_graph g){
     graph_type interp_transpose = transpose_non_null(interp);
     ordinal_t nc = interp_transpose.numRows();
     Kokkos::Timer timer;
     Kokkos::parallel_for("sort tranpose entries", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i){
-        //bubble-sort entries where g is a directed acyclic graph
+        //sort entries where g is a bi-directed graph
         ordinal_t vtx_id = i + 1;
         edge_offset_t start = interp_transpose.row_map(i);
         edge_offset_t end = interp_transpose.row_map(i + 1);
-        ordinal_t end_vertex = ORD_MAX;
-        //find the last vertex in the ordering
+        ordinal_t start_vertex = ORD_MAX;
+        ordinal_t next = ORD_MAX;
+        //find the first vertex in the ordering
         for(edge_offset_t x = start; x < end; x++){
             ordinal_t u = interp_transpose.entries(x);
-            if(g(u) == ORD_MAX){
+            if(g.right_edges(u) == ORD_MAX || g.left_edges(u) == ORD_MAX){
                 //last vertex in path
                 //only one fine vertex in a coarse vertex can satisfy this condition
-                interp_transpose.entries(x) = interp_transpose.entries(end - 1);
-                interp_transpose.entries(end - 1) = u;
-                end_vertex = u;
+                interp_transpose.entries(x) = interp_transpose.entries(start);
+                interp_transpose.entries(start) = u;
+                start_vertex = u;
+                next = g.right_edges(u);
+                if(next == ORD_MAX){
+                    next = g.left_edges(u);
+                }
                 break;
             } else {
-                ordinal_t v = g(u);
+                ordinal_t v = g.right_edges(u);
                 if(interp.entries(v) != vtx_id){
                     //last vertex in path contained in this coarse vertex
                     //only one fine vertex in a coarse vertex can satisfy either this or the previous condition
-                    interp_transpose.entries(x) = interp_transpose.entries(end - 1);
-                    interp_transpose.entries(end - 1) = u;
-                    end_vertex = u;
+                    interp_transpose.entries(x) = interp_transpose.entries(start);
+                    interp_transpose.entries(start) = u;
+                    start_vertex = u;
+                    next = g.left_edges(u);
+                    break;
+                }
+                v = g.left_edges(u);
+                if(interp.entries(v) != vtx_id){
+                    //last vertex in path contained in this coarse vertex
+                    //only one fine vertex in a coarse vertex can satisfy either this or the previous condition
+                    interp_transpose.entries(x) = interp_transpose.entries(start);
+                    interp_transpose.entries(start) = u;
+                    start_vertex = u;
+                    next = g.right_edges(u);
                     break;
                 }
             }
         }
-        end--;
+        start++;
         while(end > start){
-            //find the vertex before end_vertex
-            for(edge_offset_t x = start; x < end; x++){
-                ordinal_t u = interp_transpose.entries(x);
-                //u MUST have an edge
-                //and v must be in the same aggregate
-                ordinal_t v = g(u);
-                if(v == end_vertex){
-                    interp_transpose.entries(x) = interp_transpose.entries(end - 1);
-                    interp_transpose.entries(end - 1) = u;
-                    end_vertex = u;
-                    break;
-                }
+            interp_transpose.entries(start) = next;
+            if(g.right_edges(next) == start_vertex){
+                start_vertex = next;
+                next = g.right_edges(next);
+            } else {
+                start_vertex = next;
+                next = g.left_edges(next);
             }
-            end--;
+            start++;
         }
     });
     printf("Time to sort transposed entries: %.3f\n", timer.seconds());
@@ -262,16 +251,16 @@ graph_type collect_outputs_first(interp_t interp) {
     return output;
 }
 
-std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, ExperimentLoggerUtil& experiment){
+std::list<graph_type> coarsen_de_bruijn_full_cycle(canon_graph cur, ExperimentLoggerUtil& experiment){
     std::list<graph_type> glue_list;
     int count = 0;
     Kokkos::Timer timer;
     bool first = true;
     graph_type glue_last;
-    while(cur.extent(0) > 0){
+    while(cur.size > 0){
         count++;
         printf("Calculating coarse graph %d\n", count);
-        printf("input vertices: %lu\n", cur.extent(0));
+        printf("input vertices: %lu\n", cur.size);
         timer.reset();
         interp_t interp = mapper.coarsen_HEC(cur, experiment);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
@@ -290,7 +279,7 @@ std::list<graph_type> coarsen_de_bruijn_full_cycle(vtx_view_t cur, ExperimentLog
         first = false;
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::CompactGlues, timer.seconds());
         timer.reset();
-        cur = coarsen_de_bruijn_graph(cur, interp);
+        cur = coarsen_de_bruijn_graph(cur, interp, glue);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Build, timer.seconds());
         timer.reset();
     }

@@ -36,10 +36,10 @@ edge_offset_t find_vtx_from_edge(const char_view_t in_chars, const char_view_t m
     while(vtx_map(hash) != EDGE_MAX){
         edge_offset_t addr = vtx_map(hash);
         edge_offset_t actual = addr;
-        bool nullified = false;
+        //bool nullified = false;
         if(addr >= null_marker){
             addr -= null_marker;
-            nullified = true;
+            //nullified = true;
         }
         char_view_t cmp_chars = map1_chars;
         if(addr >= size){
@@ -100,7 +100,7 @@ edge_view_t generate_hashmap(char_view_t kmers, char_view_t rcomps, edge_offset_
             if(written >= null_marker){
                 written = written - null_marker;
                 if(written >= size){
-                    writen = written - size;
+                    written = written - size;
                 }
                 if(cmp(rcomps, rcomps, k*i, k*written, k - 1)){
                     //hash value matches k-1 mer
@@ -110,7 +110,7 @@ edge_view_t generate_hashmap(char_view_t kmers, char_view_t rcomps, edge_offset_
                 }
             } else {
                 if(written >= size){
-                    writen = written - size;
+                    written = written - size;
                 }
                 if(cmp(rcomps, rcomps, k*i, k*written, k - 1)){
                     //hash value matches k-1 mer
@@ -215,11 +215,6 @@ graph_type convert_to_graph(vtx_view_t g){
     return graph_type(entries, row_map);
 }
 
-struct canon_graph {
-    vtx_view_t right_edges;
-    vtx_view_t left_edges;
-};
-
 canon_graph assemble_pruned_graph(char_view_t kmers, char_view_t rcomps, edge_view_t vtx_map, edge_offset_t k){
     ordinal_t n = kmers.extent(0) / k;
     //both the in and out edge counts for each vertex are packed into one char
@@ -292,6 +287,7 @@ canon_graph assemble_pruned_graph(char_view_t kmers, char_view_t rcomps, edge_vi
     canon_graph g;
     g.right_edges = g1;
     g.left_edges = g2;
+    g.size = n;
     return g;
 }
 
