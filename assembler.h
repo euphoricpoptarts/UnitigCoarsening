@@ -229,15 +229,6 @@ canon_graph assemble_pruned_graph(char_view_t kmers, char_view_t rcomps, edge_vi
         edge_offset_t v = find_vtx_from_edge(rcomps, kmers, rcomps, vtx_map, i*k + 1, k, n);
         in2(i) = v;
     });
-    //Kokkos::parallel_for("count edges", n, KOKKOS_LAMBDA(const ordinal_t i){
-    //    edge_offset_t v = in(i);
-    //    if(v != EDGE_MAX){
-    //        if(v > n){
-    //            v = v - n;
-    //        }
-    //        Kokkos::atomic_add(&edge_count(v), (char)1);
-    //    }
-    //});
     vtx_view_t g1("pruned out entries", n);
     vtx_view_t g2("pruned out entries", n);
     Kokkos::parallel_for("init g", n, KOKKOS_LAMBDA(const ordinal_t i){
@@ -260,30 +251,77 @@ canon_graph assemble_pruned_graph(char_view_t kmers, char_view_t rcomps, edge_vi
             g2(u) = v;
         }
     });
+    ordinal_t nnz = 0;
+    Kokkos::parallel_reduce("count non nulls", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update){
+        if(g1(i) != ORD_MAX){
+            update++;
+        }
+    }, nnz);
+    printf("Non null right entries: %u\n", nnz);
+    Kokkos::parallel_reduce("count non nulls", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update){
+        if(g2(i) != ORD_MAX){
+            update++;
+        }
+    }, nnz);
+    printf("Non null left entries: %u\n", nnz);
+    vtx_view_t reset_left("reset left", n);
     Kokkos::parallel_for("confirm reverse edge", n, KOKKOS_LAMBDA(const ordinal_t i){
         edge_offset_t v = g1(i);
         if(v < n){
             if(g2(v) - n != i){
-                g1(i) = ORD_MAX;
+                reset_left(i) = 1;
             }
         } else if(v != ORD_MAX) {
-            if(g1(v - n) != i) {
-                g1(i) = ORD_MAX;
+            if(g1(v - n) - n != i) {
+                reset_left(i) = 1;
             }
         }
     });
+    vtx_view_t reset_right("reset right", n);
     Kokkos::parallel_for("confirm reverse edge", n, KOKKOS_LAMBDA(const ordinal_t i){
         edge_offset_t v = g2(i);
         if(v < n){
-            if(g2(v) - n != i){
-                g2(i) = ORD_MAX;
+            if(g2(v) != i){
+                reset_right(i) = 1;
             }
         } else if(v != ORD_MAX) {
             if(g1(v - n) != i) {
-                g2(i) = ORD_MAX;
+                reset_right(i) = 1;
             }
         }
     });
+    Kokkos::parallel_for("remove markers", n, KOKKOS_LAMBDA(const ordinal_t i){
+        if(reset_left(i) == 1){
+            g1(i) = ORD_MAX;
+        } else if(g1(i) >= n && g1(i) != ORD_MAX){
+            g1(i) -= n;
+        }
+    });
+    Kokkos::parallel_for("remove markers", n, KOKKOS_LAMBDA(const ordinal_t i){
+        if(reset_right(i) == 1){
+            g2(i) = ORD_MAX;
+        } else if(g2(i) >= n && g2(i) != ORD_MAX){
+            g2(i) -= n;
+        }
+    });
+    Kokkos::parallel_reduce("count non nulls", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update){
+        if(g1(i) != ORD_MAX){
+            update++;
+        }
+        if(g1(i) == i){
+            printf("right edge to self at %u\n", i);
+        }
+    }, nnz);
+    printf("Non null right entries: %u\n", nnz);
+    Kokkos::parallel_reduce("count non nulls", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update){
+        if(g2(i) != ORD_MAX){
+            update++;
+        }
+        if(g2(i) == i){
+            printf("left edge to self at %u\n", i);
+        }
+    }, nnz);
+    printf("Non null left entries: %u\n", nnz);
     canon_graph g;
     g.right_edges = g1;
     g.left_edges = g2;
