@@ -251,19 +251,6 @@ canon_graph assemble_pruned_graph(char_view_t kmers, char_view_t rcomps, edge_vi
             g2(u) = v;
         }
     });
-    ordinal_t nnz = 0;
-    Kokkos::parallel_reduce("count non nulls", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update){
-        if(g1(i) != ORD_MAX){
-            update++;
-        }
-    }, nnz);
-    printf("Non null right entries: %u\n", nnz);
-    Kokkos::parallel_reduce("count non nulls", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update){
-        if(g2(i) != ORD_MAX){
-            update++;
-        }
-    }, nnz);
-    printf("Non null left entries: %u\n", nnz);
     vtx_view_t reset_left("reset left", n);
     Kokkos::parallel_for("confirm reverse edge", n, KOKKOS_LAMBDA(const ordinal_t i){
         edge_offset_t v = g1(i);
@@ -296,6 +283,10 @@ canon_graph assemble_pruned_graph(char_view_t kmers, char_view_t rcomps, edge_vi
         } else if(g1(i) >= n && g1(i) != ORD_MAX){
             g1(i) -= n;
         }
+        if(g1(i) == i){
+            //remove self-loop edges
+            g1(i) = ORD_MAX;
+        }
     });
     Kokkos::parallel_for("remove markers", n, KOKKOS_LAMBDA(const ordinal_t i){
         if(reset_right(i) == 1){
@@ -303,25 +294,11 @@ canon_graph assemble_pruned_graph(char_view_t kmers, char_view_t rcomps, edge_vi
         } else if(g2(i) >= n && g2(i) != ORD_MAX){
             g2(i) -= n;
         }
-    });
-    Kokkos::parallel_reduce("count non nulls", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update){
-        if(g1(i) != ORD_MAX){
-            update++;
-        }
-        if(g1(i) == i){
-            printf("right edge to self at %u\n", i);
-        }
-    }, nnz);
-    printf("Non null right entries: %u\n", nnz);
-    Kokkos::parallel_reduce("count non nulls", n, KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update){
-        if(g2(i) != ORD_MAX){
-            update++;
-        }
         if(g2(i) == i){
-            printf("left edge to self at %u\n", i);
+            //remove self-loop edges
+            g2(i) = ORD_MAX;
         }
-    }, nnz);
-    printf("Non null left entries: %u\n", nnz);
+    });
     canon_graph g;
     g.right_edges = g1;
     g.left_edges = g2;
