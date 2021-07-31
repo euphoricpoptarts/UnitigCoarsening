@@ -98,6 +98,7 @@ edge_view_t generate_hashmap(char_view_t kmers, char_view_t rcomps, edge_offset_
         while(!success){
             char_view_t compare = kmers;
             edge_offset_t written = out(hash);
+            edge_offset_t write_check = written;
             if(written >= null_marker){
                 written = written - null_marker;
                 if(written >= size){
@@ -118,7 +119,7 @@ edge_view_t generate_hashmap(char_view_t kmers, char_view_t rcomps, edge_offset_
                 if(cmp(rcomps, compare, k*i, k*written, k - 1)){
                     //hash value matches k-1 mer
                     //nullify it
-                    Kokkos::atomic_compare_exchange_strong(&out(hash), written, i + size + null_marker);
+                    Kokkos::atomic_compare_exchange_strong(&out(hash), write_check, i + size + null_marker);
                     break;
                 }
             } 
@@ -256,7 +257,7 @@ canon_graph assemble_pruned_graph(char_view_t kmers, char_view_t rcomps, edge_vi
     });
     vtx_view_t reset_left("reset left", n);
     Kokkos::parallel_for("confirm reverse edge", n, KOKKOS_LAMBDA(const ordinal_t i){
-        edge_offset_t v = g1(i);
+        ordinal_t v = g1(i);
         if(v < n){
             if(g2(v) - n != i){
                 reset_left(i) = 1;
@@ -269,7 +270,7 @@ canon_graph assemble_pruned_graph(char_view_t kmers, char_view_t rcomps, edge_vi
     });
     vtx_view_t reset_right("reset right", n);
     Kokkos::parallel_for("confirm reverse edge", n, KOKKOS_LAMBDA(const ordinal_t i){
-        edge_offset_t v = g2(i);
+        ordinal_t v = g2(i);
         if(v < n){
             if(g2(v) != i){
                 reset_right(i) = 1;
