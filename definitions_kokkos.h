@@ -53,11 +53,11 @@ namespace unitig_compact {
 	static constexpr edge_offset_t EDGE_MAX = std::numeric_limits<edge_offset_t>::max();
 
     typedef Kokkos::Device<Kokkos::DefaultExecutionSpace, typename Kokkos::DefaultExecutionSpace::memory_space> Device;
-    using matrix_type = typename KokkosSparse::CrsMatrix<value_t, ordinal_t, Device, void, edge_offset_t>;
-    using host_matrix_t = typename KokkosSparse::CrsMatrix<value_t, ordinal_t, Kokkos::OpenMP, void, edge_offset_t>;
-    using graph_type = typename matrix_type::staticcrsgraph_type;
+    using matrix_t = typename KokkosSparse::CrsMatrix<int, ordinal_t, Device, void, edge_offset_t>;
+    using host_matrix_t = typename KokkosSparse::CrsMatrix<int, ordinal_t, Kokkos::OpenMP, void, edge_offset_t>;
+    using graph_type = typename matrix_t::staticcrsgraph_type;
     using host_graph_t = typename host_matrix_t::staticcrsgraph_type;
-    using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
+    using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, int, Device>;
     using canon_graph = coarsener_t::canon_graph;
 
     using host_policy = Kokkos::RangePolicy<Kokkos::OpenMP>;

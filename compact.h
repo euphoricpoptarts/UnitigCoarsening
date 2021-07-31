@@ -21,13 +21,13 @@ void write_to_f(char_view_t unitigs, std::string fname){
     of.close();
 }
 
-void write_unitigs2(char_view_t kmers, edge_offset_t k, graph_type glue_action, std::string fname){
+void write_unitigs2(char_view_t kmers, char_view_t rcomps, edge_offset_t k, matrix_t glue_action, std::string fname){
     edge_offset_t null_size = glue_action.numRows();
     edge_view_t write_sizes("write sizes", null_size + 1);
     Kokkos::parallel_scan("count writes", r_policy(0, null_size), KOKKOS_LAMBDA(const edge_offset_t i, edge_offset_t& update, const bool final){
         //+1 for '\n'
         //k-1 for prefix of first k-mer
-        edge_offset_t size = glue_action.row_map(i + 1) - glue_action.row_map(i) + 1 + (k - 1);
+        edge_offset_t size = glue_action.graph.row_map(i + 1) - glue_action.graph.row_map(i) + 1 + (k - 1);
         if(final){
             write_sizes(i) = update;
             if(i + 1 == null_size){
@@ -43,17 +43,26 @@ void write_unitigs2(char_view_t kmers, edge_offset_t k, graph_type glue_action, 
     Kokkos::parallel_for("move writes", policy(null_size, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
         ordinal_t i = thread.league_rank();
         edge_offset_t write_offset = write_sizes(i);
-        edge_offset_t start = glue_action.row_map(i);
-        edge_offset_t end = glue_action.row_map(i + 1);
+        edge_offset_t start = glue_action.graph.row_map(i);
+        edge_offset_t end = glue_action.graph.row_map(i + 1);
         Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=] (const edge_offset_t j){
-            ordinal_t u = glue_action.entries(j);
+            ordinal_t u = glue_action.graph.entries(j);
+            ordinal_t o = glue_action.values(j);
             if(j > start){
                 edge_offset_t offset = write_offset + (k - 1) + (j - start);
-                writes(offset) = kmers((u + 1)*k - 1);
+                if(o == 0){
+                    writes(offset) = kmers((u + 1)*k - 1);
+                } else {
+                    writes(offset) = rcomps((u + 1)*k - 1);
+                }
             } else {
                 edge_offset_t offset = write_offset;
                 for(edge_offset_t x = u*k; x < k*(u+1); x++){
-                    writes(offset) = kmers(x);
+                    if(o == 0){
+                        writes(offset) = kmers(x);
+                    } else {
+                        writes(offset) = rcomps(x);
+                    }
                     offset++;
                 }
             }
@@ -241,11 +250,11 @@ void compress_unitigs_maximally(char_view_t kmers, std::list<graph_type> glue_ac
     }
 }
 
-void compress_unitigs_maximally2(char_view_t kmers, std::list<graph_type> glue_actions, edge_offset_t k, std::string fname){
+void compress_unitigs_maximally2(char_view_t kmers, char_view_t rcomps, std::list<matrix_t> glue_actions, edge_offset_t k, std::string fname){
     ordinal_t n = kmers.extent(0) / k;
     auto glue_iter = glue_actions.begin();
     while(glue_iter != glue_actions.end()){
-        write_unitigs2(kmers, k, *glue_iter, fname);
+        write_unitigs2(kmers, rcomps, k, *glue_iter, fname);
         glue_iter++;
     }
 }

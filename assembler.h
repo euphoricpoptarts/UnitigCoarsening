@@ -96,13 +96,15 @@ edge_view_t generate_hashmap(char_view_t kmers, char_view_t rcomps, edge_offset_
         bool success = Kokkos::atomic_compare_exchange_strong(&out(hash), EDGE_MAX, i + size);
         //linear probing
         while(!success){
+            char_view_t compare = kmers;
             edge_offset_t written = out(hash);
             if(written >= null_marker){
                 written = written - null_marker;
                 if(written >= size){
                     written = written - size;
+                    compare = rcomps;
                 }
-                if(cmp(rcomps, rcomps, k*i, k*written, k - 1)){
+                if(cmp(rcomps, compare, k*i, k*written, k - 1)){
                     //hash value matches k-1 mer
                     //but has been nullified
                     //do nothing
@@ -111,8 +113,9 @@ edge_view_t generate_hashmap(char_view_t kmers, char_view_t rcomps, edge_offset_
             } else {
                 if(written >= size){
                     written = written - size;
+                    compare = rcomps;
                 }
-                if(cmp(rcomps, rcomps, k*i, k*written, k - 1)){
+                if(cmp(rcomps, compare, k*i, k*written, k - 1)){
                     //hash value matches k-1 mer
                     //nullify it
                     Kokkos::atomic_compare_exchange_strong(&out(hash), written, i + size + null_marker);

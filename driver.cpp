@@ -177,7 +177,7 @@ int main(int argc, char **argv) {
         printf("kmer hashmap size: %lu\n", vtx_map.extent(0));
         printf("Time to generate hashmap: %.3f\n", t3.seconds());
         t3.reset();
-        std::list<graph_type> glue_list;
+        std::list<matrix_t> glue_list;
         char_mirror_t kmer_copy;
         ExperimentLoggerUtil experiment;
         {
@@ -219,7 +219,7 @@ int main(int argc, char **argv) {
         t.reset();
         //kmers = move_to_device(kmer_copy);
         t.reset();
-        compress_unitigs_maximally2(kmers, glue_list, k, out_fname);
+        compress_unitigs_maximally2(kmers, rcomps, glue_list, k, out_fname);
         printf("Time to compact unitigs: %.3fs\n", t.seconds());
         t.reset();
         printf("Total time: %.3fs\n", t2.seconds());
