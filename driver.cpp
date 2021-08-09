@@ -24,7 +24,7 @@
 using namespace unitig_compact;
 namespace fs = std::filesystem;
 
-int load_graph(graph_type& g, char *csr_filename) {
+int load_graph(graph_t& g, char *csr_filename) {
 
     FILE *infp = fopen(csr_filename, "rb");
     if (infp == NULL) {
@@ -47,7 +47,7 @@ int load_graph(graph_type& g, char *csr_filename) {
     vtx_view_t entries("entries", m);
     Kokkos::deep_copy(row_map, row_map_mirror);
     Kokkos::deep_copy(entries, entries_mirror);
-    g = graph_type(entries, row_map);
+    g = graph_t(entries, row_map);
     return 0;
 }
 
@@ -177,17 +177,17 @@ int main(int argc, char **argv) {
         printf("kmer hashmap size: %lu\n", vtx_map.extent(0));
         printf("Time to generate hashmap: %.3f\n", t3.seconds());
         t3.reset();
-        std::list<matrix_t> glue_list;
+        std::list<graph_t> glue_list;
         char_mirror_t kmer_copy;
         ExperimentLoggerUtil experiment;
         {
             canon_graph g = assemble_pruned_graph(kmers, rcomps, vtx_map, k);
-            //graph_type gx = convert_to_graph(g);
+            //graph_t gx = convert_to_graph(g);
             //dump_graph(gx);
             coarsener_t coarsener;
             //{
             //    t3.reset();
-            //    graph_type g_base = assemble_graph(kmers, kpmers, vtx_map, k);
+            //    graph_t g_base = assemble_graph(kmers, kpmers, vtx_map, k);
             //    printf("entries: %lu\n", g_base.entries.extent(0));
             //    printf("Time to assemble base graph: %.3f\n", t3.seconds());
             //    t3.reset();

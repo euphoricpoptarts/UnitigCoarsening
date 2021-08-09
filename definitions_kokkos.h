@@ -38,13 +38,13 @@ namespace unitig_compact {
      **********************************************************
      */
 #if defined(HUGE)
-    typedef uint64_t ordinal_t;
+    typedef int64_t ordinal_t;
     typedef uint64_t edge_offset_t;
 #elif defined(LARGE)
-    typedef uint32_t ordinal_t;
+    typedef int32_t ordinal_t;
     typedef uint64_t edge_offset_t;
 #else
-    typedef uint32_t ordinal_t;
+    typedef int32_t ordinal_t;
     typedef uint32_t edge_offset_t;
 #endif
     typedef double sgp_real_t;
@@ -55,7 +55,7 @@ namespace unitig_compact {
     typedef Kokkos::Device<Kokkos::DefaultExecutionSpace, typename Kokkos::DefaultExecutionSpace::memory_space> Device;
     using matrix_t = typename KokkosSparse::CrsMatrix<int, ordinal_t, Device, void, edge_offset_t>;
     using host_matrix_t = typename KokkosSparse::CrsMatrix<int, ordinal_t, Kokkos::OpenMP, void, edge_offset_t>;
-    using graph_type = typename matrix_t::staticcrsgraph_type;
+    using graph_t = typename matrix_t::staticcrsgraph_type;
     using host_graph_t = typename host_matrix_t::staticcrsgraph_type;
     using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, int, Device>;
     using canon_graph = coarsener_t::canon_graph;

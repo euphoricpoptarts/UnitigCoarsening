@@ -29,7 +29,7 @@ public:
     using edge_subview_t = Kokkos::View<edge_offset_t, Device>;
     using c_edge_subview_t = Kokkos::View<const edge_offset_t, Device>;
     using vtx_subview_t = Kokkos::View<ordinal_t, Device>;
-    using graph_type = typename matrix_t::staticcrsgraph_type;
+    using graph_t = typename matrix_t::staticcrsgraph_type;
     using policy_t = Kokkos::RangePolicy<exec_space>;
     using team_policy_t = Kokkos::TeamPolicy<exec_space>;
     using member = typename team_policy_t::member_type;
@@ -84,7 +84,7 @@ struct prefix_sum
     }
 };
 
-canon_graph coarsen_de_bruijn_graph(canon_graph g, interp_t interp, matrix_t glue){
+canon_graph coarsen_de_bruijn_graph(canon_graph g, interp_t interp, graph_t glue){
     ordinal_t nc = glue.numRows();
     vtx_view_t g1("right entries", nc);
     vtx_view_t g2("left entries", nc);
@@ -93,8 +93,8 @@ canon_graph coarsen_de_bruijn_graph(canon_graph g, interp_t interp, matrix_t glu
         g2(i) = ORD_MAX;
     });
     Kokkos::parallel_for("write edges", nc, KOKKOS_LAMBDA(const ordinal_t i){
-        edge_offset_t end = glue.graph.row_map(i + 1) - 1;
-        ordinal_t u = glue.graph.entries(end);
+        edge_offset_t end = glue.row_map(i + 1) - 1;
+        ordinal_t u = abs(glue.entries(end)) - 1;
         if(g.right_edges(u) != ORD_MAX && interp.entries(g.right_edges(u)) != i + 1){
            g1(i) = interp.entries(g.right_edges(u)) - 1;
         } else if(g.left_edges(u) != ORD_MAX && interp.entries(g.left_edges(u)) != i + 1){
@@ -102,8 +102,8 @@ canon_graph coarsen_de_bruijn_graph(canon_graph g, interp_t interp, matrix_t glu
         }
     });
     Kokkos::parallel_for("write edges", nc, KOKKOS_LAMBDA(const ordinal_t i){
-        edge_offset_t start = glue.graph.row_map(i);
-        ordinal_t u = glue.graph.entries(start);
+        edge_offset_t start = glue.row_map(i);
+        ordinal_t u = abs(glue.entries(start)) - 1;
         if(g.right_edges(u) != ORD_MAX && interp.entries(g.right_edges(u)) != i + 1){
            g2(i) = interp.entries(g.right_edges(u)) - 1;
         } else if(g.left_edges(u) != ORD_MAX && interp.entries(g.left_edges(u)) != i + 1){
@@ -141,7 +141,7 @@ vtx_view_t transpose_null(interp_t g){
 }
 
 //transposes the interpolation matrix
-graph_type transpose_non_null(interp_t g){
+graph_t transpose_non_null(interp_t g){
     ordinal_t n = g.n;
     //-1 cuz not counting null aggregate
     ordinal_t nc = g.nc - 1;
@@ -170,14 +170,13 @@ graph_type transpose_non_null(interp_t g){
             entries(insert) = i;
         }
     });
-    graph_type transposed(entries, row_map);
+    graph_t transposed(entries, row_map);
     return transposed;
 }
 
-matrix_t transpose_and_sort(interp_t interp, canon_graph g){
-    graph_type interp_transpose = transpose_non_null(interp);
+graph_t transpose_and_sort(interp_t interp, canon_graph g){
+    graph_t interp_transpose = transpose_non_null(interp);
     ordinal_t nc = interp_transpose.numRows();
-    wgt_view_t orientation("orientation", interp_transpose.entries.extent(0));
     printf("nc: %u\n", nc);
     Kokkos::Timer timer;
     Kokkos::parallel_for("sort tranpose entries", policy_t(0, nc), KOKKOS_LAMBDA(const ordinal_t i){
@@ -194,13 +193,12 @@ matrix_t transpose_and_sort(interp_t interp, canon_graph g){
                 //first vertex in path
                 //only two fine vertices in a coarse vertex can satisfy this condition
                 interp_transpose.entries(x) = interp_transpose.entries(start);
-                interp_transpose.entries(start) = u;
+                interp_transpose.entries(start) = u + 1;
                 start_vertex = u;
                 next = g.right_edges(u);
-                orientation(start) = 0;
                 if(next == ORD_MAX){
                     next = g.left_edges(u);
-                    orientation(start) = 1;
+                    interp_transpose.entries(start) = -u - 1;
                 }
                 break;
             } else {
@@ -209,19 +207,17 @@ matrix_t transpose_and_sort(interp_t interp, canon_graph g){
                     //first vertex in path contained in this coarse vertex
                     //only two fine vertice in a coarse vertex can satisfy either this or the previous condition
                     interp_transpose.entries(x) = interp_transpose.entries(start);
-                    interp_transpose.entries(start) = u;
+                    interp_transpose.entries(start) = -u - 1;
                     start_vertex = u;
                     next = g.left_edges(u);
-                    orientation(start) = 1;
                     break;
                 }
                 v = g.left_edges(u);
                 if(interp.entries(v) != vtx_id){
                     interp_transpose.entries(x) = interp_transpose.entries(start);
-                    interp_transpose.entries(start) = u;
+                    interp_transpose.entries(start) = u + 1;
                     start_vertex = u;
                     next = g.right_edges(u);
-                    orientation(start) = 0;
                     break;
                 }
             }
@@ -235,19 +231,18 @@ matrix_t transpose_and_sort(interp_t interp, canon_graph g){
             //    printf("entry at %lu: %u; right edge: %u; left edge: %u\n", x, u, g.right_edges(u), g.left_edges(u));
             //}
             start_vertex = interp_transpose.entries(real_start);
+            interp_transpose.entries(real_start) = start_vertex + 1;
             next = g.right_edges(start_vertex);
-            orientation(real_start) = 0;
         }
         while(end > start){
-            interp_transpose.entries(start) = next;
             if(g.right_edges(next) == start_vertex){
                 //next edge exists from left
-                orientation(start) = 1;
+                interp_transpose.entries(start) = -next - 1;
                 start_vertex = next;
                 next = g.left_edges(next);
             } else {
                 //next edge exits from right
-                orientation(start) = 0;
+                interp_transpose.entries(start) = next + 1;
                 start_vertex = next;
                 next = g.right_edges(next);
             }
@@ -256,11 +251,10 @@ matrix_t transpose_and_sort(interp_t interp, canon_graph g){
     });
     printf("Time to sort transposed entries: %.3f\n", timer.seconds());
     timer.reset();
-    matrix_t out("output matrix", nc, orientation, interp_transpose);
-    return out;
+    return interp_transpose;
 }
 
-matrix_t collect_outputs_first(interp_t interp) {
+graph_t collect_outputs_first(interp_t interp) {
     vtx_view_t entries = transpose_null(interp);
     edge_offset_t size = entries.extent(0);
     edge_view_t row_map("row map", size + 1);
@@ -268,17 +262,16 @@ matrix_t collect_outputs_first(interp_t interp) {
     Kokkos::parallel_for("init write sizes", policy_t(0, size + 1), KOKKOS_LAMBDA(const edge_offset_t i){
         row_map(i) = i;
     });
-    graph_type output_g(entries, row_map);
-    matrix_t out("output matrix", size, orientation, output_g);
-    return out;
+    graph_t output_g(entries, row_map);
+    return output_g;
 }
 
-std::list<matrix_t> coarsen_de_bruijn_full_cycle(canon_graph cur, ExperimentLoggerUtil& experiment){
-    std::list<matrix_t> glue_list;
+std::list<graph_t> coarsen_de_bruijn_full_cycle(canon_graph cur, ExperimentLoggerUtil& experiment){
+    std::list<graph_t> glue_list;
     int count = 0;
     Kokkos::Timer timer;
     bool first = true;
-    matrix_t glue_last;
+    graph_t glue_last;
     while(cur.size > 0){
         count++;
         printf("Calculating coarse graph %d\n", count);
@@ -287,7 +280,7 @@ std::list<matrix_t> coarsen_de_bruijn_full_cycle(canon_graph cur, ExperimentLogg
         interp_t interp = mapper.coarsen_HEC(cur, experiment);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::Map, timer.seconds());
         timer.reset();
-        matrix_t glue = transpose_and_sort(interp, cur);
+        graph_t glue = transpose_and_sort(interp, cur);
         experiment.addMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose, timer.seconds());
         timer.reset();
         if(first){

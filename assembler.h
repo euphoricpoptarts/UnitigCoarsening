@@ -169,7 +169,7 @@ struct prefix_sum1
     }
 };
 
-void dump_graph(graph_type g){
+void dump_graph(graph_t g){
     long n = g.numRows();
     long t_e = g.entries.extent(0);
     edge_mirror_t row_map_x("row map", n + 1);
@@ -192,14 +192,14 @@ void dump_graph(graph_type g){
     fclose(f);
 }
 
-graph_type convert_to_graph(vtx_view_t g){
+graph_t convert_to_graph(vtx_view_t g){
     ordinal_t n = g.extent(0);
     vtx_view_t edge_count("edge count", n);
     Kokkos::parallel_for("count edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t v = g(i);
         if(v != ORD_MAX){
-            Kokkos::atomic_add(&edge_count(v), 1u);
-            Kokkos::atomic_add(&edge_count(i), 1u);
+            Kokkos::atomic_add(&edge_count(v), 1);
+            Kokkos::atomic_add(&edge_count(i), 1);
         }
     });
     edge_view_t row_map("row map", n + 1);
@@ -216,7 +216,7 @@ graph_type convert_to_graph(vtx_view_t g){
             entries(row_map(i)) = v;
         }
     });
-    return graph_type(entries, row_map);
+    return graph_t(entries, row_map);
 }
 
 canon_graph assemble_pruned_graph(char_view_t kmers, char_view_t rcomps, edge_view_t vtx_map, edge_offset_t k){
