@@ -155,13 +155,12 @@ int main(int argc, char **argv) {
 
     if (argc < 5) {
         printf("You input %d args\n", argc);
-        fprintf(stderr, "Usage: %s <k-mer file> <(k+1)-mer file> k <output file>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <k-mer file> k <output file>\n", argv[0]);
         return EXIT_FAILURE;
     }
     char *kmer_fname = argv[1];
-    //char *kpmer_fname = argv[2];
-    edge_offset_t k = atoi(argv[3]);
-    std::string out_fname(argv[4]);
+    edge_offset_t k = atoi(argv[2]);
+    std::string out_fname(argv[3]);
     Kokkos::initialize();
     {
         char_view_t kmers, kpmers;
