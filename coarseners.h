@@ -258,8 +258,10 @@ graph_t collect_outputs_first(interp_t interp) {
     vtx_view_t entries = transpose_null(interp);
     edge_offset_t size = entries.extent(0);
     edge_view_t row_map("row map", size + 1);
-    wgt_view_t orientation("orientation", size);
     Kokkos::parallel_for("init write sizes", policy_t(0, size + 1), KOKKOS_LAMBDA(const edge_offset_t i){
+        //output function interprets source kmer as abs(x) - 1
+        //so we need to adjust the singleton unitigs for that
+        entries(i) = entries(i) + 1;
         row_map(i) = i;
     });
     graph_t output_g(entries, row_map);
