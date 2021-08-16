@@ -153,7 +153,7 @@ char_view_t move_to_device(char_mirror_t x){
 
 int main(int argc, char **argv) {
 
-    if (argc < 5) {
+    if (argc != 4) {
         printf("You input %d args\n", argc);
         fprintf(stderr, "Usage: %s <k-mer file> k <output file>\n", argv[0]);
         return EXIT_FAILURE;
