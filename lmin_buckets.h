@@ -1,4 +1,4 @@
-#include "definitions_kokkos.h"
+#include "defs.h"
 
 template< class ScalarType, int N >
 struct array_type {

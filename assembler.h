@@ -1,4 +1,4 @@
-#include "definitions_kokkos.h"
+#include "defs.h"
 
 namespace unitig_compact {
 

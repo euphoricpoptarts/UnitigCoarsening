@@ -3,7 +3,7 @@
 #include "assembler.h"
 #include "compact.h"
 #include "ExperimentLoggerUtil.cpp"
-#include "definitions_kokkos.h"
+#include "defs.h"
 #include <assert.h>
 #include <iostream>
 #include <fstream>

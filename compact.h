@@ -1,4 +1,4 @@
-#include "definitions_kokkos.h"
+#include "defs.h"
 #include <iostream>
 #include <fstream>
 

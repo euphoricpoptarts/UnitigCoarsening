@@ -22,29 +22,19 @@ public:
     // define internal types
     using exec_space = typename Device::execution_space;
     using mem_space = typename Device::memory_space;
-    using matrix_t = KokkosSparse::CrsMatrix<scalar_t, ordinal_t, Device, void, edge_offset_t>;
     using vtx_view_t = Kokkos::View<ordinal_t*, Device>;
     using wgt_view_t = Kokkos::View<scalar_t*, Device>;
     using edge_view_t = Kokkos::View<edge_offset_t*, Device>;
     using edge_subview_t = Kokkos::View<edge_offset_t, Device>;
     using c_edge_subview_t = Kokkos::View<const edge_offset_t, Device>;
     using vtx_subview_t = Kokkos::View<ordinal_t, Device>;
-    using graph_type = typename matrix_t::staticcrsgraph_type;
+    using graph_type = Kokkos::StaticCrsGraph<ordinal_t, Device, void, void, edge_offset_t>;
     using graph_m = typename graph_type::HostMirror;
     using policy_t = Kokkos::RangePolicy<exec_space>;
     using team_policy_t = Kokkos::TeamPolicy<exec_space>;
     using member = typename team_policy_t::member_type;
     using spgemm_kernel_handle = KokkosKernels::Experimental::KokkosKernelsHandle<edge_offset_t, ordinal_t, scalar_t, exec_space, mem_space, mem_space>;
     static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
-    // contains matrix and vertex weights corresponding to current level
-    // interp matrix maps previous level to this level
-    struct coarse_level_triple {
-        matrix_t coarse_mtx;
-        vtx_view_t coarse_vtx_wgts;
-        matrix_t interp_mtx;
-        int level;
-        bool uniform_weights;
-    };
 
     // define behavior-controlling enums
     enum Heuristic { HECv1, HECv2, HECv3, Match, MtMetis, MIS2, GOSHv1, GOSHv2 };
@@ -58,11 +48,6 @@ public:
     coarsen_heuristics<ordinal_t, edge_offset_t, scalar_t, Device> mapper;
     compact_graph<ordinal_t, edge_offset_t, scalar_t, Device> compacter;
     using interp_t = typename coarsen_heuristics<ordinal_t, edge_offset_t, scalar_t, Device>::interp_t;
-    //when the results are fetched, this list is implicitly copied
-    std::list<coarse_level_triple> results;
-    ordinal_t coarse_vtx_cutoff = 50;
-    ordinal_t min_allowed_vtx = 10;
-    unsigned int max_levels = 200;
 
 struct crosses {
     vtx_view_t in;
@@ -524,31 +509,6 @@ coarsen_output coarsen_de_bruijn_full_cycle(vtx_view_t cur, crosses c, ordinal_t
     out.glue = Kokkos::create_mirror(glue_collapsed);
     out.cross = Kokkos::create_mirror(cross_collapsed);
     return out;
-}
-
-std::list<coarse_level_triple> get_levels() {
-    //"results" is copied, therefore the list received by the caller is independent of the internal list of this class
-    return results;
-}
-
-void set_heuristic(Heuristic h) {
-    this->h = h;
-}
-
-void set_deduplication_method(Builder b) {
-    this->b = b;
-}
-
-void set_coarse_vtx_cutoff(ordinal_t coarse_vtx_cutoff) {
-    this->coarse_vtx_cutoff = coarse_vtx_cutoff;
-}
-
-void set_min_allowed_vtx(ordinal_t min_allowed_vtx) {
-    this->min_allowed_vtx = min_allowed_vtx;
-}
-
-void set_max_levels(unsigned int max_levels) {
-    this->max_levels = max_levels;
 }
 
 };

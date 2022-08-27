@@ -1,6 +1,3 @@
-
-//don't technically need scalar_t but we use to template the matrix_t, which we also don't need
-//maybe template on the graph_type instead?
 template<typename ordinal_t, typename edge_offset_t, typename scalar_t, class Device>
 class compact_graph {
 public:
@@ -8,13 +5,12 @@ public:
     // define internal types
     using exec_space = typename Device::execution_space;
     using mem_space = typename Device::memory_space;
-    using matrix_t = KokkosSparse::CrsMatrix<scalar_t, ordinal_t, Device, void, edge_offset_t>;
     using vtx_view_t = Kokkos::View<ordinal_t*, Device>;
     using edge_view_t = Kokkos::View<edge_offset_t*, Device>;
     using edge_subview_t = Kokkos::View<edge_offset_t, Device>;
     using c_edge_subview_t = Kokkos::View<const edge_offset_t, Device>;
     using vtx_subview_t = Kokkos::View<ordinal_t, Device>;
-    using graph_type = typename matrix_t::staticcrsgraph_type;
+    using graph_type = Kokkos::StaticCrsGraph<ordinal_t, Device, void, void, edge_offset_t>;
     using policy_t = Kokkos::RangePolicy<exec_space>;
     using team_policy_t = Kokkos::TeamPolicy<exec_space>;
     using member = typename team_policy_t::member_type;

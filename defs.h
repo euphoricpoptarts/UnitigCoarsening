@@ -55,15 +55,12 @@ namespace unitig_compact {
 
 
     typedef Kokkos::Device<Kokkos::DefaultExecutionSpace, typename Kokkos::DefaultExecutionSpace::memory_space> Device;
-    using matrix_type = typename KokkosSparse::CrsMatrix<value_t, ordinal_t, Device, void, edge_offset_t>;
-    using host_matrix_t = typename KokkosSparse::CrsMatrix<value_t, ordinal_t, Kokkos::OpenMP, void, edge_offset_t>;
-    using graph_type = typename matrix_type::staticcrsgraph_type;
-    using graph_m = typename graph_type::HostMirror;
-    using host_graph_t = typename host_matrix_t::staticcrsgraph_type;
 
     using host_policy = Kokkos::RangePolicy<Kokkos::OpenMP>;
 
     using coarsener_t = coarse_builder<ordinal_t, edge_offset_t, value_t, Device>;
+    using graph_type = typename coarsener_t::graph_type;
+    using graph_m = typename graph_type::HostMirror;
     using crosses = coarsener_t::crosses;
     using char_view_t = Kokkos::View<char*>;
     using char_mirror_t = typename char_view_t::HostMirror;
