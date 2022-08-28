@@ -650,12 +650,12 @@ int main(int argc, char **argv) {
             c_output x = coarsener.coarsen_de_bruijn_full_cycle(g_s, c, cross_offset, experiment);
             printf("Time to coarsen bucket %i: %.4f\n", i, t2.seconds());
             t2.reset();
-            write_unitigs2(kmer_s, k, move_to_device(x.glue), out_fname);
+            write_unitigs2(kmer_s, k, x.glue, out_fname);
             //write output of this bucket that does not require knowledge of other buckets
             printf("Time to write bucket %i's non-crossing output: %.3fs\n", i, t2.seconds());
             t2.reset();
             //generate partial unitigs from kmers
-            minitigs y = generate_minitigs(move_to_device(x.cross), kmer_s, k);
+            minitigs y = generate_minitigs(x.cross, kmer_s, k);
             c_outputs.push_back(y);
             printf("Time to repartition bucket %i's kmers: %.3fs\n", i, t2.seconds());
             t2.reset();
