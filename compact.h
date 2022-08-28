@@ -21,6 +21,56 @@ void write_to_f(char_view_t unitigs, std::string fname){
     of.close();
 }
 
+void write_unitigs4(char_view_t chars, edge_view_t row_map, edge_offset_t k, graph_type glue_action, std::string fname){
+    edge_offset_t null_size = glue_action.numRows();
+    edge_view_t write_sizes("write sizes", null_size + 1);
+    Kokkos::parallel_for("count writes", r_policy(0, null_size), KOKKOS_LAMBDA(const edge_offset_t i){
+        //+1 for '\n'
+        edge_offset_t size = 1;
+        for(edge_offset_t j = glue_action.row_map(i); j < glue_action.row_map(i + 1); j++){
+            ordinal_t x = glue_action.entries(j);
+            size += row_map(x + 1) - row_map(x) - (k - 1);
+            if(j + 1 == glue_action.row_map(i + 1)){
+                //k-1 for suffix of last k-mer
+                size += (k - 1);
+            }
+        }
+        write_sizes(i) = size;
+    });
+    edge_offset_t write_size = 0;
+    Kokkos::parallel_scan("count writes", r_policy(0, null_size), KOKKOS_LAMBDA(const edge_offset_t i, edge_offset_t& update, const bool final){
+        edge_offset_t size = write_sizes(i);
+        if(final){
+            write_sizes(i) = update;
+            if(i + 1 == null_size){
+                write_sizes(null_size) = update + size;
+            }
+        }
+        update += size;
+    }, write_size);
+    char_view_t writes("writes", write_size);
+    Kokkos::parallel_for("move writes", r_policy(0, null_size), KOKKOS_LAMBDA(const ordinal_t i){
+        edge_offset_t write_offset = write_sizes(i);
+        edge_offset_t start = glue_action.row_map(i);
+        edge_offset_t end = glue_action.row_map(i + 1);
+        for(edge_offset_t j = start; j < end; j++){
+            ordinal_t u = glue_action.entries(j);
+            edge_offset_t kmer_start = row_map(u);
+            edge_offset_t kmer_end = row_map(u + 1);
+            if(j + 1 < end){
+                kmer_end -= (k - 1);
+            }
+            for(edge_offset_t l = kmer_start; l < kmer_end; l++){
+                writes(write_offset++) = chars(l);
+            }
+            if(j + 1 == end){
+                writes(write_offset) = '\n';
+            }
+        }
+    });
+    write_to_f(writes, fname);
+}
+
 void write_unitigs3(char_view_t kmers, edge_view_t kmer_rows, edge_offset_t k, graph_type glue_action, std::string fname){
     edge_offset_t null_size = glue_action.numRows();
     edge_view_t write_sizes("write sizes", null_size + 1);

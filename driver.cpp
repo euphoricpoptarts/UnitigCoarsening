@@ -72,6 +72,67 @@ struct final_partition {
     std::vector<edge_mirror_t> kmer_rows;
 };
 
+struct minitig_partition {
+    std::vector<minitigs> minis;
+    std::vector<vtx_view_t> out_maps;
+};
+
+minitig_partition collect_buckets(std::vector<bucket_minitigs> buckets){
+    ordinal_t bucket_count = buckets[0].buckets;
+    vtx_mirror_t bucket_size("bucket size", bucket_count);
+    edge_mirror_t minitig_bucket_size("bucket size", bucket_count);
+    for(int i = 0; i < buckets.size(); i++){
+        bucket_minitigs b = buckets[i];
+        for(int j = 0; j < bucket_count; j++){
+            edge_offset_t end = b.part_offsets[j+1];
+            edge_offset_t start = b.part_offsets[j];
+            bucket_size(j) += end - start;
+            minitig_bucket_size(j) += b.m.row_map(end) - b.m.row_map(start);
+        }
+    }
+    std::vector<vtx_view_t> out_maps;
+    std::vector<minitigs> minis;
+    for(int i = 0; i < bucket_count; i++){
+        edge_mirror_t row_map("row map", bucket_size(i) + 1);
+        vtx_view_t out_map("out map", bucket_size(i));
+        char_mirror_t chars("chars", minitig_bucket_size(i));
+        edge_offset_t offset = 0;
+        edge_offset_t write_sum = 0;
+        for(int j = 0; j < bucket_count; j++){
+            bucket_minitigs b = buckets[j];
+            ordinal_t end = b.part_offsets[i+1];
+            ordinal_t start = b.part_offsets[i];
+            edge_offset_t kmer_start = b.m.row_map(start);
+            edge_offset_t kmer_end = b.m.row_map(end);
+            vtx_view_t out_map_in = b.output_map;
+            Kokkos::parallel_for("move row map", host_policy(start, end), KOKKOS_LAMBDA(const ordinal_t x){
+                ordinal_t insert = offset + x - start;
+                ordinal_t write_val = write_sum + b.m.row_map(x + 1) - b.m.row_map(start);
+                row_map(insert + 1) = write_val;
+            });
+            Kokkos::parallel_for("move out map", r_policy(start, end), KOKKOS_LAMBDA(const ordinal_t x){
+                ordinal_t insert = offset + x - start;
+                out_map(insert) = out_map_in(x);
+            });
+            char_mirror_t dest = Kokkos::subview(chars, std::make_pair(write_sum, write_sum + kmer_end - kmer_start));
+            char_mirror_t source = Kokkos::subview(b.m.chars, std::make_pair(kmer_start, kmer_end));
+            Kokkos::deep_copy(dest, source);
+            offset += end - start;
+            write_sum += b.m.row_map(end) - b.m.row_map(start);
+        }
+        minitigs x;
+        x.size = bucket_size(i);
+        x.chars = chars;
+        x.row_map = row_map;
+        out_maps.push_back(out_map);
+        minis.push_back(x);
+    }
+    minitig_partition out;
+    out.out_maps = out_maps;
+    out.minis = minis;
+    return out;
+}
+
 final_partition collect_buckets(std::vector<bucket_glues> buckets, edge_offset_t k){
     ordinal_t bucket_count = buckets[0].buckets;
     vtx_mirror_t bucket_size("bucket size", bucket_count);
@@ -211,7 +272,7 @@ char_view_t decompress_kmers(char_view_t comped, edge_offset_t k){
     edge_offset_t comp_size = k_pad / 4;
     ordinal_t kmers_in_bucket = comped.extent(0) / comp_size;
     printf("kmers in bucket: %u\n", kmers_in_bucket);
-    char_view_t kmers("kmers", kmers_in_bucket * k);
+    char_view_t kmers(Kokkos::ViewAllocateWithoutInitializing("kmers"), kmers_in_bucket * k);
     char_mirror_t char_map_mirror("char map mirror", 4);
     char_map_mirror(0) = 'A';
     char_map_mirror(1) = 'C';
@@ -220,11 +281,16 @@ char_view_t decompress_kmers(char_view_t comped, edge_offset_t k){
     char_view_t char_map("char map", 4);
     Kokkos::deep_copy(char_map, char_map_mirror);
     Kokkos::parallel_for("decompress kmers", kmers_in_bucket, KOKKOS_LAMBDA(const ordinal_t x){
-        char byte = 0;
-        for(edge_offset_t i = 0; i < k; i++){
-            if((i & 3) == 0) byte = comped(x*comp_size + (i/4));
-            char shift_byte = (byte >> (2*(3 - (i & 3)))) & 3;
-            kmers(x*k + i) = char_map(shift_byte);
+        for(edge_offset_t i = 0; i < comp_size; i++){
+            char byte = comped(x*comp_size + i);
+            char b4 = byte & 3;
+            char b3 = (byte >> 2) & 3;
+            char b2 = (byte >> 4) & 3;
+            char b1 = (byte >> 6) & 3;
+            kmers(x*k + 4*i) = char_map(b1);
+            kmers(x*k + 4*i + 1) = char_map(b2);
+            kmers(x*k + 4*i + 2) = char_map(b3);
+            if(4*i + 3 < k) kmers(x*k + 4*i + 3) = char_map(b4);
         }
     });
     return kmers;
@@ -541,7 +607,7 @@ int main(int argc, char **argv) {
         //contains the inter-bucket edges
         std::vector<crosses> cross_list;
         //contains the output of the coarsenings
-        std::vector<c_output> c_outputs;
+        std::vector<minitigs> c_outputs;
         ordinal_t cross_offset = 0;
         //for each bucket, assemble the local graph, and coarsen it
         //track vertices of inter-bucket edges in each bucket, and translate them to coarse vtx ids
@@ -582,10 +648,19 @@ int main(int argc, char **argv) {
             t2.reset();
             //coarsen local graph and relabel vertices of inter-bucket edges
             c_output x = coarsener.coarsen_de_bruijn_full_cycle(g_s, c, cross_offset, experiment);
-            c_outputs.push_back(x);
             printf("Time to coarsen bucket %i: %.4f\n", i, t2.seconds());
             t2.reset();
+            write_unitigs2(kmer_s, k, move_to_device(x.glue), out_fname);
+            //write output of this bucket that does not require knowledge of other buckets
+            printf("Time to write bucket %i's non-crossing output: %.3fs\n", i, t2.seconds());
+            t2.reset();
+            //generate partial unitigs from kmers
+            minitigs y = generate_minitigs(move_to_device(x.cross), kmer_s, k);
+            c_outputs.push_back(y);
+            printf("Time to repartition bucket %i's kmers: %.3fs\n", i, t2.seconds());
+            t2.reset();
         }
+        kmer_b.kmers.clear();
         Kokkos::resize(kmer_b.crosscut, 0);
         //vtx_view_t in_cross_buf("in cross buffer", largest_cross);
         ordinal_t cross_written_count = 0;
@@ -654,38 +729,25 @@ int main(int argc, char **argv) {
         });
         Kokkos::deep_copy(part_offsets, part_offsets_dev);
         part_offsets(bucket_count) = small_g_result.numRows();
-        std::vector<bucket_glues> output_glues;
+        std::vector<bucket_minitigs> output_minitigs;
         ordinal_t glue_offset = 0;
         Kokkos::Timer t3;
         //repartition kmers according to output unitig
         for(int i = 0; i < bucket_count; i++) {
             Kokkos::Timer t4;
             //move data to device
-            char_view_t kmer_s("kmer part", kmer_b.kmers[i].extent(0));
-            Kokkos::deep_copy(kmer_s, kmer_b.kmers[i]);
-            kmer_s = decompress_kmers(kmer_s, k);
-            c_output c = c_outputs[i];
-            ordinal_t glue_size = c.cross.numRows();
+            minitigs x = c_outputs[i];
+            ordinal_t glue_size = x.size;
             vtx_view_t repart_s = Kokkos::subview(repartition_map, std::make_pair(glue_offset, glue_offset + glue_size));
             vtx_view_t output_s = Kokkos::subview(output_mapping, std::make_pair(glue_offset, glue_offset + glue_size));
             glue_offset += glue_size;
-            graph_type non_cross_glue = move_to_device(c.glue);
-            graph_type cross_glue = move_to_device(c.cross);
             printf("Time to move bucket %i's stuff to device: %.3fs\n", i, t4.seconds());
             t4.reset();
-            //write output of this bucket that does not require knowledge of other buckets
-            write_unitigs2(kmer_s, k, non_cross_glue, out_fname);
-            printf("Time to write bucket %i's non-crossing output: %.3fs\n", i, t4.seconds());
-            t4.reset();
             //determine output partition of each kmer that is part of an inter-bucket unitig
-            bucket_glues glue_b = partition_for_output(bucket_count, cross_glue, repart_s, output_s);
+            bucket_minitigs minitig_b = partition_for_output(bucket_count, x, k, repart_s, output_s);
             printf("Time to calculate bucket %i's crossing output partitions: %.3fs\n", i, t4.seconds());
             t4.reset();
-            //move kmers to output partitions
-            glue_b = partition_kmers_for_glueing(glue_b, kmer_s, k);
-            printf("Time to repartition bucket %i's kmers: %.3fs\n", i, t4.seconds());
-            t4.reset();
-            output_glues.push_back(glue_b);
+            output_minitigs.push_back(minitig_b);
         }
         c_outputs.clear();
         kmer_b.kmers.clear();
@@ -693,7 +755,7 @@ int main(int argc, char **argv) {
         printf("Time to repartition kmers: %.3fs\n", t3.seconds());
         t3.reset();
         //form output partitions by collecting partitions from each bucket
-        final_partition f_p = collect_buckets(output_glues, k);
+        minitig_partition f_p = collect_buckets(output_minitigs);
         ordinal_t glue_start = 0, glue_end = 0;
         //for each output partition, form each maximal unitig and write to output
         for(int i = 0; i < bucket_count; i++){
@@ -710,16 +772,14 @@ int main(int argc, char **argv) {
             Kokkos::deep_copy(result_start, result_start_s);
             Kokkos::deep_copy(result_end, result_end_s);
             edge_view_t row_map("row map", 1 + glue_end - glue_start);
-            printf("result size: %u; graph size: %u\n", result_end - result_start, f_p.glues[i].numRows());
+            printf("result size: %u; graph size: %u\n", result_end - result_start, f_p.minis[i].size);
             Kokkos::parallel_for("write row map", glue_end - glue_start, KOKKOS_LAMBDA(const ordinal_t i){
                 row_map(i + 1) = small_g_result.row_map(glue_start + i + 1) - small_g_result.row_map(glue_start);
             });
             vtx_view_t entries = Kokkos::subview(small_g_result.entries, std::make_pair(result_start, result_end));
             graph_type out_g(entries, row_map);
-            //form each maximal unitig
-            graph_type blah = coarsener.compacter.collect_unitigs(move_to_device(f_p.glues[i]), out_g);
             //write to file
-            write_unitigs3(move_to_device(f_p.kmer_glues[i]), move_to_device(f_p.kmer_rows[i]), k, blah, out_fname);
+            write_unitigs4(move_to_device(f_p.minis[i].chars), move_to_device(f_p.minis[i].row_map), k, out_g, out_fname);
         }
         //printf("glue list length: %lu\n", glue_list.size());
         printf("Time to generate glue list: %.3fs\n", t.seconds());
