@@ -118,7 +118,7 @@ struct bucket_kmers {
 };
 
 struct bucket_kpmers {
-    std::list<char_mirror_t> kmers;
+    std::list<comp_mt> kmers;
     ordinal_t buckets;
     ordinal_t size;
     char_mirror_t crosscut;
@@ -547,19 +547,19 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(char_view_t& kmers, edge_offset_t 
     });
     //printf("Partitioned kmers in %.3f seconds\n", t.seconds());
     t.reset();
-    edge_offset_t k_pad = ((k + 3) / 4) * 4;
-    edge_offset_t comp_size = k_pad / 4;
-    char_view_t kmer_compress(Kokkos::ViewAllocateWithoutInitializing("kmers compressed nonpart"), buckets_m(large_buckets) * comp_size);
+    edge_offset_t k_pad = ((k + 15) / 16) * 16;
+    edge_offset_t comp_size = k_pad / 16;
+    comp_vt kmer_compress(Kokkos::ViewAllocateWithoutInitializing("kmers compressed nonpart"), buckets_m(large_buckets) * comp_size);
     Kokkos::parallel_for("compress kmers", buckets_m(large_buckets), KOKKOS_LAMBDA(const edge_offset_t j){
-        char byte = 0;
+        uint32_t byte = 0;
         for(edge_offset_t x = 0; x < k_pad; x++){
             byte <<= 2;
-            if((x & 3) == 0) byte = 0;
+            if((x & 15) == 0) byte = 0;
             if(x < k) byte = byte | char_map(kmers(j*k + x));
-            if((x & 3) == 3) kmer_compress(j*comp_size + (x / 4)) = byte;
+            if((x & 15) == 15) kmer_compress(j*comp_size + (x / 16)) = byte;
         }
     });
-    char_view_t kmers_partitioned(Kokkos::ViewAllocateWithoutInitializing("kmers partitioned"), buckets_m(large_buckets) * comp_size);
+    comp_vt kmers_partitioned(Kokkos::ViewAllocateWithoutInitializing("kmers partitioned"), buckets_m(large_buckets) * comp_size);
     if(typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::HostSpace)){
         Kokkos::parallel_for("write kmers", policy(buckets_m(large_buckets), 32), KOKKOS_LAMBDA(const member& thread){
             ordinal_t write_id = thread.league_rank();
@@ -612,8 +612,8 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(char_view_t& kmers, edge_offset_t 
         bucket_kpmers output;
         for(int i = 0; i < large_buckets; i++){
             ordinal_t kmers_in_bucket = buckets_m(i + 1) - buckets_m(i);
-            char_view_t kmer_bucket_dev = Kokkos::subview(kmers_partitioned, std::make_pair(comp_size*buckets_m(i), comp_size*buckets_m(i+1)));
-            char_mirror_t kmer_bucket = Kokkos::create_mirror_view(kmer_bucket_dev);
+            comp_vt kmer_bucket_dev = Kokkos::subview(kmers_partitioned, std::make_pair(comp_size*buckets_m(i), comp_size*buckets_m(i+1)));
+            comp_mt kmer_bucket = Kokkos::create_mirror_view(kmer_bucket_dev);
             Kokkos::deep_copy(kmer_bucket, kmer_bucket_dev);
             output.kmers.push_back(kmer_bucket);
         }

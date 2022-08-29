@@ -69,6 +69,8 @@ namespace unitig_compact {
     using c_edge_subview_t = Kokkos::View<const edge_offset_t, Device>;
     using edge_mirror_t = typename edge_view_t::HostMirror;
     using vtx_view_t = Kokkos::View<ordinal_t*>;
+    using comp_vt = Kokkos::View<uint32_t*>;
+    using comp_mt = typename comp_vt::HostMirror;
     using vtx_subview_t = Kokkos::View<ordinal_t>;
     using vtx_mirror_t = typename vtx_view_t::HostMirror;
     using wgt_view_t = Kokkos::View<value_t*>;
