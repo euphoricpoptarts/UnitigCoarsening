@@ -470,10 +470,8 @@ int main(int argc, char **argv) {
             generate_hashmap(hashmap, kmer_s, k, kmer_count);
             printf("Time to generate hashmap: %.3fs\n", t5.seconds());
             t5.reset();
-            vtx_view_t g_s("graph portion", kmer_count);
-            Kokkos::parallel_for("init g", kmer_count, KOKKOS_LAMBDA(const ordinal_t i){
-                g_s(i) = ORD_MAX;
-            });
+            vtx_view_t g_s(Kokkos::ViewAllocateWithoutInitializing("graph portion"), kmer_count);
+            Kokkos::deep_copy(g_s, ORD_MAX);
             //assemble local graph by looking up k-1 suffixes inside hashmap
             crosses c = assemble_pruned_graph(assembler, kmer_s, hashmap, cross_s, cross_ids, k, g_s);
             cross_list.push_back(c);
@@ -501,10 +499,8 @@ int main(int argc, char **argv) {
         printf("Cross edges written: %u\n", cross_written_count);
         printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
         t.reset();
-        vtx_view_t small_g("small g", cross_offset);
-        Kokkos::parallel_for("init g", cross_offset, KOKKOS_LAMBDA(const ordinal_t i){
-            small_g(i) = ORD_MAX;
-        });
+        vtx_view_t small_g(Kokkos::ViewAllocateWithoutInitializing("small g"), cross_offset);
+        Kokkos::deep_copy(small_g, ORD_MAX);
         //assemble the graph induced by the inter-bucket edges, maximally coarsened within each bucket
         for(int i = 0; i < bucket_count; i++){
             for(int j = 0; j < bucket_count; j++){
