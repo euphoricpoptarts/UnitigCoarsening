@@ -21,10 +21,25 @@ void write_to_f(char_view_t unitigs, std::string fname){
     of.close();
 }
 
-void write_unitigs4(char_view_t chars, edge_view_t row_map, edge_offset_t k, graph_type glue_action, std::string fname){
+void write_to_f(char_mirror_t chars, std::string fname){
+    std::ofstream of(fname, std::ofstream::out | std::ofstream::app);
+    //FILE *of = fopen(fname.c_str(), "a");
+    if (!of.is_open()) {
+        printf("Error: Could not open input file. Exiting ...\n");
+        exit(1);
+    }
+    //string is already formatted, dump it into file
+    //need to be cautious about non-integer type of chars.extent(0)
+    //fprintf(of, "%.*s", chars.extent(0), chars.data());
+    of.write(chars.data(), chars.extent(0));
+    //fclose(of);
+    of.close();
+}
+
+void write_unitigs4(char_mirror_t chars, edge_mirror_t row_map, edge_offset_t k, graph_m glue_action, std::string fname){
     edge_offset_t null_size = glue_action.numRows();
-    edge_view_t write_sizes("write sizes", null_size + 1);
-    Kokkos::parallel_for("count writes", r_policy(0, null_size), KOKKOS_LAMBDA(const edge_offset_t i){
+    edge_mirror_t write_sizes("write sizes", null_size + 1);
+    Kokkos::parallel_for("count writes", host_policy(0, null_size), KOKKOS_LAMBDA(const edge_offset_t i){
         //+1 for '\n'
         edge_offset_t size = 1;
         for(edge_offset_t j = glue_action.row_map(i); j < glue_action.row_map(i + 1); j++){
@@ -38,7 +53,7 @@ void write_unitigs4(char_view_t chars, edge_view_t row_map, edge_offset_t k, gra
         write_sizes(i) = size;
     });
     edge_offset_t write_size = 0;
-    Kokkos::parallel_scan("count writes", r_policy(0, null_size), KOKKOS_LAMBDA(const edge_offset_t i, edge_offset_t& update, const bool final){
+    Kokkos::parallel_scan("count writes", host_policy(0, null_size), KOKKOS_LAMBDA(const edge_offset_t i, edge_offset_t& update, const bool final){
         edge_offset_t size = write_sizes(i);
         if(final){
             write_sizes(i) = update;
@@ -48,8 +63,8 @@ void write_unitigs4(char_view_t chars, edge_view_t row_map, edge_offset_t k, gra
         }
         update += size;
     }, write_size);
-    char_view_t writes("writes", write_size);
-    Kokkos::parallel_for("move writes", r_policy(0, null_size), KOKKOS_LAMBDA(const ordinal_t i){
+    char_mirror_t writes(Kokkos::ViewAllocateWithoutInitializing("writes"), write_size);
+    Kokkos::parallel_for("move writes", host_policy(0, null_size), KOKKOS_LAMBDA(const ordinal_t i){
         edge_offset_t write_offset = write_sizes(i);
         edge_offset_t start = glue_action.row_map(i);
         edge_offset_t end = glue_action.row_map(i + 1);

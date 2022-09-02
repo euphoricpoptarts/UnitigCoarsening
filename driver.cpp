@@ -162,9 +162,9 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers>& buckets, edge_offse
             comp_mt source = b.kmers.front();
             b.kmers.pop_front();
             edge_offset_t transfer_size = source.extent(0);
-            Kokkos::parallel_for("update cross ids", host_policy(b.crosscut_row_map[j*bucket_count], b.crosscut_row_map[(j+1)*bucket_count]), KOKKOS_LAMBDA(const ordinal_t i){
-                if(b.cross_ids(i) != ORD_MAX){
-                    b.cross_ids(i) += bucket_kmer_count;
+            Kokkos::parallel_for("update cross ids", host_policy(b.crosscut_row_map[j*bucket_count], b.crosscut_row_map[(j+1)*bucket_count]), KOKKOS_LAMBDA(const ordinal_t x){
+                if(b.cross_ids(x) != ORD_MAX){
+                    b.cross_ids(x) += bucket_kmer_count;
                 }
             });
             bucket_kmer_count += transfer_size / comp_size;
@@ -609,7 +609,7 @@ int main(int argc, char **argv) {
             vtx_view_t entries = Kokkos::subview(small_g_result.entries, std::make_pair(result_start, result_end));
             graph_type out_g(entries, row_map);
             //write to file
-            write_unitigs4(move_to_device(f_p.minis[i].chars), move_to_device(f_p.minis[i].row_map), k, out_g, out_fname);
+            write_unitigs4(f_p.minis[i].chars, f_p.minis[i].row_map, k, Kokkos::create_mirror(out_g), out_fname);
         }
         //printf("glue list length: %lu\n", glue_list.size());
         printf("Time to generate glue list: %.3fs\n", t.seconds());
