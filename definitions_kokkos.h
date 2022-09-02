@@ -63,6 +63,7 @@ namespace unitig_compact {
     using host_policy = Kokkos::RangePolicy<Kokkos::OpenMP>;
 
     using char_view_t = Kokkos::View<char*>;
+    using comp_vt = Kokkos::View<uint32_t*>;
     using char_mirror_t = typename char_view_t::HostMirror;
     using edge_view_t = Kokkos::View<edge_offset_t*>;
     using edge_subview_t = Kokkos::View<edge_offset_t, Device>;

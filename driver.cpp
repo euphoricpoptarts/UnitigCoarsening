@@ -151,6 +151,33 @@ char_view_t move_to_device(char_mirror_t x){
     return y;
 }
 
+comp_vt compress_kmers(edge_offset_t k, char_view_t kmers){
+    edge_offset_t k_pad = ((k + 15) / 16) * 16;
+    edge_offset_t comp_size = k_pad / 16;
+    edge_offset_t n = kmers.extent(0) / k;
+    comp_vt kmer_compress(Kokkos::ViewAllocateWithoutInitializing("kmers compressed nonpart"), n * comp_size);
+    vtx_mirror_t char_map_mirror("char map mirror", 256);
+    char_map_mirror('A') = 0;
+    char_map_mirror('C') = 1;
+    char_map_mirror('G') = 2;
+    char_map_mirror('T') = 3;
+    vtx_view_t char_map("char map", 256);
+    Kokkos::deep_copy(char_map, char_map_mirror);
+    Kokkos::parallel_for("compress kmers", n, KOKKOS_LAMBDA(const edge_offset_t j){
+        uint32_t byte = 0;
+        for(edge_offset_t x = 0; x < k_pad; x++){
+            if((x & 15) == 0) byte = 0;
+            if(x < k){
+                uint32_t write = char_map(kmers(j*k + x));
+                write <<= 2*(x & 15);
+                byte = byte | write;
+            }
+            if((x & 15) == 15) kmer_compress(j*comp_size + (x / 16)) = byte;
+        }
+    });
+    return kmer_compress;
+}
+
 int main(int argc, char **argv) {
 
     if (argc != 4) {
@@ -172,34 +199,20 @@ int main(int argc, char **argv) {
         t3.reset();
         printf("kmer size: %lu, kmers: %lu\n", kmers.extent(0), kmers.extent(0)/k);
         char_view_t rcomps = generate_rcomps(kmers, k, kmers.extent(0)/k);
-        edge_view_t vtx_map = generate_hashmap(kmers, rcomps, k, kmers.extent(0)/k);
+        comp_vt kmer_comp = compress_kmers(k, kmers);
+        comp_vt rcomps_comp = compress_kmers(k, rcomps);
+        edge_offset_t k_pad = ((k + 15) / 16) * 16;
+        edge_offset_t comp_size = k_pad / 16;
+        edge_view_t vtx_map = generate_hashmap(kmer_comp, rcomps_comp, comp_size, kmers.extent(0)/k);
         printf("kmer hashmap size: %lu\n", vtx_map.extent(0));
         printf("Time to generate hashmap: %.3f\n", t3.seconds());
         t3.reset();
         std::list<graph_t> glue_list;
-        char_mirror_t kmer_copy;
         ExperimentLoggerUtil experiment;
         {
-            canon_graph g = assemble_pruned_graph(kmers, rcomps, vtx_map, k);
-            //graph_t gx = convert_to_graph(g);
-            //dump_graph(gx);
+            canon_graph g = assemble_pruned_graph(kmer_comp, rcomps_comp, vtx_map, comp_size);
             coarsener_t coarsener;
-            //{
-            //    t3.reset();
-            //    graph_t g_base = assemble_graph(kmers, kpmers, vtx_map, k);
-            //    printf("entries: %lu\n", g_base.entries.extent(0));
-            //    printf("Time to assemble base graph: %.3f\n", t3.seconds());
-            //    t3.reset();
-            //    //kmer_copy = move_to_main(kmers);
-            //    //this is likely the peak memory usage point of the program
-            //    //don't need these anymore, delete them
-            //    //Kokkos::resize(edge_map, 0);
                 Kokkos::resize(vtx_map, 0);
-            //    Kokkos::resize(kpmers, 0);
-            //    //will need this later but we made a copy
-            //    //Kokkos::resize(kmers, 0);
-            //    g = coarsener.prune_edges(g_base);
-            //}
             printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
             t.reset();
             glue_list = coarsener.coarsen_de_bruijn_full_cycle(g, experiment);
@@ -216,7 +229,6 @@ int main(int argc, char **argv) {
         printf("Interpolation graph transpose time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::InterpTranspose));
         printf("Glue compact time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::CompactGlues));
         t.reset();
-        //kmers = move_to_device(kmer_copy);
         t.reset();
         compress_unitigs_maximally2(kmers, rcomps, glue_list, k, out_fname);
         printf("Time to compact unitigs: %.3fs\n", t.seconds());

@@ -15,6 +15,84 @@ uint32_t fnv(const char_view_t chars, edge_offset_t offset, edge_offset_t k){
     return hash;
 }
 
+KOKKOS_INLINE_FUNCTION
+uint32_t fnv_pref(const comp_vt chars, edge_offset_t offset, edge_offset_t comp){
+    uint32_t hash = 2166136261U;
+    const uint32_t pref_mask = 268435455;
+    for(edge_offset_t i = offset; i < offset + comp; i++)
+    {
+        uint32_t x = chars(i);
+        if(i + 1 == offset + comp) x = x & pref_mask;
+        for(int i = 0; i < 4; i++){
+            char y = (x >> i*8) & 255;
+            hash = hash ^ y; // xor next byte into the bottom of the hash
+            hash = hash * 16777619; // Multiply by prime number found to work well
+        }
+    }
+    return hash;
+}
+
+KOKKOS_INLINE_FUNCTION
+uint32_t fnv_suf(const comp_vt chars, edge_offset_t offset, edge_offset_t comp){
+    uint32_t hash = 2166136261U;
+    const uint32_t pref_mask = 268435455;
+    for(edge_offset_t i = offset; i < offset + comp; i++)
+    {
+        uint32_t x = chars(i);
+        x = x >> 2;
+        if(i + 1 == offset + comp) x = x & pref_mask;
+        else{
+            uint32_t addon = chars(i + 1) & 3;
+            x = x | (addon << 30);
+        }
+        for(int i = 0; i < 4; i++){
+            char y = (x >> i*8) & 255;
+            hash = hash ^ y; // xor next byte into the bottom of the hash
+            hash = hash * 16777619; // Multiply by prime number found to work well
+        }
+    }
+    return hash;
+}
+
+//gotta do everything myself
+KOKKOS_INLINE_FUNCTION
+bool cmp_pref(const comp_vt s1_chars, const comp_vt s2_chars, const edge_offset_t s1_offset, const edge_offset_t s2_offset, const edge_offset_t comp){
+    const uint32_t pref_mask = 268435455;
+    for(edge_offset_t i = 0; i < comp; i++){
+        if(i + 1 == comp){
+            if((s1_chars(s1_offset + i) & pref_mask) != (s2_chars(s2_offset + i) & pref_mask)){
+                return false;
+            }
+        } else {
+            if(s1_chars(s1_offset + i) != s2_chars(s2_offset + i)){
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+KOKKOS_INLINE_FUNCTION
+bool cmp_suf(const comp_vt s1_chars, const comp_vt s2_chars, const edge_offset_t s1_offset, const edge_offset_t s2_offset, const edge_offset_t comp){
+    const uint32_t pref_mask = 268435455;
+    for(edge_offset_t i = 0; i < comp; i++){
+        uint32_t suf = s1_chars(s1_offset + i);
+        suf = suf >> 2;
+        if(i + 1 == comp){
+            if((suf & pref_mask) != (s2_chars(s2_offset + i) & pref_mask)){
+                return false;
+            }
+        } else {
+            uint32_t suf_addon = s1_chars(s1_offset + i + 1) & 3;
+            suf = suf | (suf_addon << 30);
+            if(suf != s2_chars(s2_offset + i)){
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 //gotta do everything myself
 KOKKOS_INLINE_FUNCTION
 bool cmp(const char_view_t s1_chars, const char_view_t s2_chars, const edge_offset_t s1_offset, const edge_offset_t s2_offset, const edge_offset_t k){
@@ -28,8 +106,8 @@ bool cmp(const char_view_t s1_chars, const char_view_t s2_chars, const edge_offs
 
 //check if vtx found in edge_chars at offset exists in vtx_chars using a hashmap
 KOKKOS_INLINE_FUNCTION
-edge_offset_t find_vtx_from_edge(const char_view_t in_chars, const char_view_t map1_chars, const char_view_t map2_chars, const edge_view_t vtx_map, edge_offset_t offset, edge_offset_t k, edge_offset_t size){
-    size_t hash = fnv(in_chars, offset, k - 1);
+edge_offset_t find_vtx_from_edge(const comp_vt in_chars, const comp_vt map1_chars, const comp_vt map2_chars, const edge_view_t vtx_map, edge_offset_t offset, edge_offset_t comp, edge_offset_t size){
+    size_t hash = fnv_suf(in_chars, offset, comp);
     size_t hash_cast = vtx_map.extent(0) - 1;
     hash = hash & hash_cast;
     edge_offset_t null_marker = 2*size;
@@ -41,13 +119,13 @@ edge_offset_t find_vtx_from_edge(const char_view_t in_chars, const char_view_t m
             addr -= null_marker;
             //nullified = true;
         }
-        char_view_t cmp_chars = map1_chars;
+        comp_vt cmp_chars = map1_chars;
         if(addr >= size){
             cmp_chars = map2_chars;
             addr -= size;
         }
-        edge_offset_t hash_offset = addr*k;
-        if(cmp(in_chars, cmp_chars, offset, hash_offset, k - 1)){
+        edge_offset_t hash_offset = addr*comp;
+        if(cmp_suf(in_chars, cmp_chars, offset, hash_offset, comp)){
             return actual;
         }
         hash = (hash + 1) & hash_cast;
@@ -55,7 +133,7 @@ edge_offset_t find_vtx_from_edge(const char_view_t in_chars, const char_view_t m
     return EDGE_MAX;
 }
 
-edge_view_t generate_hashmap(char_view_t kmers, char_view_t rcomps, edge_offset_t k, edge_offset_t size){
+edge_view_t generate_hashmap(comp_vt kmers, comp_vt rcomps, edge_offset_t comp, edge_offset_t size){
     size_t hashmap_size = 1;
     size_t preferred_size = 2*size;
     edge_offset_t null_marker = 2*size;
@@ -66,7 +144,7 @@ edge_view_t generate_hashmap(char_view_t kmers, char_view_t rcomps, edge_offset_
     });
     size_t hash_cast = hashmap_size - 1;
     Kokkos::parallel_for("fill hashmap", size, KOKKOS_LAMBDA(const edge_offset_t i){
-        size_t hash = fnv(kmers, k*i, k - 1);
+        size_t hash = fnv_pref(kmers, comp*i, comp);
         hash = hash & hash_cast;
         bool success = Kokkos::atomic_compare_exchange_strong(&out(hash), EDGE_MAX, i);
         //linear probing
@@ -74,13 +152,13 @@ edge_view_t generate_hashmap(char_view_t kmers, char_view_t rcomps, edge_offset_
             edge_offset_t written = out(hash);
             if(written >= null_marker){
                 written = written - null_marker;
-                if(cmp(kmers, kmers, k*i, k*written, k - 1)){
+                if(cmp_pref(kmers, kmers, comp*i, comp*written, comp)){
                     //hash value matches k-1 mer
                     //but has been nullified
                     //do nothing
                     break;
                 }
-            } else if(cmp(kmers, kmers, k*i, k*written, k - 1)){
+            } else if(cmp_pref(kmers, kmers, comp*i, comp*written, comp)){
                 //hash value matches k-1 mer
                 //nullify it
                 Kokkos::atomic_compare_exchange_strong(&out(hash), written, i + null_marker);
@@ -91,12 +169,12 @@ edge_view_t generate_hashmap(char_view_t kmers, char_view_t rcomps, edge_offset_
         }
     });
     Kokkos::parallel_for("fill hashmap", size, KOKKOS_LAMBDA(const edge_offset_t i){
-        size_t hash = fnv(rcomps, k*i, k - 1);
+        size_t hash = fnv_pref(rcomps, comp*i, comp);
         hash = hash & hash_cast;
         bool success = Kokkos::atomic_compare_exchange_strong(&out(hash), EDGE_MAX, i + size);
         //linear probing
         while(!success){
-            char_view_t compare = kmers;
+            comp_vt compare = kmers;
             edge_offset_t written = out(hash);
             edge_offset_t write_check = written;
             if(written >= null_marker){
@@ -105,7 +183,7 @@ edge_view_t generate_hashmap(char_view_t kmers, char_view_t rcomps, edge_offset_
                     written = written - size;
                     compare = rcomps;
                 }
-                if(cmp(rcomps, compare, k*i, k*written, k - 1)){
+                if(cmp_pref(rcomps, compare, comp*i, comp*written, comp)){
                     //hash value matches k-1 mer
                     //but has been nullified
                     //do nothing
@@ -116,7 +194,7 @@ edge_view_t generate_hashmap(char_view_t kmers, char_view_t rcomps, edge_offset_
                     written = written - size;
                     compare = rcomps;
                 }
-                if(cmp(rcomps, compare, k*i, k*written, k - 1)){
+                if(cmp_pref(rcomps, compare, comp*i, comp*written, comp)){
                     //hash value matches k-1 mer
                     //nullify it
                     Kokkos::atomic_compare_exchange_strong(&out(hash), write_check, i + size + null_marker);
@@ -219,18 +297,18 @@ graph_t convert_to_graph(vtx_view_t g){
     return graph_t(entries, row_map);
 }
 
-canon_graph assemble_pruned_graph(char_view_t kmers, char_view_t rcomps, edge_view_t vtx_map, edge_offset_t k){
-    ordinal_t n = kmers.extent(0) / k;
+canon_graph assemble_pruned_graph(comp_vt kmers, comp_vt rcomps, edge_view_t vtx_map, edge_offset_t comp){
+    ordinal_t n = kmers.extent(0) / comp;
     //both the in and out edge counts for each vertex are packed into one char
     char_view_t edge_count("edge count", n);
     edge_view_t in1("in vertex", n);
     edge_view_t in2("in vertex", n);
     Kokkos::parallel_for("translate edges", n, KOKKOS_LAMBDA(const ordinal_t i){
-        edge_offset_t v = find_vtx_from_edge(kmers, kmers, rcomps, vtx_map, i*k + 1, k, n);
+        edge_offset_t v = find_vtx_from_edge(kmers, kmers, rcomps, vtx_map, i*comp, comp, n);
         in1(i) = v;
     });
     Kokkos::parallel_for("translate rcomp edges", n, KOKKOS_LAMBDA(const ordinal_t i){
-        edge_offset_t v = find_vtx_from_edge(rcomps, kmers, rcomps, vtx_map, i*k + 1, k, n);
+        edge_offset_t v = find_vtx_from_edge(rcomps, kmers, rcomps, vtx_map, i*comp, comp, n);
         in2(i) = v;
     });
     vtx_view_t g1("pruned out entries", n);
