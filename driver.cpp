@@ -201,9 +201,11 @@ int main(int argc, char **argv) {
         char_view_t rcomps = generate_rcomps(kmers, k, kmers.extent(0)/k);
         comp_vt kmer_comp = compress_kmers(k, kmers);
         comp_vt rcomps_comp = compress_kmers(k, rcomps);
+        Kokkos::resize(kmers, 0);
+        Kokkos::resize(rcomps, 0);
         edge_offset_t k_pad = ((k + 15) / 16) * 16;
         edge_offset_t comp_size = k_pad / 16;
-        edge_view_t vtx_map = generate_hashmap(kmer_comp, rcomps_comp, comp_size, kmers.extent(0)/k);
+        vtx_view_t vtx_map = generate_hashmap(kmer_comp, rcomps_comp, comp_size, kmer_comp.extent(0) / comp_size);
         printf("kmer hashmap size: %lu\n", vtx_map.extent(0));
         printf("Time to generate hashmap: %.3f\n", t3.seconds());
         t3.reset();
@@ -212,7 +214,7 @@ int main(int argc, char **argv) {
         {
             canon_graph g = assemble_pruned_graph(kmer_comp, rcomps_comp, vtx_map, comp_size);
             coarsener_t coarsener;
-                Kokkos::resize(vtx_map, 0);
+            Kokkos::resize(vtx_map, 0);
             printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
             t.reset();
             glue_list = coarsener.coarsen_de_bruijn_full_cycle(g, experiment);
@@ -230,7 +232,7 @@ int main(int argc, char **argv) {
         printf("Glue compact time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::CompactGlues));
         t.reset();
         t.reset();
-        compress_unitigs_maximally2(kmers, rcomps, glue_list, k, out_fname);
+        compress_unitigs_maximally2(kmer_comp, rcomps_comp, glue_list, k, out_fname);
         printf("Time to compact unitigs: %.3fs\n", t.seconds());
         t.reset();
         printf("Total time: %.3fs\n", t2.seconds());

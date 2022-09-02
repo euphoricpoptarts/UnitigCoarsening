@@ -50,7 +50,7 @@ namespace unitig_compact {
     typedef double sgp_real_t;
     typedef edge_offset_t value_t;
 	static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
-	static constexpr edge_offset_t EDGE_MAX = std::numeric_limits<edge_offset_t>::max();
+	static constexpr ordinal_t HASH_NULL = std::numeric_limits<ordinal_t>::max();
 
     typedef Kokkos::Device<Kokkos::DefaultExecutionSpace, typename Kokkos::DefaultExecutionSpace::memory_space> Device;
     using matrix_t = typename KokkosSparse::CrsMatrix<int, ordinal_t, Device, void, edge_offset_t>;
