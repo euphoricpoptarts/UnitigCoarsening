@@ -119,7 +119,7 @@ char_view_t decompress_kmers(comp_vt comped, edge_offset_t k){
         for(edge_offset_t i = 0; i < comp_size; i++){
             uint32_t bytes = comped(x*comp_size + i);
             for(edge_offset_t j = 0; j < 16; j++){
-                char b = (bytes >> (2*(15-j))) & 3;
+                char b = (bytes >> (2*j)) & 3;
                 b = char_map(b);
                 if(16*i + j < k) kmers(x*k + 16*i + j) = b;
             }

@@ -348,9 +348,12 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(char_view_t& kmers, edge_offset_t 
     Kokkos::parallel_for("compress kmers", buckets_m(large_buckets), KOKKOS_LAMBDA(const edge_offset_t j){
         uint32_t byte = 0;
         for(edge_offset_t x = 0; x < k_pad; x++){
-            byte <<= 2;
             if((x & 15) == 0) byte = 0;
-            if(x < k) byte = byte | char_map(kmers(j*k + x));
+            if(x < k){
+                uint32_t write = char_map(kmers(j*k + x));
+                write <<= 2*(x & 15);
+                byte = byte | write;
+            }
             if((x & 15) == 15) kmer_compress(j*comp_size + (x / 16)) = byte;
         }
     });
