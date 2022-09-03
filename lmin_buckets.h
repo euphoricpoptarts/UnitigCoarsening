@@ -335,6 +335,10 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(char_view_t& kmers, edge_offset_t 
             ordinal_t offset = Kokkos::atomic_fetch_add(&cross_buckets_count(less_bucket), 1);
             ordinal_t cross_insert = cross_buckets(out_bucket) + offset;
             cross_writes(cross_insert) = i;
+            //the lmin_out -> lmin_in crossbucket tracks the id of the out-side kmer of this edge
+            //and will eventually know the coarse id
+            //the lmin_in -> lmin_out crossbucket will be written with the in-side kmer of the edge
+            //when it is discovered later
             cross_ids(cross_insert) = insert - buckets(lmin_out);
             cross_insert = cross_buckets(in_bucket) + offset;
             cross_writes(cross_insert) = i;
