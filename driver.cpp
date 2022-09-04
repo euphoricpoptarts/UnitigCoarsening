@@ -454,7 +454,7 @@ int main(int argc, char **argv) {
             ordinal_t kmer_count = kmer_b.part_sizes(i);
             comp_vt kmer_compress(Kokkos::ViewAllocateWithoutInitializing("kmer part"), kmer_b.kmers[i].extent(0));
             Kokkos::deep_copy(kmer_compress, kmer_b.kmers[i]);
-            printf("Time to move buckets to device: %.3fs\n", t2.seconds());
+            printf("Time to move bucket %i to device: %.3fs\n", i, t2.seconds());
             t2.reset();
             comp_mt cross_s_m = Kokkos::subview(kmer_b.crosscut, std::make_pair(kmer_b.crosscut_row_map(bucket_count*i)*comp_size, kmer_b.crosscut_row_map(bucket_count*(i+1))*comp_size));
             vtx_mirror_t cross_ids_m = Kokkos::subview(kmer_b.cross_ids, std::make_pair(kmer_b.crosscut_row_map(bucket_count*i), kmer_b.crosscut_row_map(bucket_count*(i+1))));

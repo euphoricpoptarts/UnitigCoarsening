@@ -255,7 +255,7 @@ graph_type collect_outputs_first(interp_t interp, ordinal_t null_id) {
 }
 
 ordinal_t relabel_crosses(crosses c, vtx_view_t cross_glues, interp_t interp, ordinal_t offset){
-    vtx_subview_t relabel_count("relabel count");
+    ordinal_t next_offset = 0;
     Kokkos::parallel_scan("enumerate crosses", interp.entries.extent(0), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
         if(interp.entries(i) == ORD_MAX){
             if(final){
@@ -263,12 +263,7 @@ ordinal_t relabel_crosses(crosses c, vtx_view_t cross_glues, interp_t interp, or
             }
             update++;
         }
-        if(final && i + 1 == interp.entries.extent(0)){
-            relabel_count() = update;
-        }
-    });
-    ordinal_t next_offset = 0;
-    Kokkos::deep_copy(next_offset, relabel_count);
+    }, next_offset);
     next_offset += offset;
     Kokkos::parallel_for("relabel crosses", cross_glues.extent(0), KOKKOS_LAMBDA(const ordinal_t x){
         ordinal_t i = cross_glues(x);
@@ -492,19 +487,6 @@ coarsen_output coarsen_de_bruijn_full_cycle(vtx_view_t cur, crosses c, ordinal_t
     cross_list.clear();
     ordinal_t total_rows = glue_collapsed.numRows();
     ordinal_t cross_rows = cross_collapsed.numRows();
-#ifdef HUGE
-    printf("Total vtx after glueing: %lu\n", total_rows);
-    printf("Total cut vtx after glueing: %lu\n", cross_rows);
-    printf("Total cut vtx after glueing (verify): %lu\n", cross_offset);
-#elif defined(LARGE)
-    printf("Total vtx after glueing: %u\n", total_rows);
-    printf("Total cut vtx after glueing: %u\n", cross_rows);
-    printf("Total cut vtx after glueing (verify): %u\n", cross_offset);
-#else
-    printf("Total vtx after glueing: %u\n", total_rows);
-    printf("Total cut vtx after glueing: %u\n", cross_rows);
-    printf("Total cut vtx after glueing (verify): %u\n", cross_offset);
-#endif
     coarsen_output out;
     out.glue = glue_collapsed;
     out.cross = cross_collapsed;
