@@ -114,7 +114,7 @@ struct bucket_kpmers {
     std::list<comp_mt> kmers;
     ordinal_t buckets;
     ordinal_t size;
-    char_mirror_t crosscut;
+    comp_mt crosscut;
     vtx_mirror_t cross_ids;
     vtx_mirror_t crosscut_row_map;
     ordinal_t crosscut_buckets;
@@ -384,26 +384,26 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(char_view_t& kmers, edge_offset_t 
             }
         });
     }
-    char_view_t crosscut_partitioned(Kokkos::ViewAllocateWithoutInitializing("crosscut partitioned"), total_crosscut * k);
+    comp_vt crosscut_partitioned(Kokkos::ViewAllocateWithoutInitializing("crosscut partitioned"), total_crosscut * comp_size);
     if(typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::HostSpace)){
         Kokkos::parallel_for("write kmers", policy(total_crosscut, 32), KOKKOS_LAMBDA(const member& thread){
             ordinal_t write_id = thread.league_rank();
             ordinal_t read_id = cross_writes(write_id);
-            edge_offset_t write_idx = k*write_id;
-            edge_offset_t start = k*read_id;
-            edge_offset_t end = start + k;
+            edge_offset_t write_idx = comp_size*write_id;
+            edge_offset_t start = comp_size*read_id;
+            edge_offset_t end = start + comp_size;
             Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t j){
-                crosscut_partitioned(write_idx + (j - start)) = kmers(j);
+                crosscut_partitioned(write_idx + (j - start)) = kmer_compress(j);
             });
         });
     } else {
         Kokkos::parallel_for("write kmers host", total_crosscut, KOKKOS_LAMBDA(const ordinal_t write_id){
             ordinal_t read_id = cross_writes(write_id);
-            edge_offset_t write_idx = k*write_id;
-            edge_offset_t start = k*read_id;
-            edge_offset_t end = start + k;
+            edge_offset_t write_idx = comp_size*write_id;
+            edge_offset_t start = comp_size*read_id;
+            edge_offset_t end = start + comp_size;
             for(edge_offset_t j = start; j < end; j++){
-                crosscut_partitioned(write_idx + (j - start)) = kmers(j);
+                crosscut_partitioned(write_idx + (j - start)) = kmer_compress(j);
             }
         });
     }
