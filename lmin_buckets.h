@@ -146,7 +146,17 @@ graph_type move_to_device(graph_m x){
     return graph_type(entries, row_map);
 }
 
-minitigs generate_minitigs(graph_type glues, char_view_t kmers, edge_offset_t k){
+KOKKOS_INLINE_FUNCTION
+char get_char2(comp_vt source, edge_offset_t offset, edge_offset_t char_id){
+    offset += (char_id / 16);
+    char_id = char_id % 16;
+    uint32_t bytes = source(offset);
+    char byte = bytes >> (2*char_id);
+    byte = byte & 3;
+    return byte;
+}
+
+minitigs generate_minitigs(graph_type glues, comp_vt kmers, edge_offset_t k, edge_offset_t comp_size){
     ordinal_t n = glues.numRows();
     edge_view_t row_map("minitig row map", n + 1);
     edge_offset_t total_chars = 0;
@@ -157,6 +167,13 @@ minitigs generate_minitigs(graph_type glues, char_view_t kmers, edge_offset_t k)
         }
     }, total_chars);
     char_view_t chars("minitig chars", total_chars);
+    char_mirror_t char_map_mirror("char map mirror", 4);
+    char_map_mirror(0) = 'A';
+    char_map_mirror(1) = 'C';
+    char_map_mirror(2) = 'G';
+    char_map_mirror(3) = 'T';
+    char_view_t char_map("char map", 4);
+    Kokkos::deep_copy(char_map, char_map_mirror);
     Kokkos::parallel_for("write minitig chars", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
         ordinal_t i = thread.league_rank();
         edge_offset_t write_to = row_map(i);
@@ -164,10 +181,10 @@ minitigs generate_minitigs(graph_type glues, char_view_t kmers, edge_offset_t k)
             ordinal_t u = glues.entries(j);
             edge_offset_t local_write = write_to + j - glues.row_map(i);
             if(j + 1 < glues.row_map(i + 1)){
-                chars(local_write) = kmers(u*k);
+                chars(local_write) = char_map(get_char2(kmers, u*comp_size, 0));
             } else {
-                for(edge_offset_t l = u*k; l < (u+1)*k; l++){
-                    chars(local_write++) = kmers(l);
+                for(edge_offset_t l = 0; l < k; l++){
+                    chars(local_write++) = char_map(get_char2(kmers, u*comp_size, l));
                 }
             }
         });

@@ -456,9 +456,6 @@ int main(int argc, char **argv) {
             Kokkos::deep_copy(kmer_compress, kmer_b.kmers[i]);
             printf("Time to move buckets to device: %.3fs\n", t2.seconds());
             t2.reset();
-            char_view_t kmer_s = decompress_kmers(kmer_compress, k);
-            printf("Time to decompress kmers: %.3fs\n", t2.seconds());
-            t2.reset();
             comp_mt cross_s_m = Kokkos::subview(kmer_b.crosscut, std::make_pair(kmer_b.crosscut_row_map(bucket_count*i)*comp_size, kmer_b.crosscut_row_map(bucket_count*(i+1))*comp_size));
             vtx_mirror_t cross_ids_m = Kokkos::subview(kmer_b.cross_ids, std::make_pair(kmer_b.crosscut_row_map(bucket_count*i), kmer_b.crosscut_row_map(bucket_count*(i+1))));
             comp_vt cross_s_compress("cross s", cross_s_m.extent(0));
@@ -478,18 +475,17 @@ int main(int argc, char **argv) {
             crosses c = assemble_pruned_graph(assembler, kmer_compress, hashmap, cross_s_compress, cross_ids, comp_size, g_s);
             cross_list.push_back(c);
             printf("Time to assemble bucket %i: %.4f\n", i, t2.seconds());
-            //printf("Bucket %i has %u kmers and %u k+1-mers\n", i, kmer_count, kpmer_count);
             t2.reset();
             //coarsen local graph and relabel vertices of inter-bucket edges
             c_output x = coarsener.coarsen_de_bruijn_full_cycle(g_s, c, cross_offset, experiment);
             printf("Time to coarsen bucket %i: %.4f\n", i, t2.seconds());
             t2.reset();
-            write_unitigs2(kmer_s, k, x.glue, out_fname);
+            write_intra_bucket_outputs(kmer_compress, k, comp_size, x.glue, out_fname);
             //write output of this bucket that does not require knowledge of other buckets
             printf("Time to write bucket %i's non-crossing output: %.3fs\n", i, t2.seconds());
             t2.reset();
             //generate partial unitigs from kmers
-            minitigs y = generate_minitigs(x.cross, kmer_s, k);
+            minitigs y = generate_minitigs(x.cross, kmer_compress, k, comp_size);
             c_outputs.push_back(y);
             printf("Time to repartition bucket %i's kmers: %.3fs\n", i, t2.seconds());
             t2.reset();

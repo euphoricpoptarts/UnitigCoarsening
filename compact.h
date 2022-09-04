@@ -133,7 +133,17 @@ void write_unitigs3(char_view_t kmers, edge_view_t kmer_rows, edge_offset_t k, g
     write_to_f(writes, fname);
 }
 
-void write_unitigs2(char_view_t kmers, edge_offset_t k, graph_type glue_action, std::string fname){
+KOKKOS_INLINE_FUNCTION
+char get_char(comp_vt source, edge_offset_t offset, edge_offset_t char_id){
+    offset += (char_id / 16);
+    char_id = char_id % 16;
+    uint32_t bytes = source(offset);
+    char byte = bytes >> (2*char_id);
+    byte = byte & 3;
+    return byte;
+}
+
+void write_intra_bucket_outputs(comp_vt kmers, edge_offset_t k, edge_offset_t comp_size, graph_type glue_action, std::string fname){
     edge_offset_t null_size = glue_action.numRows();
     edge_view_t write_sizes("write sizes", null_size + 1);
     Kokkos::parallel_scan("count writes", r_policy(0, null_size), KOKKOS_LAMBDA(const edge_offset_t i, edge_offset_t& update, const bool final){
@@ -152,6 +162,13 @@ void write_unitigs2(char_view_t kmers, edge_offset_t k, graph_type glue_action, 
     edge_subview_t write_size_sub = Kokkos::subview(write_sizes, null_size);
     Kokkos::deep_copy(write_size, write_size_sub);
     char_view_t writes("writes", write_size);
+    char_mirror_t char_map_mirror("char map mirror", 4);
+    char_map_mirror(0) = 'A';
+    char_map_mirror(1) = 'C';
+    char_map_mirror(2) = 'G';
+    char_map_mirror(3) = 'T';
+    char_view_t char_map("char map", 4);
+    Kokkos::deep_copy(char_map, char_map_mirror);
     Kokkos::parallel_for("move writes", policy(null_size, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
         ordinal_t i = thread.league_rank();
         edge_offset_t write_offset = write_sizes(i);
@@ -161,11 +178,11 @@ void write_unitigs2(char_view_t kmers, edge_offset_t k, graph_type glue_action, 
             ordinal_t u = glue_action.entries(j);
             if(j > start){
                 edge_offset_t offset = write_offset + (k - 1) + (j - start);
-                writes(offset) = kmers((u + 1)*k - 1);
+                writes(offset) = char_map(get_char(kmers, u*comp_size, k - 1));
             } else {
                 edge_offset_t offset = write_offset;
-                for(edge_offset_t x = u*k; x < k*(u+1); x++){
-                    writes(offset) = kmers(x);
+                for(edge_offset_t x = 0; x < k; x++){
+                    writes(offset) = char_map(get_char(kmers, u*comp_size, x));
                     offset++;
                 }
             }
@@ -349,15 +366,6 @@ void compress_unitigs_maximally(char_view_t kmers, std::list<graph_type> glue_ac
         compress_unitigs(kmers, sizes, *glue_iter, k, iteration++);
         printf("Compact time: %.3f\n", t.seconds());
         t.reset();
-        glue_iter++;
-    }
-}
-
-void compress_unitigs_maximally2(char_view_t kmers, std::list<graph_type> glue_actions, edge_offset_t k, std::string fname){
-    ordinal_t n = kmers.extent(0) / k;
-    auto glue_iter = glue_actions.begin();
-    while(glue_iter != glue_actions.end()){
-        write_unitigs2(kmers, k, *glue_iter, fname);
         glue_iter++;
     }
 }
