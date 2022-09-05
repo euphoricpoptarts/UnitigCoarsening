@@ -46,26 +46,35 @@ namespace Kokkos { //reduction identity must be defined in Kokkos namespace
 namespace unitig_compact{
 
 KOKKOS_INLINE_FUNCTION
-void get_double_lmin(const char_view_t& chars, const vtx_view_t& lmin_map, const vtx_view_t& char_map, edge_offset_t offset, edge_offset_t k, edge_offset_t l, ordinal_t& l1, ordinal_t& l2){
+char get_char2(comp_vt source, edge_offset_t offset, edge_offset_t char_id){
+    offset += (char_id / 16);
+    char_id = char_id % 16;
+    uint32_t bytes = source(offset);
+    char byte = bytes >> (2*char_id);
+    byte = byte & 3;
+    return byte;
+}
+
+KOKKOS_INLINE_FUNCTION
+void get_double_lmin(const comp_vt& chars, const vtx_view_t& lmin_map, edge_offset_t offset, edge_offset_t k, edge_offset_t l, ordinal_t& l1, ordinal_t& l2){
     const ordinal_t lmer_mask = (1 << (2*l)) - 1;
     ordinal_t lmer_id = 0;
     l1 = ORD_MAX;
     l2 = ORD_MAX;
-    for(edge_offset_t i = offset; i < offset + k; i++)
+    for(edge_offset_t i = 0; i < k; i++)
     {
-        char c = chars(i);
-        ordinal_t c_val = char_map(c);
+        ordinal_t c_val = get_char2(chars, offset, i);
         //emplace c_val into the least significant two bits and trim the most significant bits
         lmer_id <<= 2;
         lmer_id ^= c_val;
         lmer_id &= lmer_mask;
 
-        if(i + 1 - offset >= l && i + 1 < offset + k){
+        if(i + 1 >= l && i + 1 < k){
             if(l1 > lmin_map(lmer_id)){
                 l1 = lmin_map(lmer_id);
             }
         }
-        if(i + 1 - offset >= l + 1){
+        if(i + 1 >= l + 1){
             if(l2 > lmin_map(lmer_id)){
                 l2 = lmin_map(lmer_id);
             }
@@ -144,16 +153,6 @@ graph_type move_to_device(graph_m x){
     vtx_view_t entries("entries", x.entries.extent(0));
     Kokkos::deep_copy(entries, x.entries);
     return graph_type(entries, row_map);
-}
-
-KOKKOS_INLINE_FUNCTION
-char get_char2(comp_vt source, edge_offset_t offset, edge_offset_t char_id){
-    offset += (char_id / 16);
-    char_id = char_id % 16;
-    uint32_t bytes = source(offset);
-    char byte = bytes >> (2*char_id);
-    byte = byte & 3;
-    return byte;
 }
 
 minitigs generate_minitigs(graph_type glues, comp_vt kmers, edge_offset_t k, edge_offset_t comp_size){
@@ -262,26 +261,21 @@ bucket_minitigs partition_for_output(ordinal_t buckets, minitigs x, edge_offset_
 }
 
 template <class T>
-T find_l_minimizer(char_view_t& kmers, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_bucket_map, ordinal_t size);
+T find_l_minimizer(comp_vt& kmers, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_bucket_map, ordinal_t size);
 
 template <>
-bucket_kpmers find_l_minimizer<bucket_kpmers>(char_view_t& kmers, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_bucket_map, ordinal_t size){
+bucket_kpmers find_l_minimizer<bucket_kpmers>(comp_vt& kmer_compress, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_bucket_map, ordinal_t size){
     ordinal_t lmin_buckets = 1;
     lmin_buckets <<= 2*l;
     ordinal_t large_buckets_mask = large_buckets - 1;
-    vtx_mirror_t char_map_mirror("char map mirror", 256);
-    char_map_mirror('A') = 0;
-    char_map_mirror('C') = 1;
-    char_map_mirror('G') = 2;
-    char_map_mirror('T') = 3;
-    vtx_view_t char_map("char map", 256);
-    Kokkos::deep_copy(char_map, char_map_mirror);
     vtx_view_t lmin_counter("lmin counter", large_buckets);//lmin_buckets);
     vtx_view_t out_lmins("lmins", size);
     vtx_view_t in_lmins("lmins", size);
+    edge_offset_t k_pad = ((k + 15) / 16) * 16;
+    edge_offset_t comp_size = k_pad / 16;
     Kokkos::Timer t;
     Kokkos::parallel_for("calc lmins", size, KOKKOS_LAMBDA(const ordinal_t i){
-        get_double_lmin(kmers, lmin_bucket_map, char_map, k*i, k, l, out_lmins(i), in_lmins(i));
+        get_double_lmin(kmer_compress, lmin_bucket_map, comp_size*i, k, l, out_lmins(i), in_lmins(i));
     });
     //printf("Found lmins in %.3f seconds\n", t.seconds());
     t.reset();
@@ -363,21 +357,6 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(char_view_t& kmers, edge_offset_t 
     });
     //printf("Partitioned kmers in %.3f seconds\n", t.seconds());
     t.reset();
-    edge_offset_t k_pad = ((k + 15) / 16) * 16;
-    edge_offset_t comp_size = k_pad / 16;
-    comp_vt kmer_compress(Kokkos::ViewAllocateWithoutInitializing("kmers compressed nonpart"), buckets_m(large_buckets) * comp_size);
-    Kokkos::parallel_for("compress kmers", buckets_m(large_buckets), KOKKOS_LAMBDA(const edge_offset_t j){
-        uint32_t byte = 0;
-        for(edge_offset_t x = 0; x < k_pad; x++){
-            if((x & 15) == 0) byte = 0;
-            if(x < k){
-                uint32_t write = char_map(kmers(j*k + x));
-                write <<= 2*(x & 15);
-                byte = byte | write;
-            }
-            if((x & 15) == 15) kmer_compress(j*comp_size + (x / 16)) = byte;
-        }
-    });
     comp_vt kmers_partitioned(Kokkos::ViewAllocateWithoutInitializing("kmers partitioned"), buckets_m(large_buckets) * comp_size);
     if(typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::HostSpace)){
         Kokkos::parallel_for("write kmers", policy(buckets_m(large_buckets), 32), KOKKOS_LAMBDA(const member& thread){

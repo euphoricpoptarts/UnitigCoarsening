@@ -215,6 +215,30 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers>& buckets, edge_offse
     return out;
 }
 
+comp_mt compact_kmers(comp_mt buffer, char_mirror_t kmers, edge_offset_t k, ordinal_t n){
+    vtx_mirror_t char_map("char map", 256);
+    char_map('A') = 0;
+    char_map('C') = 1;
+    char_map('G') = 2;
+    char_map('T') = 3;
+    edge_offset_t k_pad = ((k + 15) / 16) * 16;
+    edge_offset_t comp_size = k_pad / 16;
+    comp_mt kmer_compress = Kokkos::subview(buffer, std::make_pair((edge_offset_t) 0, n * comp_size));
+    Kokkos::parallel_for("compress kmers", host_policy(0, n), KOKKOS_LAMBDA(const edge_offset_t j){
+        uint32_t byte = 0;
+        for(edge_offset_t x = 0; x < k_pad; x++){
+            if((x & 15) == 0) byte = 0;
+            if(x < k){
+                uint32_t write = char_map(kmers(j*k + x));
+                write <<= 2*(x & 15);
+                byte = byte | write;
+            }
+            if((x & 15) == 15) kmer_compress(j*comp_size + (x / 16)) = byte;
+        }
+    });
+    return kmer_compress;
+}
+
 //input file looks like
 //4
 //AAAA
@@ -238,12 +262,16 @@ out_t load_kmers(char *fname, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_
     // Create a buffer for file
     char* s = new char[chunk_size];
     edge_offset_t n = 0, total_read = 0;
-    char_mirror_t char_mirror;
     char* read_to = 0;
     printf("Time to init buffer: %.3f\n", t.seconds());
     t.reset();
-    char_view_t out("chars", chunk_size);
-    char_mirror = Kokkos::create_mirror_view(out);
+    edge_offset_t k_pad = ((k + 15) / 16) * 16;
+    edge_offset_t comp_size = k_pad / 16;
+    size_t buff_size = chunk_size / k;
+    buff_size *= comp_size;
+    comp_vt out("chars", buff_size);
+    comp_mt comp_buf("chars", buff_size);
+    char_mirror_t packed_chars(Kokkos::ViewAllocateWithoutInitializing("packed chars"), chunk_size);
     double bucket_time = 0;
     std::vector<bucket_t> bucketed_kmers;
     while(offset < sz){
@@ -265,7 +293,7 @@ out_t load_kmers(char *fname, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_
             sscanf(f, "%u", &n);
 #endif
         }
-        read_to = char_mirror.data();
+        read_to = packed_chars.data();
         size_t last_read = 0;
         ordinal_t kmers_read = 0;
         printf("read chunk in %.3f seconds\n", t.seconds());
@@ -292,8 +320,8 @@ out_t load_kmers(char *fname, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_
         offset += last_read;
         printf("packed chunk in %.3f seconds\n", t.seconds());
         t.reset();
-        char_view_t out_sub = Kokkos::subview(out, std::make_pair((edge_offset_t)0, (edge_offset_t)k*kmers_read));
-        char_mirror_t out_m_sub = Kokkos::subview(char_mirror, std::make_pair((edge_offset_t)0, (edge_offset_t)k*kmers_read));
+        comp_mt out_m_sub = compact_kmers(comp_buf, packed_chars, k, kmers_read);
+        comp_vt out_sub = Kokkos::subview(out, std::make_pair((edge_offset_t)0, (edge_offset_t)comp_size*kmers_read));
         Kokkos::deep_copy(out_sub, out_m_sub);
         printf("transferred chunk to device in %.3f seconds\n", t.seconds());
         t.reset();
