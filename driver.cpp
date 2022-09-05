@@ -522,7 +522,6 @@ int main(int argc, char **argv) {
         Kokkos::resize(kmer_b.crosscut, 0);
         //vtx_view_t in_cross_buf("in cross buffer", largest_cross);
         ordinal_t cross_written_count = 0;
-        printf("Cross edges written: %u\n", cross_written_count);
         printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
         t.reset();
         vtx_view_t small_g(Kokkos::ViewAllocateWithoutInitializing("small g"), cross_offset);
@@ -554,6 +553,7 @@ int main(int argc, char **argv) {
                 }
             }
         }
+        printf("Cross edges written: %u\n", cross_written_count);
         //coarsen the final graph
         //for k = 31, this will have about 6-7% as many vertices as kmers in the original input
         //for k = 63, this is about 3-4%
