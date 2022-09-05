@@ -235,7 +235,7 @@ int main(int argc, char **argv) {
         printf("Glue compact time: %.3fs\n", experiment.getMeasurement(ExperimentLoggerUtil::Measurement::CompactGlues));
         t.reset();
         t.reset();
-        compress_unitigs_maximally2(kmer_comp, rcomps_comp, glue_list, k, out_fname);
+        compress_unitigs_maximally2(kmer_comp, glue_list, k, out_fname);
         printf("Time to compact unitigs: %.3fs\n", t.seconds());
         t.reset();
         printf("Total time: %.3fs\n", t2.seconds());

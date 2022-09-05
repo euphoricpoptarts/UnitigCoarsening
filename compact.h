@@ -31,7 +31,7 @@ char get_char(comp_vt source, edge_offset_t offset, edge_offset_t char_id){
     return byte;
 }
 
-void write_unitigs2(comp_vt kmers, comp_vt rcomps, edge_offset_t k, graph_t glue_action, std::string fname){
+void write_unitigs2(comp_vt kmers, edge_offset_t k, graph_t glue_action, std::string fname){
     edge_offset_t null_size = glue_action.numRows();
     edge_view_t write_sizes("write sizes", null_size + 1);
     edge_offset_t write_size = 0;
@@ -67,19 +67,25 @@ void write_unitigs2(comp_vt kmers, comp_vt rcomps, edge_offset_t k, graph_t glue
             int o = glue_action.entries(j) < 0;
             if(j > start){
                 edge_offset_t offset = write_offset + (k - 1) + (j - start);
+                char c = 0;
                 if(o == 0){
-                    writes(offset) = char_map(get_char(kmers, u*comp_size, k - 1));
+                    c = get_char(kmers, u*comp_size, k-1);
                 } else {
-                    writes(offset) = char_map(get_char(rcomps, u*comp_size, k - 1));
+                    c = get_char(kmers, u*comp_size, 0);
+                    c = c ^ 3;
                 }
+                writes(offset) = char_map(c);
             } else {
                 edge_offset_t offset = write_offset;
                 for(edge_offset_t x = 0; x < k; x++){
+                    char c = 0;
                     if(o == 0){
-                        writes(offset) = char_map(get_char(kmers, u*comp_size, x));
+                        c = get_char(kmers, u*comp_size, x);
                     } else {
-                        writes(offset) = char_map(get_char(rcomps, u*comp_size, x));
+                        c = get_char(kmers, u*comp_size, k - 1 - x);
+                        c = c ^ 3;
                     }
+                    writes(offset) = char_map(c);
                     offset++;
                 }
             }
@@ -267,13 +273,13 @@ void compress_unitigs_maximally(char_view_t kmers, std::list<graph_t> glue_actio
     }
 }
 
-void compress_unitigs_maximally2(comp_vt kmers, comp_vt rcomps, std::list<graph_t> glue_actions, edge_offset_t k, std::string fname){
+void compress_unitigs_maximally2(comp_vt kmers, std::list<graph_t> glue_actions, edge_offset_t k, std::string fname){
     edge_offset_t k_pad = ((k + 15) / 16) * 16;
     edge_offset_t comp_size = k_pad / 16;
     ordinal_t n = kmers.extent(0) / comp_size;
     auto glue_iter = glue_actions.begin();
     while(glue_iter != glue_actions.end()){
-        write_unitigs2(kmers, rcomps, k, *glue_iter, fname);
+        write_unitigs2(kmers, k, *glue_iter, fname);
         glue_iter++;
     }
 }
