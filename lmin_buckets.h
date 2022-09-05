@@ -69,14 +69,16 @@ void get_double_lmin(const comp_vt& chars, const vtx_view_t& lmin_map, edge_offs
         lmer_id ^= c_val;
         lmer_id &= lmer_mask;
 
-        if(i + 1 >= l && i + 1 < k){
-            if(l1 > lmin_map(lmer_id)){
-                l1 = lmin_map(lmer_id);
+        //check if we have a full lmer
+        if(i + 1 >= l){
+            ordinal_t lx = lmin_map(lmer_id);
+            //check if we are in the k-1 prefix
+            if(i + 1 < k && l1 > lx){
+                l1 = lx;
             }
-        }
-        if(i + 1 >= l + 1){
-            if(l2 > lmin_map(lmer_id)){
-                l2 = lmin_map(lmer_id);
+            //check if we are in the k-1 suffix
+            if(i + 1 >= l + 1 && l2 > lx){
+                l2 = lx;
             }
         }
     }
