@@ -53,7 +53,8 @@ minitig_partition collect_buckets(std::vector<bucket_minitigs> buckets){
     for(int i = 0; i < bucket_count; i++){
         edge_mirror_t row_map("row map", bucket_size(i) + 1);
         vtx_view_t out_map(Kokkos::ViewAllocateWithoutInitializing("out map"), bucket_size(i));
-        char_mirror_t chars(Kokkos::ViewAllocateWithoutInitializing("chars"), minitig_bucket_size(i));
+        vtx_mirror_t lengths(Kokkos::ViewAllocateWithoutInitializing("lengths"), bucket_size(i));
+        comp_mt chars(Kokkos::ViewAllocateWithoutInitializing("chars"), minitig_bucket_size(i));
         edge_offset_t offset = 0;
         edge_offset_t write_sum = 0;
         for(int j = 0; j < bucket_count; j++){
@@ -72,13 +73,18 @@ minitig_partition collect_buckets(std::vector<bucket_minitigs> buckets){
                 ordinal_t insert = offset + x - start;
                 out_map(insert) = out_map_in(x);
             });
-            char_mirror_t dest = Kokkos::subview(chars, std::make_pair(write_sum, write_sum + kmer_end - kmer_start));
-            char_mirror_t source = Kokkos::subview(b.m.chars, std::make_pair(kmer_start, kmer_end));
+            Kokkos::parallel_for("move out map", host_policy(start, end), KOKKOS_LAMBDA(const ordinal_t x){
+                ordinal_t insert = offset + x - start;
+                lengths(insert) = b.m.lengths(x);
+            });
+            comp_mt dest = Kokkos::subview(chars, std::make_pair(write_sum, write_sum + kmer_end - kmer_start));
+            comp_mt source = Kokkos::subview(b.m.chars, std::make_pair(kmer_start, kmer_end));
             Kokkos::deep_copy(dest, source);
             offset += end - start;
             write_sum += b.m.row_map(end) - b.m.row_map(start);
         }
         minitigs x;
+        x.lengths = lengths;
         x.size = bucket_size(i);
         x.chars = chars;
         x.row_map = row_map;
@@ -325,7 +331,7 @@ out_t load_kmers(char *fname, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_
         Kokkos::deep_copy(out_sub, out_m_sub);
         printf("transferred chunk to device in %.3f seconds\n", t.seconds());
         t.reset();
-        bucket_t kmer_b = find_l_minimizer<bucket_t>(out_sub, k, l, lmin_bucket_map, kmers_read);
+        bucket_t kmer_b = find_l_minimizer<bucket_t>(out_sub, out_m_sub, k, l, lmin_bucket_map, kmers_read);
         bucketed_kmers.push_back(kmer_b);
         printf("organized chunk by lmins in %.3f seconds\n", t.seconds());
         bucket_time += t.seconds();
@@ -635,7 +641,7 @@ int main(int argc, char **argv) {
             vtx_view_t entries = Kokkos::subview(small_g_result.entries, std::make_pair(result_start, result_end));
             graph_type out_g(entries, row_map);
             //write to file
-            write_unitigs4(f_p.minis[i].chars, f_p.minis[i].row_map, k, Kokkos::create_mirror(out_g), out_fname);
+            write_unitigs4(f_p.minis[i].chars, f_p.minis[i].row_map, f_p.minis[i].lengths, k, Kokkos::create_mirror(out_g), out_fname);
         }
         //printf("glue list length: %lu\n", glue_list.size());
         printf("Time to generate glue list: %.3fs\n", t.seconds());

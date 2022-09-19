@@ -5,7 +5,7 @@ namespace unitig_compact {
 //fnv hash algorithm
 //for use on k-1 prefix
 KOKKOS_INLINE_FUNCTION
-uint32_t fnv_pref(const comp_vt chars, edge_offset_t offset, edge_offset_t comp){
+uint32_t fnv_pref(const hash_vt chars, edge_offset_t offset, edge_offset_t comp){
     uint32_t hash = 2166136261U;
     const uint32_t pref_mask = 268435455;
     for(edge_offset_t i = offset; i < offset + comp; i++)
@@ -23,7 +23,7 @@ uint32_t fnv_pref(const comp_vt chars, edge_offset_t offset, edge_offset_t comp)
 
 //for use on k-1 suffix
 KOKKOS_INLINE_FUNCTION
-uint32_t fnv_suf(const comp_vt chars, edge_offset_t offset, edge_offset_t comp){
+uint32_t fnv_suf(const hash_vt chars, edge_offset_t offset, edge_offset_t comp){
     uint32_t hash = 2166136261U;
     const uint32_t pref_mask = 268435455;
     for(edge_offset_t i = offset; i < offset + comp; i++)
@@ -46,7 +46,7 @@ uint32_t fnv_suf(const comp_vt chars, edge_offset_t offset, edge_offset_t comp){
 
 //compares k-1 prefixes
 KOKKOS_INLINE_FUNCTION
-bool cmp_pref(const comp_vt s1_chars, const comp_vt s2_chars, const edge_offset_t s1_offset, const edge_offset_t s2_offset, const edge_offset_t comp){
+bool cmp_pref(const hash_vt s1_chars, const hash_vt s2_chars, const edge_offset_t s1_offset, const edge_offset_t s2_offset, const edge_offset_t comp){
     const uint32_t pref_mask = 268435455;
     for(edge_offset_t i = 0; i < comp; i++){
         if(i + 1 == comp){
@@ -64,7 +64,7 @@ bool cmp_pref(const comp_vt s1_chars, const comp_vt s2_chars, const edge_offset_
 
 //compares a k-1 suffix to a k-1 prefix
 KOKKOS_INLINE_FUNCTION
-bool cmp_suf(const comp_vt s1_chars, const comp_vt s2_chars, const edge_offset_t s1_offset, const edge_offset_t s2_offset, const edge_offset_t comp){
+bool cmp_suf(const hash_vt s1_chars, const hash_vt s2_chars, const edge_offset_t s1_offset, const edge_offset_t s2_offset, const edge_offset_t comp){
     const uint32_t pref_mask = 268435455;
     for(edge_offset_t i = 0; i < comp; i++){
         uint32_t suf = s1_chars(s1_offset + i);
@@ -86,7 +86,7 @@ bool cmp_suf(const comp_vt s1_chars, const comp_vt s2_chars, const edge_offset_t
 
 //check if vtx found in edge_chars at offset exists in vtx_chars using a hashmap
 KOKKOS_INLINE_FUNCTION
-ordinal_t find_vtx_from_edge(const comp_vt& vtx_chars, const vtx_view_t& vtx_map, const comp_vt& vtx_chars2, const edge_offset_t offset, const edge_offset_t comp, const ordinal_t size){
+ordinal_t find_vtx_from_edge(const hash_vt& vtx_chars, const vtx_view_t& vtx_map, const hash_vt& vtx_chars2, const edge_offset_t offset, const edge_offset_t comp, const ordinal_t size){
     uint32_t hash = fnv_suf(vtx_chars2, offset, comp);
     uint32_t hash_cast = vtx_map.extent(0) - 1;
     hash = hash & hash_cast;
@@ -117,7 +117,7 @@ vtx_view_t init_hashmap(ordinal_t max_size){
     return hashmap;
 }
 
-void generate_hashmap(vtx_view_t hashmap, comp_vt kmers, edge_offset_t comp, ordinal_t size){
+void generate_hashmap(vtx_view_t hashmap, const hash_vt kmers, edge_offset_t comp, ordinal_t size){
     size_t hashmap_size = hashmap.extent(0);
     Kokkos::parallel_for("init hashmap", hashmap_size, KOKKOS_LAMBDA(const ordinal_t i){
         hashmap(i) = ORD_MAX;
@@ -163,7 +163,7 @@ assembler_data init_assembler(ordinal_t max_n, ordinal_t max_np){
     return d;
 }
 
-crosses assemble_pruned_graph(assembler_data assembler, comp_vt kmers, vtx_view_t vtx_map, comp_vt cross, vtx_view_t cross_ids, edge_offset_t comp, vtx_view_t g){
+crosses assemble_pruned_graph(assembler_data assembler, const hash_vt kmers, vtx_view_t vtx_map, const hash_vt cross, vtx_view_t cross_ids, edge_offset_t comp, vtx_view_t g){
     ordinal_t n = kmers.extent(0) / comp;
     ordinal_t n_cross = cross.extent(0) / comp;
     Kokkos::parallel_for("reset edge count", n, KOKKOS_LAMBDA(const ordinal_t i){
