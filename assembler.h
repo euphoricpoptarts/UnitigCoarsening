@@ -129,18 +129,18 @@ void generate_hashmap(vtx_view_t hashmap, const hash_vt kmers, edge_offset_t com
         //linear probing
         while(!success){
             ordinal_t written = hashmap(hash);
+            bool nullify = false;
             if(written >= size){
                 written = written - size;
-                if(cmp_pref(kmers, kmers, comp*i, comp*written, comp)){
-                    //hash value matches k-1 prefix
-                    //but has been nullified
-                    //do nothing
-                    break;
-                }
-            } else if(cmp_pref(kmers, kmers, comp*i, comp*written, comp)){
+            } else {
+                nullify = true;
+            }
+            if(cmp_pref(kmers, kmers, comp*i, comp*written, comp)){
                 //hash value matches k-1 prefix
-                //nullify it
-                Kokkos::atomic_compare_exchange_strong(&hashmap(hash), written, i + size);
+                if(nullify){
+                    //nullify it
+                    Kokkos::atomic_compare_exchange_strong(&hashmap(hash), written, i + size);
+                }
                 break;
             }
             hash = (hash + 1) & hash_cast;
@@ -152,14 +152,14 @@ void generate_hashmap(vtx_view_t hashmap, const hash_vt kmers, edge_offset_t com
 struct assembler_data {
     vtx_view_t in;
     vtx_view_t out;
-    char_view_t edge_count;
+    vtx_view_t edge_count;
 };
 
 assembler_data init_assembler(ordinal_t max_n, ordinal_t max_np){
     assembler_data d;
     d.in = vtx_view_t("in vertex", max_np);
     d.out = vtx_view_t("out vertex", max_np);
-    d.edge_count = char_view_t("edge count", max_n);
+    d.edge_count = vtx_view_t("edge count", max_n);
     return d;
 }
 
@@ -184,7 +184,7 @@ crosses assemble_pruned_graph(assembler_data assembler, const hash_vt kmers, vtx
             if(v > n){
                 v = v - n;
             }
-            Kokkos::atomic_add(&assembler.edge_count(v), (char)1);
+            Kokkos::atomic_add(&assembler.edge_count(v), 1);
         }
     });
     Kokkos::parallel_for("write edges", n, KOKKOS_LAMBDA(const ordinal_t i){

@@ -61,7 +61,7 @@ void write_char(comp_vt dest, edge_offset_t offset, edge_offset_t char_id, char 
     char_id = char_id % 16;
     uint32_t bytes = val;
     bytes = bytes << (2*char_id);
-    dest(offset) = dest(offset) | bytes;
+    Kokkos::atomic_or(&dest(offset), bytes);
 }
 
 KOKKOS_INLINE_FUNCTION
@@ -186,9 +186,10 @@ minitigs generate_minitigs(graph_type glues, const hash_vt kmers, edge_offset_t 
         }
     }, total_chars);
     comp_vt chars("minitig chars", total_chars);
-    Kokkos::parallel_for("write minitig chars", n, KOKKOS_LAMBDA(const ordinal_t i){
+    Kokkos::parallel_for("write minitig chars", policy(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member& thread){
+        const ordinal_t i = thread.league_rank();
         edge_offset_t write_to = row_map(i);
-        for(edge_offset_t j = glues.row_map(i); j < glues.row_map(i + 1); j++){
+        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, glues.row_map(i), glues.row_map(i + 1)), [=] (const edge_offset_t j){
             ordinal_t u = glues.entries(j);
             edge_offset_t local_write = j - glues.row_map(i);
             if(j + 1 < glues.row_map(i + 1)){
@@ -200,7 +201,7 @@ minitigs generate_minitigs(graph_type glues, const hash_vt kmers, edge_offset_t 
                     write_char(chars, write_to, local_write++, x);
                 }
             }
-        }
+        });
     });
     minitigs out;
     out.lengths = vtx_mirror_t(Kokkos::ViewAllocateWithoutInitializing("minitig lengths"), n);
