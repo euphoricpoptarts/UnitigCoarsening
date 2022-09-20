@@ -36,7 +36,27 @@ void write_to_f(char_mirror_t chars, std::string fname){
     of.close();
 }
 
-void write_unitigs4(char_mirror_t chars, edge_mirror_t row_map, edge_offset_t k, graph_m glue_action, std::string fname){
+KOKKOS_INLINE_FUNCTION
+char get_char(comp_vt source, edge_offset_t offset, edge_offset_t char_id){
+    offset += (char_id / 16);
+    char_id = char_id % 16;
+    uint32_t bytes = source(offset);
+    char byte = bytes >> (2*char_id);
+    byte = byte & 3;
+    return byte;
+}
+
+KOKKOS_INLINE_FUNCTION
+char get_char(comp_mt source, edge_offset_t offset, edge_offset_t char_id){
+    offset += (char_id / 16);
+    char_id = char_id % 16;
+    uint32_t bytes = source(offset);
+    char byte = bytes >> (2*char_id);
+    byte = byte & 3;
+    return byte;
+}
+
+void write_unitigs4(comp_mt chars, edge_mirror_t row_map, vtx_mirror_t lengths, edge_offset_t k, graph_m glue_action, std::string fname){
     edge_offset_t null_size = glue_action.numRows();
     edge_mirror_t write_sizes("write sizes", null_size + 1);
     Kokkos::parallel_for("count writes", host_policy(0, null_size), KOKKOS_LAMBDA(const edge_offset_t i){
@@ -44,7 +64,7 @@ void write_unitigs4(char_mirror_t chars, edge_mirror_t row_map, edge_offset_t k,
         edge_offset_t size = 1;
         for(edge_offset_t j = glue_action.row_map(i); j < glue_action.row_map(i + 1); j++){
             ordinal_t x = glue_action.entries(j);
-            size += row_map(x + 1) - row_map(x) - (k - 1);
+            size += lengths(x) - (k - 1);
             if(j + 1 == glue_action.row_map(i + 1)){
                 //k-1 for suffix of last k-mer
                 size += (k - 1);
@@ -63,6 +83,11 @@ void write_unitigs4(char_mirror_t chars, edge_mirror_t row_map, edge_offset_t k,
         }
         update += size;
     }, write_size);
+    char_mirror_t char_map("char map host", 4);
+    char_map(0) = 'A';
+    char_map(1) = 'C';
+    char_map(2) = 'G';
+    char_map(3) = 'T';
     char_mirror_t writes(Kokkos::ViewAllocateWithoutInitializing("writes"), write_size);
     Kokkos::parallel_for("move writes", host_policy(0, null_size), KOKKOS_LAMBDA(const ordinal_t i){
         edge_offset_t write_offset = write_sizes(i);
@@ -71,12 +96,12 @@ void write_unitigs4(char_mirror_t chars, edge_mirror_t row_map, edge_offset_t k,
         for(edge_offset_t j = start; j < end; j++){
             ordinal_t u = glue_action.entries(j);
             edge_offset_t kmer_start = row_map(u);
-            edge_offset_t kmer_end = row_map(u + 1);
+            edge_offset_t wsize = lengths(u);
             if(j + 1 < end){
-                kmer_end -= (k - 1);
+                wsize -= (k - 1);
             }
-            for(edge_offset_t l = kmer_start; l < kmer_end; l++){
-                writes(write_offset++) = chars(l);
+            for(edge_offset_t l = 0; l < wsize; l++){
+                writes(write_offset++) = char_map(get_char(chars, kmer_start, l));
             }
             if(j + 1 == end){
                 writes(write_offset) = '\n';
@@ -131,16 +156,6 @@ void write_unitigs3(char_view_t kmers, edge_view_t kmer_rows, edge_offset_t k, g
         });
     });
     write_to_f(writes, fname);
-}
-
-KOKKOS_INLINE_FUNCTION
-char get_char(comp_vt source, edge_offset_t offset, edge_offset_t char_id){
-    offset += (char_id / 16);
-    char_id = char_id % 16;
-    uint32_t bytes = source(offset);
-    char byte = bytes >> (2*char_id);
-    byte = byte & 3;
-    return byte;
 }
 
 void write_intra_bucket_outputs(comp_vt kmers, edge_offset_t k, edge_offset_t comp_size, graph_type glue_action, std::string fname){
