@@ -1,13 +1,8 @@
 #pragma once
 #include <limits>
 #include <Kokkos_Core.hpp>
-#include <Kokkos_Atomic.hpp>
-#include <Kokkos_Random.hpp>
 #include <Kokkos_Sort.hpp>
-#include <Kokkos_Functional.hpp>
-#include "KokkosSparse_CrsMatrix.hpp"
-#include "KokkosGraph_MIS2.hpp"
-#include "KokkosKernels_SparseUtils.hpp"
+#include <Kokkos_Random.hpp>
 #include "ExperimentLoggerUtil.cpp"
 
 template<typename ordinal_t, typename edge_offset_t, typename scalar_t, class Device>
@@ -26,7 +21,6 @@ public:
     using part_view_t = typename Kokkos::View<int*, Device>;
     using pool_t = Kokkos::Random_XorShift64_Pool<Device>;
     using gen_t = typename pool_t::generator_type;
-    using hasher_t = Kokkos::pod_hash<ordinal_t>;
     static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
 
     struct interp_t

@@ -2,19 +2,9 @@
 
 #include <limits>
 #include <Kokkos_Core.hpp>
-#include <Kokkos_Atomic.hpp>
-#include <Kokkos_UnorderedMap.hpp>
 #include <Kokkos_Random.hpp>
-#include <Kokkos_UniqueToken.hpp>
 #include <Kokkos_Sort.hpp>
-#include <Kokkos_Functional.hpp>
-#include "KokkosSparse_CrsMatrix.hpp"
-#include "KokkosSparse_spmv.hpp"
-#include "KokkosSparse_spgemm.hpp"
-#include "KokkosSparse_spadd.hpp"
-#include "KokkosKernels_SparseUtils.hpp"
-#include "KokkosKernels_HashmapAccumulator.hpp"
-#include "KokkosKernels_Uniform_Initialized_MemoryPool.hpp"
+#include <Kokkos_StaticCrsGraph.hpp>
 
 namespace unitig_compact {
 
@@ -84,7 +74,6 @@ namespace unitig_compact {
     using member = typename policy::member_type;
     using pool_t = Kokkos::Random_XorShift64_Pool<>;
     using gen_t = typename pool_t::generator_type;
-    using hasher_t = Kokkos::pod_hash<ordinal_t>;
     using eigenview_t = Kokkos::View<sgp_real_t*>;
     using eigen_mirror_t = typename eigenview_t::HostMirror;
 }

@@ -1,3 +1,5 @@
+#include <Kokkos_StaticCrsGraph.hpp>
+
 template<typename ordinal_t, typename edge_offset_t, typename scalar_t, class Device>
 class compact_graph {
 public:

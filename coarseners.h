@@ -2,15 +2,7 @@
 #include <list>
 #include <limits>
 #include <Kokkos_Core.hpp>
-#include <Kokkos_Atomic.hpp>
-#include <Kokkos_UniqueToken.hpp>
-#include <Kokkos_Functional.hpp>
-#include "KokkosSparse_CrsMatrix.hpp"
-#include "KokkosSparse_spmv.hpp"
-#include "KokkosSparse_spgemm.hpp"
-#include "KokkosKernels_SparseUtils.hpp"
-#include "KokkosKernels_HashmapAccumulator.hpp"
-#include "KokkosKernels_Uniform_Initialized_MemoryPool.hpp"
+#include <Kokkos_StaticCrsGraph.hpp>
 #include "ExperimentLoggerUtil.cpp"
 #include "heuristics.h"
 #include "compact_graph.h"
@@ -33,7 +25,6 @@ public:
     using policy_t = Kokkos::RangePolicy<exec_space>;
     using team_policy_t = Kokkos::TeamPolicy<exec_space>;
     using member = typename team_policy_t::member_type;
-    using spgemm_kernel_handle = KokkosKernels::Experimental::KokkosKernelsHandle<edge_offset_t, ordinal_t, scalar_t, exec_space, mem_space, mem_space>;
     static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
 
     // define behavior-controlling enums
