@@ -46,15 +46,15 @@ uint32_t fnv_suf(const hash_vt chars, edge_offset_t offset, edge_offset_t comp){
 
 //compares k-1 prefixes
 KOKKOS_INLINE_FUNCTION
-bool cmp_pref(const hash_vt s1_chars, const hash_vt s2_chars, const edge_offset_t s1_offset, const edge_offset_t s2_offset, const edge_offset_t comp){
+bool cmp_pref(const hash_vt chars, const edge_offset_t s1_offset, const edge_offset_t s2_offset, const edge_offset_t comp){
     const uint32_t pref_mask = 268435455;
     for(edge_offset_t i = 0; i < comp; i++){
         if(i + 1 == comp){
-            if((s1_chars(s1_offset + i) & pref_mask) != (s2_chars(s2_offset + i) & pref_mask)){
+            if((chars(s1_offset + i) & pref_mask) != (chars(s2_offset + i) & pref_mask)){
                 return false;
             }
         } else {
-            if(s1_chars(s1_offset + i) != s2_chars(s2_offset + i)){
+            if(chars(s1_offset + i) != chars(s2_offset + i)){
                 return false;
             }
         }
@@ -135,7 +135,7 @@ void generate_hashmap(vtx_view_t hashmap, const hash_vt kmers, edge_offset_t com
             } else {
                 nullify = true;
             }
-            if(cmp_pref(kmers, kmers, comp*i, comp*written, comp)){
+            if(cmp_pref(kmers, comp*i, comp*written, comp)){
                 //hash value matches k-1 prefix
                 if(nullify){
                     //nullify it
@@ -151,21 +151,19 @@ void generate_hashmap(vtx_view_t hashmap, const hash_vt kmers, edge_offset_t com
 
 struct assembler_data {
     vtx_view_t in;
-    vtx_view_t out;
     vtx_view_t edge_count;
 };
 
-assembler_data init_assembler(ordinal_t max_n, ordinal_t max_np){
+assembler_data init_assembler(ordinal_t max_n){
     assembler_data d;
-    d.in = vtx_view_t("in vertex", max_np);
-    d.out = vtx_view_t("out vertex", max_np);
+    d.in = vtx_view_t("in vertex", max_n);
     d.edge_count = vtx_view_t("edge count", max_n);
     return d;
 }
 
-crosses assemble_pruned_graph(assembler_data assembler, const hash_vt kmers, vtx_view_t vtx_map, const hash_vt cross, vtx_view_t cross_ids, edge_offset_t comp, vtx_view_t g){
+crosses assemble_pruned_graph(assembler_data assembler, const hash_vt kmers, vtx_view_t vtx_map, vtx_view_t cross_lends, vtx_view_t cross_borrows, edge_offset_t comp, vtx_view_t g){
+    ordinal_t n_cross = cross_lends.extent(0);
     ordinal_t n = kmers.extent(0) / comp;
-    ordinal_t n_cross = cross.extent(0) / comp;
     Kokkos::parallel_for("reset edge count", n, KOKKOS_LAMBDA(const ordinal_t i){
         assembler.edge_count(i) = 0;
     });
@@ -174,11 +172,12 @@ crosses assemble_pruned_graph(assembler_data assembler, const hash_vt kmers, vtx
         ordinal_t v = find_vtx_from_edge(kmers, vtx_map, kmers, i*comp, comp, n);
         assembler.in(i) = v;
     });
-    Kokkos::parallel_for("translate cross edges", n_cross, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t v = find_vtx_from_edge(kmers, vtx_map, cross, i*comp, comp, n);
-        assembler.in(n + i) = v;
+    //vertices on loan can't have an edge inside this subgraph
+    Kokkos::parallel_for("mark lends", n_cross, KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t x = cross_lends(i);
+        if(x != ORD_MAX) assembler.in(x) = ORD_MAX;
     });
-    Kokkos::parallel_for("count edges", n + n_cross, KOKKOS_LAMBDA(const ordinal_t i){
+    Kokkos::parallel_for("count edges", n, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t v = assembler.in(i);
         if(v != ORD_MAX){
             if(v > n){
@@ -196,19 +195,17 @@ crosses assemble_pruned_graph(assembler_data assembler, const hash_vt kmers, vtx
             g(u) = v;
         }
     });
+    //create copies of borrowed and loaned vertices
+    //these will be transformed into coarse ids
     vtx_view_t out_cross_id("out cross ids", n_cross);
     Kokkos::parallel_for("init out cross ids", n_cross, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t u = cross_ids(i);
+        ordinal_t u = cross_lends(i);
         out_cross_id(i) = u;
     });
     vtx_view_t in_cross_id("in cross ids", n_cross);
     Kokkos::parallel_for("init in cross ids", n_cross, KOKKOS_LAMBDA(const ordinal_t i){
-        ordinal_t v = assembler.in(n + i);
-        if(v < n && (assembler.edge_count(v) == 1)){
-            in_cross_id(i) = v;
-        } else {
-            in_cross_id(i) = ORD_MAX;
-        }
+        ordinal_t x = cross_borrows(i);
+        in_cross_id(i) = x;
     });
     crosses c;
     c.in = in_cross_id;

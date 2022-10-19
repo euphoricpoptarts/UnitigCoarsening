@@ -103,7 +103,7 @@ struct kpmer_partitions {
     ordinal_t size;
     comp_mt crosscut;
     vtx_mirror_t crosscut_row_map;
-    vtx_mirror_t cross_ids;
+    vtx_mirror_t cross_lend, cross_borrow;
     ordinal_t crosscut_buckets;
     ordinal_t crosscut_size;
 };
@@ -169,8 +169,11 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers>& buckets, edge_offse
             b.kmers.pop_front();
             edge_offset_t transfer_size = source.extent(0);
             Kokkos::parallel_for("update cross ids", host_policy(b.crosscut_row_map[j*bucket_count], b.crosscut_row_map[(j+1)*bucket_count]), KOKKOS_LAMBDA(const ordinal_t x){
-                if(b.cross_ids(x) != ORD_MAX){
-                    b.cross_ids(x) += bucket_kmer_count;
+                if(b.cross_lend(x) != ORD_MAX){
+                    b.cross_lend(x) += bucket_kmer_count;
+                }
+                if(b.cross_borrow(x) != ORD_MAX){
+                    b.cross_borrow(x) += bucket_kmer_count;
                 }
             });
             bucket_kmer_count += transfer_size / comp_size;
@@ -193,18 +196,18 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers>& buckets, edge_offse
         cross_bucket_row_map(i + 1) = cross_bucket_row_map(i) + cross_bucket_size(i);
     }
     ordinal_t cross_size = cross_bucket_row_map(cross_bucket_count);
-    comp_mt cross_kmers(Kokkos::ViewAllocateWithoutInitializing("all kmers"), cross_size * comp_size);
-    vtx_mirror_t cross_ids(Kokkos::ViewAllocateWithoutInitializing("cross ids"), cross_size);
+    vtx_mirror_t cross_lend(Kokkos::ViewAllocateWithoutInitializing("cross ids"), cross_size);
+    vtx_mirror_t cross_borrow(Kokkos::ViewAllocateWithoutInitializing("cross ids"), cross_size);
     for(int j = 0; j < cross_bucket_count; j++){
         ordinal_t transfer_loc = cross_bucket_row_map(j);
         for(int i = 0; i < buckets.size(); i++){
             ordinal_t transfer_size = buckets[i].crosscut_row_map[j+1] - buckets[i].crosscut_row_map[j];
             if(transfer_size > 0){
-                comp_mt transfer_to = Kokkos::subview(cross_kmers, std::make_pair(comp_size*transfer_loc, comp_size*(transfer_loc + transfer_size)));
-                comp_mt transfer_from = Kokkos::subview(buckets[i].crosscut, std::make_pair(buckets[i].crosscut_row_map[j] * comp_size, comp_size * buckets[i].crosscut_row_map[j + 1]));
-                vtx_mirror_t dest = Kokkos::subview(cross_ids, std::make_pair(transfer_loc, transfer_loc + transfer_size));
-                vtx_mirror_t source = Kokkos::subview(buckets[i].cross_ids, std::make_pair(buckets[i].crosscut_row_map[j], buckets[i].crosscut_row_map[j+1]));
-                Kokkos::deep_copy(transfer_to, transfer_from);
+                vtx_mirror_t dest = Kokkos::subview(cross_lend, std::make_pair(transfer_loc, transfer_loc + transfer_size));
+                vtx_mirror_t source = Kokkos::subview(buckets[i].cross_lend, std::make_pair(buckets[i].crosscut_row_map[j], buckets[i].crosscut_row_map[j+1]));
+                Kokkos::deep_copy(dest, source);
+                dest = Kokkos::subview(cross_borrow, std::make_pair(transfer_loc, transfer_loc + transfer_size));
+                source = Kokkos::subview(buckets[i].cross_borrow, std::make_pair(buckets[i].crosscut_row_map[j], buckets[i].crosscut_row_map[j+1]));
                 Kokkos::deep_copy(dest, source);
                 transfer_loc += transfer_size;
             }
@@ -213,11 +216,11 @@ kpmer_partitions collect_buckets(std::vector<bucket_kpmers>& buckets, edge_offse
     out.kmers = all_kmers;
     out.part_sizes = bucket_size;
     out.size = total_size;
-    out.crosscut = cross_kmers;
     out.crosscut_row_map = cross_bucket_row_map;
     out.crosscut_size = cross_size;
     out.crosscut_buckets = cross_bucket_count;
-    out.cross_ids = cross_ids;
+    out.cross_lend = cross_lend;
+    out.cross_borrow = cross_borrow;
     return out;
 }
 
@@ -331,7 +334,7 @@ out_t load_kmers(char *fname, edge_offset_t k, edge_offset_t l, vtx_view_t lmin_
         Kokkos::deep_copy(out_sub, out_m_sub);
         printf("transferred chunk to device in %.3f seconds\n", t.seconds());
         t.reset();
-        bucket_t kmer_b = find_l_minimizer<bucket_t>(out_sub, out_m_sub, k, l, lmin_bucket_map, kmers_read);
+        bucket_t kmer_b = find_l_minimizer<bucket_t>(out_sub, k, l, lmin_bucket_map, kmers_read);
         bucketed_kmers.push_back(kmer_b);
         printf("organized chunk by lmins in %.3f seconds\n", t.seconds());
         bucket_time += t.seconds();
@@ -448,27 +451,19 @@ int main(int argc, char **argv) {
 #else
         printf("kmer size: %u, kmers: %u\n", kmer_b.size*k, kmer_b.size);
 #endif
-        ordinal_t largest_n = 0, largest_np = 0, largest_cross = 0;
+        ordinal_t largest_n = 0;
         ordinal_t bucket_count = kmer_b.kmers.size();
         //calculate the largest bucket
         for(int i = 0; i < bucket_count; i++){
             ordinal_t kmer_count = kmer_b.part_sizes(i);
-            ordinal_t cross_count = kmer_b.crosscut_row_map(bucket_count*(i + 1)) - kmer_b.crosscut_row_map(bucket_count*i);
-            ordinal_t kpmer_count = kmer_count + cross_count;
             if(kmer_count > largest_n){
                 largest_n = kmer_count;
             }
-            if(kpmer_count > largest_np){
-                largest_np = kpmer_count;
-            }
-            if(cross_count > largest_cross){
-                largest_cross = cross_count;
-            }
         }
-        printf("largest_np: %u\n", largest_np);
+        printf("largest_n: %u\n", largest_n);
         //init hashmap and related datastructures
         vtx_view_t hashmap = init_hashmap(largest_n);
-        assembler_data assembler = init_assembler(largest_n, largest_np);
+        assembler_data assembler = init_assembler(largest_n);
         ExperimentLoggerUtil experiment;
         coarsener_t coarsener;
         using c_output = typename coarsener_t::coarsen_output;
@@ -490,12 +485,12 @@ int main(int argc, char **argv) {
             Kokkos::deep_copy(kmer_compress, kmer_b.kmers[i]);
             printf("Time to move bucket %i to device: %.3fs\n", i, t2.seconds());
             t2.reset();
-            comp_mt cross_s_m = Kokkos::subview(kmer_b.crosscut, std::make_pair(kmer_b.crosscut_row_map(bucket_count*i)*comp_size, kmer_b.crosscut_row_map(bucket_count*(i+1))*comp_size));
-            vtx_mirror_t cross_ids_m = Kokkos::subview(kmer_b.cross_ids, std::make_pair(kmer_b.crosscut_row_map(bucket_count*i), kmer_b.crosscut_row_map(bucket_count*(i+1))));
-            comp_vt cross_s_compress("cross s", cross_s_m.extent(0));
-            vtx_view_t cross_ids("cross ids", cross_ids_m.extent(0));
-            Kokkos::deep_copy(cross_ids, cross_ids_m);
-            Kokkos::deep_copy(cross_s_compress, cross_s_m);
+            vtx_mirror_t cross_lend_m = Kokkos::subview(kmer_b.cross_lend, std::make_pair(kmer_b.crosscut_row_map(bucket_count*i), kmer_b.crosscut_row_map(bucket_count*(i+1))));
+            vtx_view_t cross_lend("cross ids", cross_lend_m.extent(0));
+            Kokkos::deep_copy(cross_lend, cross_lend_m);
+            vtx_mirror_t cross_borrow_m = Kokkos::subview(kmer_b.cross_borrow, std::make_pair(kmer_b.crosscut_row_map(bucket_count*i), kmer_b.crosscut_row_map(bucket_count*(i+1))));
+            vtx_view_t cross_borrow("cross ids", cross_borrow_m.extent(0));
+            Kokkos::deep_copy(cross_borrow, cross_borrow_m);
             printf("Time to move crossers to device: %.3fs\n", t2.seconds());
             t2.reset();
             Kokkos::Timer t5;
@@ -506,7 +501,7 @@ int main(int argc, char **argv) {
             vtx_view_t g_s(Kokkos::ViewAllocateWithoutInitializing("graph portion"), kmer_count);
             Kokkos::deep_copy(g_s, ORD_MAX);
             //assemble local graph by looking up k-1 suffixes inside hashmap
-            crosses c = assemble_pruned_graph(assembler, kmer_compress, hashmap, cross_s_compress, cross_ids, comp_size, g_s);
+            crosses c = assemble_pruned_graph(assembler, kmer_compress, hashmap, cross_lend, cross_borrow, comp_size, g_s);
             cross_list.push_back(c);
             printf("Time to assemble bucket %i: %.4f\n", i, t2.seconds());
             t2.reset();
@@ -526,7 +521,6 @@ int main(int argc, char **argv) {
         }
         kmer_b.kmers.clear();
         Kokkos::resize(kmer_b.crosscut, 0);
-        //vtx_view_t in_cross_buf("in cross buffer", largest_cross);
         ordinal_t cross_written_count = 0;
         printf("Time to assemble pruned graph: %.3fs\n", t.seconds());
         t.reset();

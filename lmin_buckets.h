@@ -136,8 +136,7 @@ struct bucket_kpmers {
     std::list<comp_mt> kmers;
     ordinal_t buckets;
     ordinal_t size;
-    comp_mt crosscut;
-    vtx_mirror_t cross_ids;
+    vtx_mirror_t cross_lend, cross_borrow;
     vtx_mirror_t crosscut_row_map;
     ordinal_t crosscut_buckets;
     ordinal_t crosscut_size;
@@ -284,10 +283,10 @@ bucket_minitigs partition_for_output(ordinal_t buckets, minitigs x, edge_offset_
 }
 
 template <class T>
-T find_l_minimizer(const hash_vt& kmers, comp_mt& partition_copy, edge_offset_t k, edge_offset_t l, const lmin_vt lmin_bucket_map, ordinal_t size);
+T find_l_minimizer(const hash_vt& kmers, edge_offset_t k, edge_offset_t l, const lmin_vt lmin_bucket_map, ordinal_t size);
 
 template <>
-bucket_kpmers find_l_minimizer<bucket_kpmers>(const hash_vt& kmer_compress, comp_mt& partition_copy, edge_offset_t k, edge_offset_t l, const lmin_vt lmin_bucket_map, ordinal_t size){
+bucket_kpmers find_l_minimizer<bucket_kpmers>(const hash_vt& kmer_compress, edge_offset_t k, edge_offset_t l, const lmin_vt lmin_bucket_map, ordinal_t size){
     ordinal_t lmin_buckets = 1;
     lmin_buckets <<= 2*l;
     ordinal_t large_buckets_mask = large_buckets - 1;
@@ -312,6 +311,7 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(const hash_vt& kmer_compress, comp
         Kokkos::atomic_increment(&small_bucket_counts(out_lmins(i)));
         //ensure they are in the same large bucket
         if(lmin_in != lmin_out){
+            Kokkos::atomic_increment(&small_bucket_counts(in_lmins(i)));
             Kokkos::atomic_increment(&cross_buckets_count(lmin_out*large_buckets + lmin_in));
             Kokkos::atomic_increment(&cross_buckets_count(lmin_in*large_buckets + lmin_out));
         }
@@ -350,11 +350,10 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(const hash_vt& kmer_compress, comp
     vtx_mirror_t crosscut_buckets_m = Kokkos::create_mirror(cross_buckets);
     Kokkos::deep_copy(crosscut_buckets_m, cross_buckets);
     ordinal_t total_crosscut = crosscut_buckets_m(large_buckets*large_buckets);
-    vtx_view_t cross_writes("cross writes", total_crosscut);
-    vtx_view_t cross_ids("cross ids", total_crosscut);
-    Kokkos::parallel_for("init cross ids", total_crosscut, KOKKOS_LAMBDA(const ordinal_t i){
-        cross_ids(i) = ORD_MAX;
-    });
+    vtx_view_t cross_lend("cross lends", total_crosscut);
+    vtx_view_t cross_borrow("cross borrow", total_crosscut);
+    Kokkos::deep_copy(cross_lend, ORD_MAX);
+    Kokkos::deep_copy(cross_borrow, ORD_MAX);
     Kokkos::parallel_for("partition by lmins", size, KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t lmin_out = out_lmins(i);
         ordinal_t insert = small_buckets(lmin_out) + Kokkos::atomic_fetch_add(&small_bucket_counts(lmin_out), 1);
@@ -363,22 +362,25 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(const hash_vt& kmer_compress, comp
         ordinal_t lmin_in = in_lmins(i);
         lmin_in = lmin_in & large_buckets_mask;
         if(lmin_in != lmin_out){
+            ordinal_t local_id = insert - buckets(lmin_out);
+            ordinal_t write_lmin = in_lmins(i);
+            insert = small_buckets(write_lmin) + Kokkos::atomic_fetch_add(&small_bucket_counts(write_lmin), 1);
+            kmer_writes(insert) = i;
             ordinal_t out_bucket = lmin_out*large_buckets + lmin_in;
             ordinal_t in_bucket = lmin_in*large_buckets + lmin_out;
             ordinal_t less_bucket = in_bucket < out_bucket ? in_bucket : out_bucket;
             ordinal_t offset = Kokkos::atomic_fetch_add(&cross_buckets_count(less_bucket), 1);
             ordinal_t cross_insert = cross_buckets(out_bucket) + offset;
-            cross_writes(cross_insert) = i;
             //the lmin_out -> lmin_in crossbucket tracks the id of the out-side kmer of this edge
             //and will eventually know the coarse id
             //the lmin_in -> lmin_out crossbucket will be written with the in-side kmer of the edge
             //when it is discovered later
-            cross_ids(cross_insert) = insert - buckets(lmin_out);
+            cross_lend(cross_insert) = local_id;
             cross_insert = cross_buckets(in_bucket) + offset;
-            cross_writes(cross_insert) = i;
+            local_id = insert - buckets(lmin_in);
+            cross_borrow(cross_insert) = local_id;
         }
     });
-    //printf("Partitioned kmers in %.3f seconds\n", t.seconds());
     t.reset();
     comp_vt kmers_partitioned(Kokkos::ViewAllocateWithoutInitializing("kmers partitioned"), buckets_m(large_buckets) * comp_size);
     if(typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::HostSpace)){
@@ -403,34 +405,12 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(const hash_vt& kmer_compress, comp
             }
         });
     }
-    comp_vt crosscut_partitioned(Kokkos::ViewAllocateWithoutInitializing("crosscut partitioned"), total_crosscut * comp_size);
-    if(typeid(Kokkos::DefaultExecutionSpace::memory_space) != typeid(Kokkos::HostSpace)){
-        Kokkos::parallel_for("write kmers", policy(total_crosscut, 32), KOKKOS_LAMBDA(const member& thread){
-            ordinal_t write_id = thread.league_rank();
-            ordinal_t read_id = cross_writes(write_id);
-            edge_offset_t write_idx = comp_size*write_id;
-            edge_offset_t start = comp_size*read_id;
-            edge_offset_t end = start + comp_size;
-            Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t j){
-                crosscut_partitioned(write_idx + (j - start)) = kmer_compress(j);
-            });
-        });
-    } else {
-        Kokkos::parallel_for("write kmers host", total_crosscut, KOKKOS_LAMBDA(const ordinal_t write_id){
-            ordinal_t read_id = cross_writes(write_id);
-            edge_offset_t write_idx = comp_size*write_id;
-            edge_offset_t start = comp_size*read_id;
-            edge_offset_t end = start + comp_size;
-            for(edge_offset_t j = start; j < end; j++){
-                crosscut_partitioned(write_idx + (j - start)) = kmer_compress(j);
-            }
-        });
-    }
     //printf("Wrote partitioned kmers in %.3f seconds\n", t.seconds());
     t.reset();
     {
         //prevent lambdas from trying to capture output.kmers (a std::vector)
         bucket_kpmers output;
+        comp_mt partition_copy = Kokkos::create_mirror_view(kmers_partitioned);
         Kokkos::deep_copy(partition_copy, kmers_partitioned);
         for(int i = 0; i < large_buckets; i++){
             ordinal_t kmers_in_bucket = buckets_m(i + 1) - buckets_m(i);
@@ -441,10 +421,10 @@ bucket_kpmers find_l_minimizer<bucket_kpmers>(const hash_vt& kmer_compress, comp
         }
         output.buckets = large_buckets;
         output.size = buckets_m(large_buckets);
-        output.crosscut = Kokkos::create_mirror_view(crosscut_partitioned);
-        Kokkos::deep_copy(output.crosscut, crosscut_partitioned);
-        output.cross_ids = Kokkos::create_mirror_view(cross_ids);
-        Kokkos::deep_copy(output.cross_ids, cross_ids);
+        output.cross_lend = Kokkos::create_mirror_view(cross_lend);
+        Kokkos::deep_copy(output.cross_lend, cross_lend);
+        output.cross_borrow = Kokkos::create_mirror_view(cross_borrow);
+        Kokkos::deep_copy(output.cross_borrow, cross_borrow);
         output.crosscut_row_map = crosscut_buckets_m;
         output.crosscut_buckets = large_buckets*large_buckets;
         output.crosscut_size = crosscut_buckets_m(large_buckets*large_buckets);

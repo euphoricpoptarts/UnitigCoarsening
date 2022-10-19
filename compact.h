@@ -64,10 +64,10 @@ void write_unitigs4(comp_mt chars, edge_mirror_t row_map, vtx_mirror_t lengths, 
         edge_offset_t size = 1;
         for(edge_offset_t j = glue_action.row_map(i); j < glue_action.row_map(i + 1); j++){
             ordinal_t x = glue_action.entries(j);
-            size += lengths(x) - (k - 1);
+            size += lengths(x) - k;
             if(j + 1 == glue_action.row_map(i + 1)){
                 //k-1 for suffix of last k-mer
-                size += (k - 1);
+                size += k;
             }
         }
         write_sizes(i) = size;
@@ -98,7 +98,7 @@ void write_unitigs4(comp_mt chars, edge_mirror_t row_map, vtx_mirror_t lengths, 
             edge_offset_t kmer_start = row_map(u);
             edge_offset_t wsize = lengths(u);
             if(j + 1 < end){
-                wsize -= (k - 1);
+                wsize -= k;
             }
             for(edge_offset_t l = 0; l < wsize; l++){
                 writes(write_offset++) = char_map(get_char(chars, kmer_start, l));
